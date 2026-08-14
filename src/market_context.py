@@ -123,7 +123,7 @@ def approximate_volume_profile(data: pd.DataFrame, lookback: int = 100, bins: in
     low = float(window["Low"].min())
     high = float(window["High"].max())
     if not math.isfinite(low) or not math.isfinite(high) or high <= low:
-        return {"poc": math.nan, "vah": math.nan, "val": math.nan, "width_pct": math.nan}
+        return {"poc": math.nan, "vah": math.nan, "val": math.nan, "width_pct": math.nan, "bin_width": math.nan}
     edges = np.linspace(low, high, bins + 1)
     centers = (edges[:-1] + edges[1:]) / 2
     profile = np.zeros(bins, dtype=float)
@@ -139,7 +139,7 @@ def approximate_volume_profile(data: pd.DataFrame, lookback: int = 100, bins: in
         profile[first : last + 1] += volume / count
     total = float(profile.sum())
     if total <= 0:
-        return {"poc": math.nan, "vah": math.nan, "val": math.nan, "width_pct": math.nan}
+        return {"poc": math.nan, "vah": math.nan, "val": math.nan, "width_pct": math.nan, "bin_width": math.nan}
     poc_index = int(profile.argmax())
     selected = {poc_index}
     cumulative = float(profile[poc_index])
@@ -159,7 +159,13 @@ def approximate_volume_profile(data: pd.DataFrame, lookback: int = 100, bins: in
     val = float(edges[min(selected)])
     vah = float(edges[max(selected) + 1])
     poc = float(centers[poc_index])
-    return {"poc": poc, "vah": vah, "val": val, "width_pct": (vah / val - 1) * 100 if val else math.nan}
+    return {
+        "poc": poc,
+        "vah": vah,
+        "val": val,
+        "width_pct": (vah / val - 1) * 100 if val else math.nan,
+        "bin_width": float(edges[1] - edges[0]),
+    }
 
 
 def rolling_volume_profile_levels(
@@ -203,8 +209,16 @@ def profile_context(data: pd.DataFrame, lookback: int = 100) -> dict[str, Any]:
     migration_delta_3 = poc - previous_3["poc"]
     va_width_delta = current["width_pct"] - previous["width_pct"]
     va_state = "Genişliyor" if va_width_delta > 0.05 else "Daralıyor" if va_width_delta < -0.05 else "Değişmiyor"
-    migration_threshold = atr * 0.05 if math.isfinite(atr) else abs(poc) * 0.001
-    migration = "Yukarı göç" if migration_delta > migration_threshold else "Aşağı göç" if migration_delta < -migration_threshold else "Yatay"
+    bin_width = current["bin_width"]
+    atr_threshold = atr * 0.05 if math.isfinite(atr) else 0.0
+    migration_threshold = max(bin_width * 0.5, atr_threshold) if math.isfinite(bin_width) else atr_threshold
+    migration_bins = migration_delta / bin_width if bin_width and math.isfinite(bin_width) else math.nan
+    if abs(migration_delta) <= migration_threshold:
+        migration = "Yatay"
+    elif migration_delta > 0:
+        migration = "Hafif yukarı göç" if migration_bins < 1.5 else "Belirgin yukarı göç"
+    else:
+        migration = "Hafif aşağı göç" if migration_bins > -1.5 else "Belirgin aşağı göç"
     closes = data["Close"]
     above_count = 0
     below_count = 0
@@ -217,20 +231,45 @@ def profile_context(data: pd.DataFrame, lookback: int = 100) -> dict[str, Any]:
             break
     last = data.iloc[-1]
     if last["High"] > vah and last["Close"] <= vah:
-        acceptance = "VAH üzeri reddedildi; Value Area'ya döndü"
+        acceptance = "Mevcut VAH üzeri reddedildi; Value Area'ya döndü"
         acceptance_tone = "warning"
     elif last["Low"] < val and last["Close"] >= val:
-        acceptance = "VAL altı reddedildi; Value Area'ya döndü"
+        acceptance = "Mevcut VAL altı reddedildi; Value Area'ya döndü"
         acceptance_tone = "warning"
     elif above_count >= 2:
-        acceptance = f"VAH üzerinde kabul: {above_count} bar"
+        acceptance = f"Mevcut VAH üzerinde: {above_count} bar"
         acceptance_tone = "positive"
     elif below_count >= 2:
-        acceptance = f"VAL altında kabul: {below_count} bar"
+        acceptance = f"Mevcut VAL altında: {below_count} bar"
         acceptance_tone = "negative"
     else:
-        acceptance = "Value Area içinde rotasyon" if val <= price <= vah else "Kabul henüz oluşmadı"
+        acceptance = "Mevcut Value Area içinde rotasyon" if val <= price <= vah else "Mevcut profile göre kabul oluşmadı"
         acceptance_tone = "neutral"
+
+    profile_source = data.tail(lookback + 9)
+    developing = rolling_volume_profile_levels(profile_source, lookback=lookback)
+    developing_tail = developing.tail(10)
+    developing_close = profile_source["Close"].tail(10)
+    developing_above = 0
+    developing_below = 0
+    for close_value, rolling_vah, rolling_val in reversed(
+        list(zip(developing_close.tolist(), developing_tail["vah"].tolist(), developing_tail["val"].tolist()))
+    ):
+        if math.isfinite(rolling_vah) and close_value > rolling_vah and developing_below == 0:
+            developing_above += 1
+        elif math.isfinite(rolling_val) and close_value < rolling_val and developing_above == 0:
+            developing_below += 1
+        else:
+            break
+    if developing_above >= 2:
+        developing_acceptance = f"Developing VAH üzerinde kabul: {developing_above} bar"
+        developing_tone = "positive"
+    elif developing_below >= 2:
+        developing_acceptance = f"Developing VAL altında kabul: {developing_below} bar"
+        developing_tone = "negative"
+    else:
+        developing_acceptance = "Developing profile kabulü oluşmadı"
+        developing_tone = "neutral"
     return {
         **current,
         "position": position,
@@ -240,10 +279,15 @@ def profile_context(data: pd.DataFrame, lookback: int = 100) -> dict[str, Any]:
         "poc_migration": migration,
         "poc_delta": migration_delta,
         "poc_delta_3": migration_delta_3,
+        "poc_migration_bins": migration_bins,
+        "poc_migration_threshold": migration_threshold,
         "value_area_state": va_state,
         "value_area_width_delta": va_width_delta,
         "acceptance": acceptance,
         "acceptance_tone": acceptance_tone,
+        "current_profile_acceptance": acceptance,
+        "developing_acceptance": developing_acceptance,
+        "developing_acceptance_tone": developing_tone,
         "note": f"Son {min(lookback, len(data))} bar OHLCV yaklaşık profili",
     }
 
@@ -363,7 +407,13 @@ def _last_cross_age(main: pd.Series, signal: pd.Series | float, upward: bool) ->
     return int(len(events) - 1 - positions[-1]) if len(positions) else None
 
 
-def recent_events(data: pd.DataFrame, structure: dict[str, Any], profile: dict[str, Any], limit: int = 12) -> list[dict[str, Any]]:
+def recent_events(
+    data: pd.DataFrame,
+    structure: dict[str, Any],
+    profile: dict[str, Any],
+    limit: int = 12,
+    bar_state: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     definitions: list[tuple[str, pd.Series, pd.Series | float, bool]] = [
         ("MACD ↑ Signal", data["MACD"], data["MACD_SIGNAL"], True),
         ("MACD ↓ Signal", data["MACD"], data["MACD_SIGNAL"], False),
@@ -405,21 +455,26 @@ def recent_events(data: pd.DataFrame, structure: dict[str, Any], profile: dict[s
         ("Fiyat ↓ BB orta", data["Close"], data["BB_MID"], False),
         ("Fiyat ↑ BB alt", data["Close"], data["BB_LOWER"], True),
         ("Fiyat ↓ BB alt", data["Close"], data["BB_LOWER"], False),
-        ("Fiyat ↑ VWAP", data["Close"], data["VWAP"], True),
-        ("Fiyat ↓ VWAP", data["Close"], data["VWAP"], False),
+        ("Fiyat ↑ Dataset VWAP", data["Close"], data["VWAP"], True),
+        ("Fiyat ↓ Dataset VWAP", data["Close"], data["VWAP"], False),
         ("Fiyat ↑ SAR", data["Close"], data["PSAR"], True),
         ("Fiyat ↓ SAR", data["Close"], data["PSAR"], False),
         ("Fiyat ↑ Supertrend", data["Close"], data["SUPERTREND"], True),
         ("Fiyat ↓ Supertrend", data["Close"], data["SUPERTREND"], False),
     ]
     events: list[dict[str, Any]] = []
+
+    def confirmation(age: int, suffix: str = "") -> str:
+        label = "CANLI" if age == 0 and bar_state and bar_state.get("is_live") else "TEYİTLİ"
+        return f"{label} {suffix}".strip()
+
     for name, main, signal, upward in definitions:
         age = _last_cross_age(main, signal, upward)
         if age is not None:
-            events.append({"event": name, "age": age, "state": "TEYİTLİ"})
+            events.append({"event": name, "age": age, "state": confirmation(age)})
     structure_age = structure.get("event_age")
     if structure_age is not None:
-        events.append({"event": structure["event"], "age": structure_age, "state": "TEYİTLİ"})
+        events.append({"event": structure["event"], "age": structure_age, "state": confirmation(structure_age)})
     profile_lookback = 100
     event_window = min(100, len(data))
     profile_source = data.tail(profile_lookback + event_window - 1)
@@ -435,12 +490,17 @@ def recent_events(data: pd.DataFrame, structure: dict[str, Any], profile: dict[s
     ]:
         age = _last_cross_age(price, rolling_profile[column].tail(event_window), upward)
         if age is not None:
-            events.append({"event": label, "age": age, "state": "TEYİTLİ OHLCV PROFİL"})
+            events.append({"event": label, "age": age, "state": confirmation(age, "OHLCV PROFİL")})
     events.sort(key=lambda item: item["age"])
     return events[:limit]
 
 
-def build_market_context(data: pd.DataFrame, ma_periods: list[int], anchor_date: str = "") -> dict[str, Any]:
+def build_market_context(
+    data: pd.DataFrame,
+    ma_periods: list[int],
+    anchor_date: str = "",
+    bar_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     row = data.iloc[-1]
     price = float(row["Close"])
     profile = profile_context(data)
@@ -460,20 +520,54 @@ def build_market_context(data: pd.DataFrame, ma_periods: list[int], anchor_date:
     atr_rank = float(row["ATR_RANK"])
     bb_rank = float(row["BB_WIDTH_RANK"])
     bb_widening = float(row["BB_WIDTH"]) > float(data["BB_WIDTH"].iloc[-2])
-    if adx >= 25 and (atr_rank >= 60 or bb_rank >= 60):
-        regime = "Yönlü / genişleyen piyasa"
+    adx_delta = float(row["ADX"] - data["ADX"].iloc[-2])
+    spread_delta = float(row["MA_SPREAD_PCT"] - data["MA_SPREAD_PCT"].iloc[-2])
+
+    def candidate_regime(item: pd.Series, previous_item: pd.Series) -> str:
+        item_adx = float(item["ADX"])
+        item_atr_rank = float(item["ATR_RANK"])
+        item_bb_rank = float(item["BB_WIDTH_RANK"])
+        item_spread_rank = float(item["MA_SPREAD_RANK"])
+        item_adx_delta = float(item["ADX"] - previous_item["ADX"])
+        item_spread_delta = float(item["MA_SPREAD_PCT"] - previous_item["MA_SPREAD_PCT"])
+        expanding = item_atr_rank >= 60 or item_bb_rank >= 60
+        if item_adx >= 25 and expanding and item_adx_delta > 0 and item_spread_delta > 0:
+            return "Trend genişliyor"
+        if item_adx >= 25 and item_adx_delta < 0 and item_spread_delta < 0:
+            return "Trend yavaşlıyor"
+        if item_adx >= 25 and item_adx_delta > 0:
+            return "Trend oluşuyor"
+        if item_adx >= 25:
+            return "Yönlü / kontrollü piyasa"
+        if item_adx < 20 and item_bb_rank <= 25 and item_spread_rank <= 30:
+            return "Denge / sıkışma"
+        if item_adx < 20 and item_bb_rank >= 70:
+            return "Volatilite genişlemesi / yönsüz"
+        return "Geçiş / karma piyasa"
+
+    candidates = []
+    for position in range(max(1, len(data) - 20), len(data)):
+        if data[["ADX", "ATR_RANK", "BB_WIDTH_RANK", "MA_SPREAD_RANK", "MA_SPREAD_PCT"]].iloc[position].isna().any():
+            continue
+        candidates.append(candidate_regime(data.iloc[position], data.iloc[position - 1]))
+    regime = candidates[0] if candidates else "Geçiş / karma piyasa"
+    pending = regime
+    pending_count = 0
+    for candidate in candidates[1:]:
+        if candidate == regime:
+            pending, pending_count = candidate, 0
+        elif candidate == pending:
+            pending_count += 1
+            if pending_count >= 2:
+                regime, pending_count = candidate, 0
+        else:
+            pending, pending_count = candidate, 1
+    current_candidate = candidates[-1] if candidates else regime
+    if regime.startswith(("Trend", "Yönlü")):
         regime_tone = "positive" if row["PLUS_DI"] > row["MINUS_DI"] else "negative"
-    elif adx < 20 and bb_rank <= 25 and ma_spread_rank <= 30:
-        regime = "Dengeli / sıkışan piyasa"
-        regime_tone = "warning"
-    elif adx >= 25:
-        regime = "Yönlü / kontrollü piyasa"
-        regime_tone = "positive" if row["PLUS_DI"] > row["MINUS_DI"] else "negative"
-    elif adx < 20 and bb_rank >= 70:
-        regime = "Yüksek volatilite / yönsüz"
+    elif "sıkışma" in regime or "Volatilite" in regime:
         regime_tone = "warning"
     else:
-        regime = "Geçiş / karma piyasa"
         regime_tone = "neutral"
 
     momentum_directions = [
@@ -483,19 +577,40 @@ def build_market_context(data: pd.DataFrame, ma_periods: list[int], anchor_date:
         row["SMI"] > row["SMI_EMA"],
     ]
     positive_momentum = sum(bool(value) for value in momentum_directions)
-    momentum_state = "Yukarı yönlü uyum" if positive_momentum == 4 else "Aşağı yönlü uyum" if positive_momentum == 0 else "Karışık"
-    momentum_tone = "positive" if positive_momentum == 4 else "negative" if positive_momentum == 0 else "warning"
+    momentum_state = {
+        4: "Tam yukarı uyum",
+        3: "Yukarı ağırlıklı",
+        2: "Karma",
+        1: "Aşağı ağırlıklı",
+        0: "Tam aşağı uyum",
+    }[positive_momentum]
+    momentum_tone = "positive" if positive_momentum >= 3 else "negative" if positive_momentum <= 1 else "warning"
     volume_state = "Belirgin katılım" if rvol >= 1.5 else "Ortalama üstü katılım" if rvol >= 1.1 else "Düşük katılım" if rvol < 0.8 else "Normal katılım"
     volume_tone = "purple" if rvol >= 1.1 else "neutral"
     volatility_state = ("Genişliyor" if bb_widening else "Daralıyor") + f" | ATR perc %{atr_rank:.0f}"
     volatility_tone = "purple" if atr_rank >= 70 else "blue" if atr_rank <= 30 else "neutral"
-    ma_state = f"Fiyat {ma_above}/{len(valid_ma)} EMA üzerinde | {ma_rising}/{len(ma_periods)} EMA yükseliyor"
+    ma_groups_definition = {
+        "Çok kısa": [5, 8, 10, 13],
+        "Kısa": [20, 21, 34, 50, 55],
+        "Orta": [89, 100, 144],
+        "Uzun": [200, 233, 377],
+    }
+    ma_groups = {}
+    for group_name, periods in ma_groups_definition.items():
+        group_values = [float(row[f"EMA_{length}"]) for length in periods]
+        ma_groups[group_name] = {
+            "above": sum(price > value for value in group_values if math.isfinite(value)),
+            "rising": sum(float(data[f"EMA_{length}"].iloc[-1]) > float(data[f"EMA_{length}"].iloc[-2]) for length in periods),
+            "total": len(periods),
+            "periods": periods,
+        }
+    ma_state = " | ".join(f"{name} {item['above']}/{item['total']}" for name, item in ma_groups.items())
     location_state = profile["position"]
 
     families = [
-        ["REJİM", regime, f"ADX {adx:.1f} | BB perc %{bb_rank:.0f}", regime_tone],
+        ["REJİM", regime, f"Aday {current_candidate} | ADX Δ {adx_delta:+.2f} | Spread Δ {spread_delta:+.3f}", regime_tone],
         ["YAPI", structure["state"], structure["event"], structure["tone"]],
-        ["KONUM", location_state, profile["acceptance"], profile["tone"]],
+        ["KONUM", location_state, profile["developing_acceptance"], profile["tone"]],
         ["TREND", ma_state, f"EMA spread %{ma_spread_pct:.2f} | perc %{ma_spread_rank:.0f}", "positive" if ma_above >= 10 else "negative" if ma_above <= 5 else "warning"],
         ["MOMENTUM", momentum_state, f"{positive_momentum}/4 ana çizgi sinyal üstünde", momentum_tone],
         ["KATILIM", volume_state, f"RVOL {rvol:.2f}x | Delta tah. %{flow['delta_pct']:.1f}", volume_tone],
@@ -504,8 +619,9 @@ def build_market_context(data: pd.DataFrame, ma_periods: list[int], anchor_date:
 
     location_rows = [
         ["POC / VA", f"POC {profile['poc']:.2f} | VAH {profile['vah']:.2f} | VAL {profile['val']:.2f} | {profile['poc_distance_atr']:+.2f} ATR", profile["position"], profile["tone"]],
-        ["POC göçü", f"Δ1 {profile['poc_delta']:+.2f} | Δ3 {profile['poc_delta_3']:+.2f} | Mesafe {profile['poc_distance_pct']:+.2f}%", profile["poc_migration"], "positive" if profile["poc_migration"] == "Yukarı göç" else "negative" if profile["poc_migration"] == "Aşağı göç" else "neutral"],
-        ["Kabul / Red", f"{profile['note']} | VA {profile['value_area_state']}", profile["acceptance"], profile["acceptance_tone"]],
+        ["POC göçü", f"Δ1 {profile['poc_delta']:+.2f} | {profile['poc_migration_bins']:+.2f} bin | Eşik {profile['poc_migration_threshold']:.2f}", profile["poc_migration"], "positive" if "yukarı" in profile["poc_migration"] else "negative" if "aşağı" in profile["poc_migration"] else "neutral"],
+        ["Mevcut profil", f"{profile['note']} | VA {profile['value_area_state']}", profile["current_profile_acceptance"], profile["acceptance_tone"]],
+        ["Developing profil", "Her barda geriye dönük 100 bar VAH/VAL", profile["developing_acceptance"], profile["developing_acceptance_tone"]],
         ["AVWAP", f"{vwaps['manual']:.2f} | Mesafe {_pct_distance(price, float(vwaps['manual'])):+.2f}% | Anchor {vwaps['manual_anchor']}", f"Fiyat {'üstünde' if price > float(vwaps['manual']) else 'altında'} | AVWAP {vwaps['manual_direction']}", "positive" if price > float(vwaps["manual"]) else "negative"],
         ["VWAP dönem", f"Ay {vwaps['month']:.2f} | Çeyrek {vwaps['quarter']:.2f} | Yıl {vwaps['year']:.2f}", "Fiyat dönem VWAP'larıyla karşılaştırıldı", "neutral"],
         ["Önceki gün", f"PDH {levels['pdh']:.2f} | PDL {levels['pdl']:.2f} | PDC {levels['pdc']:.2f} | D Açılış {levels['current_open']:.2f}", "PDH üzeri" if price > levels["pdh"] else "PDL altı" if price < levels["pdl"] else "Önceki gün aralığında", "positive" if price > levels["pdh"] else "negative" if price < levels["pdl"] else "neutral"],
@@ -528,7 +644,7 @@ def build_market_context(data: pd.DataFrame, ma_periods: list[int], anchor_date:
     ]
 
     return {
-        "regime": {"state": regime, "tone": regime_tone, "adx": adx, "atr_percentile": atr_rank, "bb_percentile": bb_rank},
+        "regime": {"state": regime, "candidate": current_candidate, "tone": regime_tone, "adx": adx, "adx_delta": adx_delta, "ma_spread_delta": spread_delta, "atr_percentile": atr_rank, "bb_percentile": bb_rank, "persistence_bars": 2},
         "families": families,
         "profile": profile,
         "structure": structure,
@@ -536,8 +652,8 @@ def build_market_context(data: pd.DataFrame, ma_periods: list[int], anchor_date:
         "anchored_vwaps": vwaps,
         "order_flow_proxy": flow,
         "relative_volume": rvol,
-        "ma_structure": {"above": ma_above, "rising": ma_rising, "total": len(valid_ma), "spread_pct": ma_spread_pct, "spread_percentile": ma_spread_rank},
+        "ma_structure": {"above": ma_above, "rising": ma_rising, "total": len(valid_ma), "spread_pct": ma_spread_pct, "spread_percentile": ma_spread_rank, "groups": ma_groups},
         "location_rows": location_rows,
         "participation_rows": participation_rows,
-        "events": recent_events(data, structure, profile),
+        "events": recent_events(data, structure, profile, bar_state=bar_state),
     }

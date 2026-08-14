@@ -1,0 +1,77 @@
+name: Zamanlanmış Watchlist Taraması
+
+on:
+  workflow_dispatch:
+    inputs:
+      bb_rank_max:
+        description: "Bollinger genişlik percentile üst sınırı"
+        required: true
+        default: "20"
+        type: string
+      rvol_min:
+        description: "Minimum RVOL"
+        required: true
+        default: "1.5"
+        type: string
+      send_telegram:
+        description: "Eşleşme varsa Telegram'a gönder"
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: "30 16 * * 1-5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-watchlist-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scan-watchlist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v6
+
+      - name: Python kur
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Bağımlılıkları yükle
+        run: python -m pip install --requirement requirements.txt
+
+      - name: Testleri çalıştır
+        run: python -m unittest discover -s tests -v
+
+      - name: Watchlist tara
+        env:
+          BB_RANK_MAX: ${{ inputs.bb_rank_max || '20' }}
+          RVOL_MIN: ${{ inputs.rvol_min || '1.5' }}
+          SEND_TELEGRAM: ${{ github.event_name == 'schedule' || inputs.send_telegram }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1003502567927"
+          TELEGRAM_MESSAGE_THREAD_ID: ""
+        run: |
+          SEND_FLAG=""
+          if [ "$SEND_TELEGRAM" = "true" ]; then SEND_FLAG="--send-telegram"; fi
+          python -m src.watchlist_scan \
+            --watchlist watchlist.txt \
+            --provider AUTO \
+            --period 2y \
+            --bb-rank-max "$BB_RANK_MAX" \
+            --rvol-min "$RVOL_MIN" \
+            $SEND_FLAG
+
+      - name: Tarama sonucunu sakla
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: watchlist-tarama
+          path: reports/watchlist_scan.json
+          if-no-files-found: warn
+          retention-days: 14

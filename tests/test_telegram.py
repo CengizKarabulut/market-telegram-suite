@@ -7,7 +7,6 @@ from unittest.mock import Mock, patch
 
 from src.send_telegram import send
 
-
 STATUS = {
     "symbol": "THYAO",
     "price": 305.25,
@@ -41,7 +40,7 @@ class TelegramTests(unittest.TestCase):
             patch.dict(os.environ, environment, clear=True),
             patch.object(Path, "read_text", return_value=json.dumps(STATUS)),
             patch.object(Path, "open", return_value=io.BytesIO(b"png")),
-            patch("src.send_telegram.requests.post", return_value=response) as post,
+            patch("src.telegram_client.requests.post", return_value=response) as post,
         ):
             send(Path("report.png"), Path("report.json"))
         return post.call_args.kwargs["data"]

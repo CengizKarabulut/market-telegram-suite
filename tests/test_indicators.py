@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -8,7 +9,10 @@ from src.stock_dashboard import (
     ScanConfig,
     build_status,
     calculate_indicators,
+    download_prices,
+    effective_download_period,
     normalize_symbol,
+    rsi,
     validate_price_data,
 )
 
@@ -35,6 +39,48 @@ class IndicatorTests(unittest.TestCase):
         self.assertEqual(normalize_symbol("thyao", "BIST"), "THYAO.IS")
         self.assertEqual(normalize_symbol("THYAO.IS", "BIST"), "THYAO.IS")
         self.assertEqual(normalize_symbol("aapl", "US"), "AAPL")
+
+    def test_warmup_period_is_separate_from_requested_period(self) -> None:
+        self.assertEqual(effective_download_period("6mo", "2y"), "2y")
+        self.assertEqual(effective_download_period("5y", "2y"), "5y")
+
+    def test_auto_market_prefers_verified_bist_symbol(self) -> None:
+        expected = ("THYAO", synthetic_prices())
+        with (
+            patch("src.stock_dashboard.download_borsapy", return_value=expected) as borsapy_download,
+            patch("src.stock_dashboard.download_yfinance") as yahoo_download,
+        ):
+            result = download_prices(ScanConfig("THYAO", market="AUTO", provider="AUTO"))
+        self.assertEqual(result[0], "THYAO")
+        self.assertEqual(borsapy_download.call_args.args[0].market, "BIST")
+        yahoo_download.assert_not_called()
+
+    def test_auto_market_falls_back_from_bist_candidates_to_us(self) -> None:
+        def yahoo_side_effect(config):
+            if config.market == "BIST":
+                raise RuntimeError("AAPL.IS bulunamadı")
+            return "AAPL", synthetic_prices()
+
+        with (
+            patch("src.stock_dashboard.download_borsapy", side_effect=RuntimeError("BIST sembolü yok")),
+            patch("src.stock_dashboard.download_yfinance", side_effect=yahoo_side_effect) as yahoo_download,
+        ):
+            result = download_prices(ScanConfig("AAPL", market="AUTO", provider="AUTO"))
+        self.assertEqual(result[0], "AAPL")
+        self.assertEqual([call.args[0].market for call in yahoo_download.call_args_list], ["BIST", "US"])
+
+    def test_rsi_flat_rising_and_falling_edge_cases(self) -> None:
+        flat = pd.Series([10.0] * 40)
+        rising = pd.Series(np.arange(1.0, 41.0))
+        falling = pd.Series(np.arange(40.0, 0.0, -1.0))
+        self.assertEqual(rsi(flat).iloc[-1], 50.0)
+        self.assertEqual(rsi(rising).iloc[-1], 100.0)
+        self.assertEqual(rsi(falling).iloc[-1], 0.0)
+
+    def test_mfi_flat_zero_flow_is_neutral(self) -> None:
+        frame = synthetic_prices()
+        frame[["Open", "High", "Low", "Close"]] = 100.0
+        self.assertEqual(calculate_indicators(frame)["MFI"].iloc[-1], 50.0)
 
     def test_price_validation_preserves_provider(self) -> None:
         data = validate_price_data(synthetic_prices(), "TEST", "borsapy/TradingView")

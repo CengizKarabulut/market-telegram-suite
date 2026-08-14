@@ -4,6 +4,13 @@ GitHub Actions ekranından bir hisse sembolü girerek kapsamlı teknik piyasa du
 
 Sistem otomatik AL/SAT kararı veya birleşik puan üretmez. Rejim, yapı, konum, trend, momentum, katılım ve volatilite durumlarını tarafsız biçimde raporlar.
 
+İki ürün bilinçli olarak farklı kapsam taşır:
+
+- **Pine:** TradingView üzerinde gerçek zamanlı teknik teşhis panelidir.
+- **Python/Telegram:** CANLI/TEYİTLİ ayrımı yapan market-context raporu ve kapanış sonrası watchlist durum tarayıcısıdır.
+
+Ana kullanım swing/pozisyon araştırması ve kapanış sonrası izlemedir. Kimlik doğrulamasız gecikmeli veri nedeniyle intraday/scalping karar sistemi değildir.
+
 ## Telegram hedefi
 
 - Grup kimliği: `-1003502567927`
@@ -27,8 +34,10 @@ Token'ı hiçbir dosyaya, issue'ya veya Actions loguna yazmayın.
 2. `ticker` alanına `THYAO`, `ASELS`, `TUPRS` veya `AAPL` gibi sembolü girin.
 3. BIST hisselerinde `market=BIST`, `provider=AUTO` seçilmesi önerilir.
 4. İstenirse `anchor_date` alanına manuel AVWAP başlangıcı `YYYY-MM-DD` biçiminde yazılır. Tarih indirilen mum aralığında olmalıdır; boşsa yıl başlangıcı kullanılır.
-5. SMA/EMA 377 için günlük grafikte en az `period=2y` kullanın.
-6. `send_telegram=true` olduğunda rapor Telegram grubunun Genel konusuna gönderilir.
+5. `period=6mo` veya `1y` seçilebilir; sistem 377 bar göstergeler için arka planda en az `warmup_period=2y` indirir. İstenen dönem ile gösterge warm-up dönemi ayrıdır.
+6. `benchmark` boşsa BIST için `XU100`, ABD için `SPY` kullanılır.
+7. `account_size=0` risk bütçesi/adet hesabını kapatır; ATR mesafe referansı yine gösterilir.
+8. `send_telegram=true` olduğunda rapor Telegram grubunun Genel konusuna gönderilir.
 
 Sağlayıcı seçenekleri:
 
@@ -47,6 +56,31 @@ Raporun üst özeti puan vermeden şu aileleri gösterir:
 - Momentum: MACD, RSI, Stochastic RSI ve SMI çizgi ilişkilerinin uyumu.
 - Katılım: hacim, RVOL, OBV ve açıkça etiketlenmiş OHLCV delta/CVD tahmini.
 - Volatilite: ATR percentile ile Bollinger bandwidth percentile ve genişleme/daralma.
+
+## Karar bağlamı
+
+- **Bar durumu:** BIST düzenli seansında güncel günlük mum `CANLI`; kapanmış mumlar ve geçmiş olaylar `TEYİTLİ` gösterilir. Tatil/yarım gün takvimi henüz yoktur; kullanılan seans varsayımı JSON'da yer alır.
+- **Relative Strength:** hisse/XU100 oranı, 1/5/20/60/252 bar göreceli getiri farkları ve oran eğimi. Temettü toplam getirisi değildir.
+- **MTF confluence:** günlük veriden oluşturulan günlük, haftalık ve aylık eğilim bağlamı. Canlı son günlük mum MTF hesabından çıkarılır.
+- **Likidite:** kapanış × lot hacmiyle 20 günlük ortalama TL işlem hacmi, son 60 günlük medyan ve borsapy'den alınabilirse halka açıklık yüzdesi. Manipülasyon tespiti değildir.
+- **Risk referansı:** mevcut kapanıştan mekanik ATR mesafesi ve isteğe bağlı risk bütçesi/adet senaryosu. Destek/direnç veya emir önerisi değildir.
+
+## Eşik metodolojisi
+
+Eşikler şimdilik sezgiseldir; istatistiksel olarak kalibre edilmiş bir tahmin modeli veya backtest edilmiş AL/SAT sistemi değildir.
+
+| Alan | Eşik |
+| --- | --- |
+| Yönlü rejim | ADX ≥ 25 |
+| Denge adayı | ADX < 20 |
+| Genişleme | ATR veya BB percentile ≥ 60 |
+| Sıkışma | BB percentile ≤ 25 ve MA spread percentile ≤ 30 |
+| Yüksek yönsüz volatilite | ADX < 20 ve BB percentile ≥ 70 |
+| BIST düşük TL likiditesi | Ort.20 < 25 milyon TL |
+| BIST yüksek TL likiditesi | Ort.20 ≥ 100 milyon TL |
+| Düşük halka açıklık uyarısı | <%10 |
+
+Rejim değişimi iki ardışık aday barla kalıcı hâle gelir. ADX eğimi ve MA spread yönü `trend oluşuyor / genişliyor / yavaşlıyor` ayrımında kullanılır. Bu eşiklerin gelecekteki doğrulaması ayrı, önceden tanımlanmış walk-forward/event-study modülünde yapılmalıdır.
 
 ## SMA ve EMA
 
@@ -84,8 +118,9 @@ Tabloda her periyodun kendi SMA ve EMA değeri bulunur:
 - PDH, PDL, PDC; PWH, PWL, PWC ve mevcut hafta açılışı.
 - Son 100 bar için yaklaşık POC, VAH, VAL ve `%70` Value Area.
 - POC uzaklığı yüzde ve ATR cinsinden.
-- Developing POC göçü.
-- VAH/VAL kabul, reddedilme ve Value Area rotasyonu.
+- Bin genişliği ve ATR eşiğini birlikte kullanan developing POC göçü.
+- Mevcut profile göre acceptance ile her bardaki rolling VAH/VAL'a göre developing acceptance ayrı gösterilir.
+- Grafikte bugünkü seviyeyi geçmişe uzatan sabit çizgiler yerine rolling POC/VAH/VAL gösterilir.
 - Son teyitli MACD, RSI, Stochastic RSI, SMI, Bollinger, Supertrend, BOS ve profil seviye olayları.
 
 ### Önemli veri sınırı
@@ -98,12 +133,24 @@ GitHub raporu TradingView'dan OHLCV mumlarını alır; TradingView Premium `requ
 
 Gerçek footprint imbalance ve gerçek buy/sell delta ayrı bir TradingView Premium Pine modülü gerektirir. Günlük workflow'da Opening Range kullanılmadığı için rapora eklenmemiştir; intraday aralık desteği açıldığında OR15/OR30/OR60 ayrı modül olarak eklenebilir.
 
+Lower-timeframe (30m/60m) profil, günlük OHLCV yaklaşımını iyileştirecek ayrı bir P1 veri modülüdür; mevcut sürüm bunu kullanıyormuş gibi davranmaz.
+
+## Zamanlanmış watchlist taraması
+
+`watchlist.txt` dosyasına her satırda bir BIST sembolü yazılır. **Zamanlanmış Watchlist Taraması** workflow'u hafta içi `16:30 UTC / 19:30 Türkiye` saatinde çalışır. Varsayılan durum koşulu Bollinger genişlik percentile ≤ 20 ve RVOL ≥ 1,5'tir. Yalnız eşleşme varsa Telegram metni gönderilir; bu bir AL/SAT sinyali değildir.
+
+Yerel kullanım:
+
+```bash
+python -m src.watchlist_scan --watchlist watchlist.txt --period 2y --provider AUTO
+```
+
 ## Yerel çalıştırma
 
 ```bash
 python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
-python -m src.stock_dashboard --ticker THYAO --market BIST --provider AUTO --period 2y --interval 1d --anchor-date 2026-01-02
+python -m src.stock_dashboard --ticker THYAO --market AUTO --provider AUTO --period 6mo --warmup-period 2y --interval 1d --benchmark XU100 --anchor-date 2026-01-02
 ```
 
 Telegram gönderimi:
@@ -116,6 +163,8 @@ python -m src.send_telegram
 
 ## Veri ve sorumluluk reddi
 
-BIST verisi varsayılan olarak [borsapy](https://github.com/saidsurucu/borsapy) aracılığıyla TradingView WebSocket kaynağından alınır. Kimlik doğrulamasız TradingView verisi yaklaşık 15 dakika gecikmelidir. JSON çıktısındaki `data_provider` alanı o çalışmada fiilen kullanılan kaynağı gösterir.
+BIST verisi varsayılan olarak [borsapy](https://github.com/saidsurucu/borsapy) aracılığıyla TradingView WebSocket kaynağından alınır. Kimlik doğrulamasız TradingView verisi yaklaşık 15 dakika gecikmelidir. JSON çıktısındaki `data_provider`, `resolved_market`, `bar_state`, `download_period` ve `price_adjustment` alanları o çalışmada fiilen kullanılan veri bağlamını gösterir.
+
+borsapy/TradingView yolu split-adjusted sağlayıcı varsayımını kullanır, temettü toplam getirisi değildir. yfinance yolu `auto_adjust=False` kullanır ve `Adj Close` teknik hesaplara uygulanmaz. KAP haberleri ve temel veri mevcut teknik durum motoruna dahil değildir; bunlar ayrı kaynak zamanı ve doğrulama gerektirir.
 
 borsapy kişisel ve eğitim amaçlı kullanım için sunulmaktadır; ticari kullanımda ilgili piyasa veri lisansları gerekir. Veriler gecikmeli veya eksik olabilir. Rapor yalnızca bilgilendirme ve teknik inceleme amaçlıdır; yatırım tavsiyesi değildir.

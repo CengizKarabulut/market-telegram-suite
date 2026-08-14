@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,11 +16,17 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import requests
 import yfinance as yf
 
-from src.market_context import build_market_context, diagnostics, normalized_gap_state
-
+from src.bar_state import build_bar_state
+from src.decision_context import build_decision_context
+from src.market_context import (
+    build_market_context,
+    diagnostics,
+    normalized_gap_state,
+    rolling_volume_profile_levels,
+)
+from src.telegram_client import send_photo
 
 MA_PERIODS = [5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
 BG = "#0f172a"
@@ -47,6 +53,20 @@ class ScanConfig:
     equality_tolerance_pct: float = 0.02
     provider: str = "AUTO"
     anchor_date: str = ""
+    warmup_period: str = "2y"
+    benchmark: str = ""
+    account_size: float = 0.0
+    risk_pct: float = 1.0
+    atr_multiple: float = 1.5
+
+
+PERIOD_ORDER = {"1d": 1, "5d": 5, "1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730, "5y": 1825, "10y": 3650, "max": 99999}
+
+
+def effective_download_period(requested: str, warmup: str) -> str:
+    if requested not in PERIOD_ORDER or warmup not in PERIOD_ORDER:
+        return warmup if PERIOD_ORDER.get(warmup, 0) >= PERIOD_ORDER.get(requested, 0) else requested
+    return warmup if PERIOD_ORDER[warmup] >= PERIOD_ORDER[requested] else requested
 
 
 def normalize_symbol(ticker: str, market: str) -> str:
@@ -81,15 +101,22 @@ def validate_price_data(data: pd.DataFrame, symbol: str, provider: str) -> pd.Da
 
 def download_yfinance(config: ScanConfig) -> tuple[str, pd.DataFrame]:
     symbol = normalize_symbol(config.ticker, config.market)
+    download_period = effective_download_period(config.period, config.warmup_period)
     data = yf.download(
         symbol,
-        period=config.period,
+        period=download_period,
         interval=config.interval,
         auto_adjust=False,
         progress=False,
         threads=False,
     )
-    return symbol, validate_price_data(data, symbol, "yfinance")
+    validated = validate_price_data(data, symbol, "yfinance")
+    validated.attrs.update(
+        market=config.market.upper(),
+        download_period=download_period,
+        price_adjustment="yfinance auto_adjust=False; Adj Close rapor hesabında kullanılmaz",
+    )
+    return symbol, validated
 
 
 def download_borsapy(config: ScanConfig) -> tuple[str, pd.DataFrame]:
@@ -102,23 +129,105 @@ def download_borsapy(config: ScanConfig) -> tuple[str, pd.DataFrame]:
     symbol = config.ticker.strip().upper().removesuffix(".IS").removesuffix(".E")
     if not symbol:
         raise ValueError("Hisse sembolü boş olamaz.")
-    data = bp.Ticker(symbol).history(period=config.period, interval=config.interval)
-    return symbol, validate_price_data(data, symbol, "borsapy/TradingView")
+    download_period = effective_download_period(config.period, config.warmup_period)
+    data = bp.Ticker(symbol).history(period=download_period, interval=config.interval)
+    validated = validate_price_data(data, symbol, "borsapy/TradingView")
+    validated.attrs.update(
+        market="BIST",
+        download_period=download_period,
+        price_adjustment="TradingView/borsapy split-adjusted varsayımı; temettü toplam getirisi değildir",
+    )
+    return symbol, validated
 
 
 def download_prices(config: ScanConfig) -> tuple[str, pd.DataFrame]:
     provider = config.provider.strip().upper()
+    market = config.market.strip().upper()
     if provider not in {"AUTO", "BORSAPY", "YFINANCE"}:
         raise ValueError(f"Geçersiz veri sağlayıcısı: {config.provider}")
-    if provider == "BORSAPY":
-        return download_borsapy(config)
-    if provider == "YFINANCE" or config.market.upper() != "BIST":
+    if market not in {"AUTO", "BIST", "US"}:
+        raise ValueError(f"Geçersiz piyasa: {config.market}")
+    if market == "BIST":
+        if provider == "BORSAPY":
+            return download_borsapy(config)
+        if provider == "YFINANCE":
+            return download_yfinance(config)
+        try:
+            return download_borsapy(config)
+        except Exception as exc:  # noqa: BLE001 -- external provider fallback boundary
+            print(f"Uyarı: borsapy/TradingView başarısız oldu ({exc}); yfinance yedeği deneniyor.")
+            return download_yfinance(config)
+    if market == "US":
+        if provider == "BORSAPY":
+            raise ValueError("BORSAPY sağlayıcısı US piyasası için kullanılamaz.")
         return download_yfinance(config)
+
+    ticker = config.ticker.strip().upper()
+    if ticker.endswith((".IS", ".E")):
+        return download_prices(dataclass_replace(config, market="BIST"))
+    errors = []
+    if provider in {"AUTO", "BORSAPY"}:
+        try:
+            return download_borsapy(dataclass_replace(config, market="BIST"))
+        except Exception as exc:
+            errors.append(f"BIST/borsapy: {exc}")
+            if provider == "BORSAPY":
+                raise RuntimeError("AUTO piyasa çözümlemesi BIST sembolünü doğrulayamadı: " + errors[-1]) from exc
+    if provider in {"AUTO", "YFINANCE"}:
+        try:
+            return download_yfinance(dataclass_replace(config, market="BIST"))
+        except Exception as exc:  # noqa: BLE001 -- external provider fallback boundary
+            errors.append(f"BIST/yfinance: {exc}")
+        try:
+            return download_yfinance(dataclass_replace(config, market="US"))
+        except Exception as exc:  # noqa: BLE001 -- external provider fallback boundary
+            errors.append(f"US/yfinance: {exc}")
+    raise RuntimeError("AUTO piyasa çözümlemesi başarısız: " + " | ".join(errors))
+
+
+def _validate_context_prices(data: pd.DataFrame, symbol: str, provider: str) -> pd.DataFrame:
+    if data.empty:
+        raise RuntimeError(f"{symbol} benchmark verisi bulunamadı ({provider}).")
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
+    if "Close" not in data:
+        raise RuntimeError(f"{symbol} benchmark verisinde Close sütunu yok ({provider}).")
+    result = data.dropna(subset=["Close"]).copy()
+    if len(result) < 22:
+        raise RuntimeError(f"{symbol} benchmark için en az 22 bar gerekli; {len(result)} bar geldi.")
+    return result
+
+
+def download_benchmark(config: ScanConfig) -> tuple[str, pd.DataFrame]:
+    market = config.market.upper()
+    benchmark = config.benchmark.strip().upper() or ("XU100" if market == "BIST" else "SPY")
+    period = effective_download_period(config.period, config.warmup_period)
+    if market == "BIST" and config.provider.upper() != "YFINANCE":
+        try:
+            import borsapy as bp
+
+            data = bp.Index(benchmark.removesuffix(".IS")).history(period=period, interval=config.interval)
+            return benchmark.removesuffix(".IS"), _validate_context_prices(data, benchmark, "borsapy/TradingView")
+        except Exception:
+            if config.provider.upper() == "BORSAPY":
+                raise
+    yahoo_symbol = f"{benchmark}.IS" if market == "BIST" and not benchmark.endswith(".IS") else benchmark
+    data = yf.download(yahoo_symbol, period=period, interval=config.interval, auto_adjust=False, progress=False, threads=False)
+    return yahoo_symbol, _validate_context_prices(data, yahoo_symbol, "yfinance")
+
+
+def download_free_float(config: ScanConfig) -> float | None:
+    if config.market.upper() != "BIST":
+        return None
     try:
-        return download_borsapy(config)
-    except Exception as exc:
-        print(f"Uyarı: borsapy/TradingView başarısız oldu ({exc}); yfinance yedeği deneniyor.")
-        return download_yfinance(config)
+        import borsapy as bp
+
+        symbol = config.ticker.strip().upper().removesuffix(".IS").removesuffix(".E")
+        value = bp.Ticker(symbol).fast_info["free_float"]
+        return float(value) if value is not None else None
+    except Exception as exc:  # noqa: BLE001 -- external provider fallback boundary
+        print(f"Uyarı: halka açıklık verisi alınamadı ({exc}).")
+        return None
 
 
 def ema(series: pd.Series, length: int) -> pd.Series:
@@ -137,7 +246,10 @@ def rsi(series: pd.Series, length: int = 14) -> pd.Series:
     avg_loss = rma(loss, length)
     rs = avg_gain / avg_loss.replace(0, np.nan)
     result = 100 - 100 / (1 + rs)
-    return result.where(avg_loss != 0, 100.0)
+    both_zero = (avg_gain == 0) & (avg_loss == 0)
+    result = result.where(~both_zero, 50.0)
+    result = result.where(~((avg_loss == 0) & (avg_gain > 0)), 100.0)
+    return result.where(~((avg_gain == 0) & (avg_loss > 0)), 0.0)
 
 
 def true_range(data: pd.DataFrame) -> pd.Series:
@@ -293,7 +405,11 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     positive_money = raw_money.where(typical.diff() > 0, 0.0).rolling(14).sum()
     negative_money = raw_money.where(typical.diff() < 0, 0.0).rolling(14).sum()
     money_ratio = positive_money / negative_money.replace(0, np.nan)
-    out["MFI"] = (100 - 100 / (1 + money_ratio)).where(negative_money != 0, 100.0)
+    mfi_value = 100 - 100 / (1 + money_ratio)
+    both_zero_flow = (positive_money == 0) & (negative_money == 0)
+    mfi_value = mfi_value.where(~both_zero_flow, 50.0)
+    mfi_value = mfi_value.where(~((negative_money == 0) & (positive_money > 0)), 100.0)
+    out["MFI"] = mfi_value.where(~((positive_money == 0) & (negative_money > 0)), 0.0)
     out["MFI_MA"] = out["MFI"].rolling(14).mean()
 
     out["OBV"] = (np.sign(close.diff()).fillna(0) * out["Volume"]).cumsum()
@@ -387,7 +503,14 @@ def diagnostic_text(series: pd.Series) -> str:
     return f"Δ1 {fmt(values['delta_1'])} | Δ3 {fmt(values['delta_3'])} | Eğim5 {fmt(values['slope_5'])}"
 
 
-def build_status(data: pd.DataFrame, config: ScanConfig, symbol: str) -> dict[str, Any]:
+def build_status(
+    data: pd.DataFrame,
+    config: ScanConfig,
+    symbol: str,
+    benchmark_data: pd.DataFrame | None = None,
+    benchmark_symbol: str = "",
+    free_float_pct: float | None = None,
+) -> dict[str, Any]:
     row = data.iloc[-1]
     previous = data.iloc[-2]
     price = float(row["Close"])
@@ -451,7 +574,7 @@ def build_status(data: pd.DataFrame, config: ScanConfig, symbol: str) -> dict[st
     trend = [
         ["ADX/DMI", f"ADX {fmt(row['ADX'])} | +DI {fmt(row['PLUS_DI'])} | -DI {fmt(row['MINUS_DI'])}", f"{'+DI üstün' if row['PLUS_DI'] > row['MINUS_DI'] else '-DI üstün'} | ADX perc %{fmt(row['ADX_RANK'], 0)} | {diagnostic_text(data['ADX'])}", GREEN if row["PLUS_DI"] > row["MINUS_DI"] else RED],
         ["Supertrend", fmt(row["SUPERTREND"]), "Fiyat üstünde" if price > row["SUPERTREND"] else "Fiyat altında", GREEN if price > row["SUPERTREND"] else RED],
-        ["Kümülatif VWAP", fmt(row["VWAP"]), f"Fiyat {'üstünde' if price > row['VWAP'] else 'altında'} | Mesafe {(price / row['VWAP'] - 1) * 100:+.2f}%", GREEN if price > row["VWAP"] else RED],
+        ["Dataset VWAP", fmt(row["VWAP"]), f"İndirme başlangıcına bağlı | Fiyat {'üstünde' if price > row['VWAP'] else 'altında'}", GREEN if price > row["VWAP"] else RED],
         ["Ichimoku", f"Tenkan {fmt(row['TENKAN'])} | Kijun {fmt(row['KIJUN'])}", cloud_state, GREEN if cloud_state == "Bulut üstü" else RED if cloud_state == "Bulut altı" else YELLOW],
         ["Parabolic SAR", fmt(row["PSAR"]), "SAR fiyat altında" if row["PSAR"] < price else "SAR fiyat üzerinde", GREEN if row["PSAR"] < price else RED],
         ["Bollinger", f"Alt {fmt(row['BB_LOWER'])} | Orta {fmt(row['BB_MID'])} | Üst {fmt(row['BB_UPPER'])}", f"{bb_position} | {bb_state} / {bb_direction} | Perc %{fmt(bb_rank, 0)}", BLUE if bb_rank <= 20 else PURPLE if bb_rank >= 80 else GRAY],
@@ -460,10 +583,43 @@ def build_status(data: pd.DataFrame, config: ScanConfig, symbol: str) -> dict[st
         ["OBV", f"{fmt(row['OBV'], 0)} | EMA20 {fmt(row['OBV_EMA'], 0)}", f"{normalized_gap_state(data['OBV'], data['OBV_EMA'])} | {diagnostic_text(data['OBV'])}", GREEN if row["OBV"] > row["OBV_EMA"] else RED],
     ]
 
-    context = build_market_context(data, MA_PERIODS, config.anchor_date)
+    resolved_market = str(data.attrs.get("market", config.market if config.market != "AUTO" else "BIST"))
+    bar_state = build_bar_state(data, resolved_market, config.interval)
+    context = build_market_context(data, MA_PERIODS, config.anchor_date, bar_state=bar_state)
+    decision = build_decision_context(
+        data,
+        benchmark_data,
+        benchmark_symbol,
+        resolved_market,
+        free_float_pct,
+        config.account_size,
+        config.risk_pct,
+        config.atr_multiple,
+        bar_state,
+    )
     executive = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["families"]]
     location = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["location_rows"]]
     participation = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["participation_rows"]]
+    rs = decision["relative_strength"]
+    rs_period = rs.get("periods", {}).get("20", {})
+    rs_values = f"20G fark {fmt(rs_period.get('excess_return_pct'))}% | Eğim5 {fmt(rs.get('ratio_slope_5_pct'))}%" if rs.get("available") else "Benchmark verisi alınamadı"
+    mtf = decision["multi_timeframe"]
+    mtf_values = " | ".join(f"{item['label']}: {item['state']}" for item in mtf["frames"])
+    liquidity = decision["liquidity"]
+    free_float_text = fmt(liquidity.get("free_float_pct")) + "%" if liquidity.get("free_float_pct") is not None else "—"
+    risk = decision["risk_reference"]
+    risk_values = (
+        f"Mesafe {fmt(risk.get('distance'))} | Long ref. {fmt(risk.get('long_reference_stop'))} / 2R {fmt(risk.get('long_reference_2r'))}"
+        if risk.get("available")
+        else "ATR referansı hesaplanamadı"
+    )
+    decision_rows = [
+        ["Relative Strength", rs_values, f"vs {rs.get('benchmark', benchmark_symbol or '—')} | {rs.get('state', '—')}", tone_color(rs.get("tone", "warning"))],
+        ["MTF Confluence", mtf_values, mtf["state"], tone_color(mtf["tone"])],
+        ["Likidite", f"Ort.20 {fmt(liquidity['average_turnover_20'], 0)} TL | Halka açıklık {free_float_text}", liquidity["state"] + (" | " + "; ".join(liquidity["warnings"]) if liquidity["warnings"] else ""), tone_color(liquidity["tone"])],
+        ["Risk Referansı", risk_values, risk.get("state", "—") + " | Emir önerisi değildir", tone_color(risk.get("tone", "neutral"))],
+    ]
+
     events = []
     for item in context["events"]:
         age_text = "Bu bar" if item["age"] == 0 else f"{item['age']} bar önce"
@@ -479,7 +635,11 @@ def build_status(data: pd.DataFrame, config: ScanConfig, symbol: str) -> dict[st
         "price": price,
         "change_pct": (price / float(previous["Close"]) - 1) * 100,
         "period": config.period,
+        "download_period": data.attrs.get("download_period", config.period),
         "interval": config.interval,
+        "resolved_market": resolved_market,
+        "price_adjustment": data.attrs.get("price_adjustment", "Sağlayıcı bilgisi yok"),
+        "bar_state": bar_state,
         "anchor_date": config.anchor_date,
         "equality_tolerance_pct": config.equality_tolerance_pct,
         "ma": ma_rows,
@@ -489,6 +649,8 @@ def build_status(data: pd.DataFrame, config: ScanConfig, symbol: str) -> dict[st
         "location": location,
         "participation": participation,
         "events": events,
+        "decision_rows": decision_rows,
+        "decision_context": decision,
         "market_context": context,
     }
 
@@ -520,8 +682,8 @@ def draw_table(ax: plt.Axes, title: str, columns: list[str], rows: list[list[str
 def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     plt.rcParams["font.family"] = "DejaVu Sans"
-    figure = plt.figure(figsize=(18, 34), dpi=120, facecolor=BG)
-    grid = figure.add_gridspec(6, 2, height_ratios=[0.7, 2.2, 3.0, 4.4, 4.2, 5.0], hspace=0.28, wspace=0.14)
+    figure = plt.figure(figsize=(18, 38), dpi=120, facecolor=BG)
+    grid = figure.add_gridspec(7, 2, height_ratios=[0.7, 2.2, 1.8, 3.0, 4.4, 4.2, 5.0], hspace=0.28, wspace=0.14)
 
     header = figure.add_subplot(grid[0, :])
     header.set_facecolor(BG)
@@ -530,8 +692,9 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     header.text(0.0, 0.72, f"{status['symbol']} — Technical Market State", color=WHITE, fontsize=27, fontweight="bold")
     header.text(0.0, 0.25, f"Fiyat: {fmt(status['price'])}", color=WHITE, fontsize=20, fontweight="bold")
     header.text(0.20, 0.25, f"Değişim: {status['change_pct']:+.2f}%", color=change_color, fontsize=18, fontweight="bold")
-    header.text(0.46, 0.30, f"Bar: {status['timestamp']} | {status['interval']}", color=MUTED, fontsize=11)
-    header.text(0.46, 0.08, f"Kaynak: {status['data_provider']}", color=MUTED, fontsize=10)
+    bar_color = YELLOW if status["bar_state"]["is_live"] else LIGHT_GREEN
+    header.text(0.46, 0.30, f"Bar: {status['timestamp']} | {status['interval']} | {status['bar_state']['label']}", color=bar_color, fontsize=11, fontweight="bold")
+    header.text(0.46, 0.08, f"Kaynak: {status['data_provider']} | Warm-up: {status['download_period']}", color=MUTED, fontsize=10)
     header.text(0.0, -0.02, "Durum raporudur; otomatik AL/SAT puanı değildir. Yatırım tavsiyesi değildir.", color="#94a3b8", fontsize=10)
 
     executive_ax = figure.add_subplot(grid[1, :])
@@ -539,7 +702,12 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     executive_colors = [[HEADER, item[3], PANEL] for item in status["executive"]]
     draw_table(executive_ax, "Piyasa Durum Haritası", ["Aile", "Durum", "Bağlam"], executive_rows, executive_colors, font_size=11, col_widths=[0.16, 0.38, 0.46])
 
-    chart = figure.add_subplot(grid[2, :])
+    decision_ax = figure.add_subplot(grid[2, :])
+    decision_rows = [[item[0], item[1], item[2]] for item in status["decision_rows"]]
+    decision_colors = [[HEADER, PANEL, item[3]] for item in status["decision_rows"]]
+    draw_table(decision_ax, "Karar Bağlamı • RS • MTF • Likidite • Risk", ["Alan", "Değerler", "Durum"], decision_rows, decision_colors, font_size=9, col_widths=[0.16, 0.46, 0.38])
+
+    chart = figure.add_subplot(grid[3, :])
     chart.set_facecolor(PANEL)
     recent = data.tail(120)
     chart.plot(recent.index, recent["Close"], color=WHITE, linewidth=2.0, label="Kapanış")
@@ -547,9 +715,11 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     chart.plot(recent.index, recent["EMA_50"], color="#f59e0b", linewidth=1.3, label="EMA50")
     chart.plot(recent.index, recent["EMA_200"], color="#f43f5e", linewidth=1.3, label="EMA200")
     chart.fill_between(recent.index, recent["BB_LOWER"], recent["BB_UPPER"], color="#3b82f6", alpha=0.10, label="Bollinger")
-    profile = status["market_context"]["profile"]
-    for label, level, color in [("VAH", profile["vah"], "#22c55e"), ("POC", profile["poc"], "#f59e0b"), ("VAL", profile["val"], "#ef4444")]:
-        chart.axhline(level, color=color, linewidth=1.0, linestyle="--", alpha=0.8, label=label)
+    profile_source = data.tail(219)
+    rolling_profile = rolling_volume_profile_levels(profile_source, lookback=100).tail(120)
+    chart.plot(rolling_profile.index, rolling_profile["vah"], color="#22c55e", linewidth=1.0, linestyle="--", alpha=0.8, label="Developing VAH")
+    chart.plot(rolling_profile.index, rolling_profile["poc"], color="#f59e0b", linewidth=1.2, linestyle="--", alpha=0.9, label="Developing POC")
+    chart.plot(rolling_profile.index, rolling_profile["val"], color="#ef4444", linewidth=1.0, linestyle="--", alpha=0.8, label="Developing VAL")
     chart.grid(color="#334155", alpha=0.45)
     chart.tick_params(colors=MUTED)
     chart.spines[:].set_color("#334155")
@@ -557,33 +727,33 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     chart.legend(facecolor=HEADER, labelcolor=WHITE, loc="upper left", ncol=8)
     chart.set_title("Fiyat • Ortalamalar • Bollinger • Yaklaşık Hacim Profili — Son 120 Bar", color=WHITE, fontsize=15, fontweight="bold", loc="left")
 
-    ma_ax = figure.add_subplot(grid[3, 0])
+    ma_ax = figure.add_subplot(grid[4, 0])
     ma_rows = [[str(item["period"]), fmt(item["sma"]), fmt(item["ema"])] for item in status["ma"]]
     ma_colors = [[HEADER, item["sma_color"], item["ema_color"]] for item in status["ma"]]
     draw_table(ma_ax, "SMA / EMA Değerleri", ["Periyot", "SMA", "EMA"], ma_rows, ma_colors, font_size=10, col_widths=[0.20, 0.40, 0.40])
     ma_ax.text(0, -0.035, f"Yeşil: fiyat üstünde | Sarı: ±%{status['equality_tolerance_pct']:.2f} yakın | Kırmızı: fiyat altında", transform=ma_ax.transAxes, color=MUTED, fontsize=8)
 
-    momentum_ax = figure.add_subplot(grid[3, 1])
+    momentum_ax = figure.add_subplot(grid[4, 1])
     momentum_rows = [[item[0], item[1], item[2]] for item in status["momentum"]]
     momentum_colors = [[HEADER, PANEL, item[3]] for item in status["momentum"]]
     draw_table(momentum_ax, "Momentum • Kesişim • Eğim", ["Gösterge", "Değerler", "Durum"], momentum_rows, momentum_colors, font_size=7, col_widths=[0.12, 0.38, 0.50])
 
-    trend_ax = figure.add_subplot(grid[4, 0])
+    trend_ax = figure.add_subplot(grid[5, 0])
     trend_rows = [[item[0], item[1], item[2]] for item in status["trend_volatility_volume"]]
     trend_colors = [[HEADER, PANEL, item[3]] for item in status["trend_volatility_volume"]]
     draw_table(trend_ax, "Trend • Volatilite • Hacim", ["Gösterge", "Değerler", "Durum"], trend_rows, trend_colors, font_size=7, col_widths=[0.14, 0.31, 0.55])
 
-    location_ax = figure.add_subplot(grid[4, 1])
+    location_ax = figure.add_subplot(grid[5, 1])
     location_rows = [[item[0], item[1], item[2]] for item in status["location"]]
     location_colors = [[HEADER, PANEL, item[3]] for item in status["location"]]
     draw_table(location_ax, "Konum • AVWAP • POC/VA • Yapı Seviyeleri", ["Alan", "Değerler", "Durum"], location_rows, location_colors, font_size=7, col_widths=[0.14, 0.52, 0.34])
 
-    participation_ax = figure.add_subplot(grid[5, 0])
+    participation_ax = figure.add_subplot(grid[6, 0])
     participation_rows = [[item[0], item[1], item[2]] for item in status["participation"]]
     participation_colors = [[HEADER, PANEL, item[3]] for item in status["participation"]]
     draw_table(participation_ax, "Katılım • RVOL • Delta/CVD Tahmini", ["Alan", "Değerler", "Durum"], participation_rows, participation_colors, font_size=7, col_widths=[0.14, 0.34, 0.52])
 
-    events_ax = figure.add_subplot(grid[5, 1])
+    events_ax = figure.add_subplot(grid[6, 1])
     event_rows = [[item[0], item[1], item[2]] for item in status["events"]]
     event_colors = [[item[3], PANEL, HEADER] for item in status["events"]]
     draw_table(events_ax, "Son 12 Teyitli Olay", ["Olay", "Zaman", "Tür"], event_rows, event_colors, font_size=7, col_widths=[0.50, 0.24, 0.26])
@@ -592,47 +762,19 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     plt.close(figure)
 
 
-def telegram_caption(status: dict[str, Any]) -> str:
-    context = status["market_context"]
-    return (
-        f"📊 {status['symbol']} Teknik Piyasa Durumu\n"
-        f"Fiyat: {fmt(status['price'])} ({status['change_pct']:+.2f}%)\n"
-        f"Rejim: {context['regime']['state']}\n"
-        f"Yapı: {context['structure']['state']} — {context['structure']['event']}\n"
-        f"Konum: {context['profile']['position']}\n"
-        f"POC: {fmt(context['profile']['poc'])} | VAH: {fmt(context['profile']['vah'])} | VAL: {fmt(context['profile']['val'])}\n"
-        f"RVOL: {context['relative_volume']:.2f}x\n"
-        f"Kaynak: {status['data_provider']}\n"
-        f"Bar: {status['timestamp']}\n\n"
-        "Durum raporudur; otomatik AL/SAT puanı değildir. Yatırım tavsiyesi değildir."
-    )
-
-
-def send_telegram(image_path: Path, status: dict[str, Any]) -> None:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-    if not token or not chat_id:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID GitHub Actions Secrets olarak tanımlanmalıdır.")
-    url = f"https://api.telegram.org/bot{token}/sendPhoto"
-    with image_path.open("rb") as image:
-        response = requests.post(
-            url,
-            data={"chat_id": chat_id, "caption": telegram_caption(status)},
-            files={"photo": (image_path.name, image, "image/png")},
-            timeout=60,
-        )
-    if not response.ok:
-        raise RuntimeError(f"Telegram gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}")
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Hisse teknik durum görseli üretir ve isteğe bağlı Telegram'a gönderir.")
     parser.add_argument("--ticker", required=True, help="Örnek: THYAO veya AAPL")
     parser.add_argument("--market", default="BIST", choices=["BIST", "US", "AUTO"])
     parser.add_argument("--provider", default="AUTO", choices=["AUTO", "BORSAPY", "YFINANCE"])
     parser.add_argument("--anchor-date", default="", help="Manuel AVWAP başlangıcı, ör. 2026-01-02")
-    parser.add_argument("--period", default="2y")
+    parser.add_argument("--period", default="2y", help="İstenen analiz/gösterim dönemi")
+    parser.add_argument("--warmup-period", default="2y", help="377 bar göstergeler için minimum veri dönemi")
     parser.add_argument("--interval", default="1d")
+    parser.add_argument("--benchmark", default="", help="Boşsa BIST için XU100, US için SPY")
+    parser.add_argument("--account-size", type=float, default=0.0, help="Opsiyonel örnek risk bütçesi hesabı")
+    parser.add_argument("--risk-pct", type=float, default=1.0)
+    parser.add_argument("--atr-multiple", type=float, default=1.5)
     parser.add_argument("--output", default="reports/technical_report.png")
     parser.add_argument("--json-output", default="reports/technical_report.json")
     parser.add_argument("--send-telegram", action="store_true")
@@ -648,10 +790,22 @@ def main() -> None:
         interval=args.interval,
         provider=args.provider,
         anchor_date=args.anchor_date,
+        warmup_period=args.warmup_period,
+        benchmark=args.benchmark,
+        account_size=args.account_size,
+        risk_pct=args.risk_pct,
+        atr_multiple=args.atr_multiple,
     )
     symbol, prices = download_prices(config)
+    resolved_config = dataclass_replace(config, market=str(prices.attrs.get("market", config.market)))
+    try:
+        benchmark_symbol, benchmark_data = download_benchmark(resolved_config)
+    except Exception as exc:  # noqa: BLE001 -- external provider fallback boundary
+        print(f"Uyarı: benchmark verisi alınamadı ({exc}).")
+        benchmark_symbol, benchmark_data = resolved_config.benchmark or ("XU100" if resolved_config.market == "BIST" else "SPY"), None
+    free_float_pct = download_free_float(resolved_config)
     calculated = calculate_indicators(prices)
-    status = build_status(calculated, config, symbol)
+    status = build_status(calculated, resolved_config, symbol, benchmark_data, benchmark_symbol, free_float_pct)
     image_path = Path(args.output)
     json_path = Path(args.json_output)
     render_report(calculated, status, image_path)
@@ -660,7 +814,7 @@ def main() -> None:
     print(f"Rapor oluşturuldu: {image_path}")
     print(f"JSON oluşturuldu: {json_path}")
     if args.send_telegram:
-        send_telegram(image_path, status)
+        send_photo(image_path, status)
         print("Telegram raporu gönderildi.")
 
 
