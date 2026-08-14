@@ -1,0 +1,95 @@
+name: Hisse Teknik Tarama
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Hisse sembolü (ör. THYAO, ASELS veya AAPL)"
+        required: true
+        default: "THYAO"
+        type: string
+      market:
+        description: "Piyasa"
+        required: true
+        default: "BIST"
+        type: choice
+        options: [BIST, US, AUTO]
+      period:
+        description: "Veri dönemi"
+        required: true
+        default: "2y"
+        type: choice
+        options: [6mo, 1y, 2y, 5y, 10y]
+      interval:
+        description: "Mum aralığı"
+        required: true
+        default: "1d"
+        type: choice
+        options: [1d]
+      send_telegram:
+        description: "Görseli Telegram grubuna gönder"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stock-scan-${{ github.ref }}-${{ inputs.ticker }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v6
+
+      - name: Python kur
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Bağımlılıkları yükle
+        run: python -m pip install --requirement requirements.txt
+
+      - name: Testleri çalıştır
+        run: python -m unittest discover -s tests -v
+
+      - name: Teknik raporu üret
+        env:
+          INPUT_TICKER: ${{ inputs.ticker }}
+          INPUT_MARKET: ${{ inputs.market }}
+          INPUT_PERIOD: ${{ inputs.period }}
+          INPUT_INTERVAL: ${{ inputs.interval }}
+        run: |
+          python -m src.stock_dashboard \
+            --ticker "$INPUT_TICKER" \
+            --market "$INPUT_MARKET" \
+            --period "$INPUT_PERIOD" \
+            --interval "$INPUT_INTERVAL"
+
+      - name: Telegram grubundaki konuya gönder
+        if: ${{ inputs.send_telegram }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1003502567927"
+          TELEGRAM_MESSAGE_THREAD_ID: "1"
+        run: python -m src.send_telegram
+
+      - name: Raporu Actions artifact olarak sakla
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: teknik-rapor-${{ inputs.ticker }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+
+
+
+
