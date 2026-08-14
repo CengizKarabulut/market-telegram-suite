@@ -9,21 +9,24 @@ import requests
 
 
 DEFAULT_CHAT_ID = "-1003502567927"
-DEFAULT_THREAD_ID = "1"
+DEFAULT_THREAD_ID = ""
 
 
 def caption(status: dict) -> str:
-    macd = status["momentum"][0][2]
-    rsi = status["momentum"][1][2]
-    dmi = status["trend_volatility_volume"][0][2]
+    context = status["market_context"]
+    profile = context["profile"]
+    structure = context["structure"]
     return (
-        f"📊 {status['symbol']} Teknik Durum\n"
+        f"📊 {status['symbol']} Teknik Piyasa Durumu\n"
         f"Fiyat: {status['price']:,.2f} ({status['change_pct']:+.2f}%)\n"
-        f"MACD: {macd}\n"
-        f"RSI: {rsi}\n"
-        f"DMI: {dmi}\n"
+        f"Rejim: {context['regime']['state']}\n"
+        f"Yapı: {structure['state']} — {structure['event']}\n"
+        f"Konum: {profile['position']}\n"
+        f"POC: {profile['poc']:,.2f} | VAH: {profile['vah']:,.2f} | VAL: {profile['val']:,.2f}\n"
+        f"RVOL: {context['relative_volume']:.2f}x\n"
+        f"Kaynak: {status.get('data_provider', 'bilinmiyor')}\n"
         f"Bar: {status['timestamp']}\n\n"
-        "Bilgilendirme amaçlıdır; yatırım tavsiyesi değildir."
+        "Durum raporudur; otomatik AL/SAT puanı değildir. Yatırım tavsiyesi değildir."
     )
 
 
@@ -46,7 +49,8 @@ def send(image_path: Path, json_path: Path) -> None:
         )
     if not response.ok:
         raise RuntimeError(f"Telegram gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}")
-    print(f"Telegram raporu gönderildi: chat_id={chat_id}, message_thread_id={thread_id}")
+    destination = f"konu {thread_id}" if thread_id else "Genel konu"
+    print(f"Telegram raporu gönderildi: chat_id={chat_id}, hedef={destination}")
 
 
 def main() -> None:
@@ -59,4 +63,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
