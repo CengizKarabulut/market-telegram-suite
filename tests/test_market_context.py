@@ -9,6 +9,8 @@ from src.market_context import (
     build_market_context,
     market_structure,
     normalized_gap_state,
+    profile_context,
+    recent_events,
     rolling_volume_profile_levels,
 )
 from src.stock_dashboard import MA_PERIODS, calculate_indicators
@@ -64,6 +66,26 @@ class MarketContextTests(unittest.TestCase):
         self.assertAlmostEqual(profiles.loc[timestamp, "vah"], expected["vah"])
         self.assertAlmostEqual(profiles.loc[timestamp, "val"], expected["val"])
 
+    def test_profile_reports_current_and_developing_acceptance(self) -> None:
+        profile = profile_context(self.data)
+        self.assertIn("current_profile_acceptance", profile)
+        self.assertIn("developing_acceptance", profile)
+        self.assertTrue(np.isfinite(profile["poc_migration_threshold"]))
+        self.assertTrue(np.isfinite(profile["poc_migration_bins"]))
+
+    def test_current_bar_cross_is_live_only_when_session_bar_is_live(self) -> None:
+        data = self.data.copy()
+        data.loc[data.index[-2], ["RSI", "RSI_MA"]] = [40.0, 50.0]
+        data.loc[data.index[-1], ["RSI", "RSI_MA"]] = [60.0, 50.0]
+        structure = market_structure(data)
+        profile = profile_context(data)
+        live_events = recent_events(data, structure, profile, limit=100, bar_state={"is_live": True})
+        confirmed_events = recent_events(data, structure, profile, limit=100, bar_state={"is_live": False})
+        live_rsi = next(item for item in live_events if item["event"] == "RSI ↑ MA" and item["age"] == 0)
+        confirmed_rsi = next(item for item in confirmed_events if item["event"] == "RSI ↑ MA" and item["age"] == 0)
+        self.assertEqual(live_rsi["state"], "CANLI")
+        self.assertEqual(confirmed_rsi["state"], "TEYİTLİ")
+
     def test_market_structure_uses_confirmed_pivots(self) -> None:
         structure = market_structure(self.data)
         self.assertTrue(structure["confirmed"])
@@ -85,6 +107,8 @@ class MarketContextTests(unittest.TestCase):
         )
         self.assertGreaterEqual(len(context["events"]), 1)
         self.assertIn("gerçek footprint delta değildir", context["order_flow_proxy"]["method"])
+        self.assertEqual(set(context["ma_structure"]["groups"]), {"Çok kısa", "Kısa", "Orta", "Uzun"})
+        self.assertIn(context["regime"]["persistence_bars"], {2})
 
 
 if __name__ == "__main__":

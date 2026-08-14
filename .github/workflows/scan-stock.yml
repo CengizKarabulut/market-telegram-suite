@@ -37,6 +37,26 @@ on:
         default: "1d"
         type: choice
         options: [1d]
+      benchmark:
+        description: "Göreceli güç benchmarkı (BIST varsayılanı XU100)"
+        required: false
+        default: ""
+        type: string
+      account_size:
+        description: "Opsiyonel örnek risk hesabı portföy büyüklüğü (0=kapalı)"
+        required: true
+        default: "0"
+        type: string
+      risk_pct:
+        description: "Örnek risk bütçesi yüzdesi"
+        required: true
+        default: "1"
+        type: string
+      atr_multiple:
+        description: "ATR volatilite mesafesi çarpanı"
+        required: true
+        default: "1.5"
+        type: string
       send_telegram:
         description: "Görseli Telegram grubuna gönder"
         required: true
@@ -78,6 +98,10 @@ jobs:
           INPUT_ANCHOR_DATE: ${{ inputs.anchor_date }}
           INPUT_PERIOD: ${{ inputs.period }}
           INPUT_INTERVAL: ${{ inputs.interval }}
+          INPUT_BENCHMARK: ${{ inputs.benchmark }}
+          INPUT_ACCOUNT_SIZE: ${{ inputs.account_size }}
+          INPUT_RISK_PCT: ${{ inputs.risk_pct }}
+          INPUT_ATR_MULTIPLE: ${{ inputs.atr_multiple }}
         run: |
           python -m src.stock_dashboard \
             --ticker "$INPUT_TICKER" \
@@ -85,7 +109,12 @@ jobs:
             --provider "$INPUT_PROVIDER" \
             --anchor-date "$INPUT_ANCHOR_DATE" \
             --period "$INPUT_PERIOD" \
-            --interval "$INPUT_INTERVAL"
+            --warmup-period "2y" \
+            --interval "$INPUT_INTERVAL" \
+            --benchmark "$INPUT_BENCHMARK" \
+            --account-size "$INPUT_ACCOUNT_SIZE" \
+            --risk-pct "$INPUT_RISK_PCT" \
+            --atr-multiple "$INPUT_ATR_MULTIPLE"
 
       - name: Telegram grubunun Genel konusuna gönder
         if: ${{ inputs.send_telegram }}
