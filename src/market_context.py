@@ -81,11 +81,26 @@ def anchored_vwaps(data: pd.DataFrame, anchor_date: str = "") -> dict[str, float
         ),
     }
     if anchor_date.strip():
-        anchor = pd.Timestamp(anchor_date)
+        try:
+            anchor = pd.Timestamp(anchor_date)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Geçersiz AVWAP anchor tarihi: {anchor_date!r}. YYYY-MM-DD biçimini kullanın.") from exc
+        if pd.isna(anchor):
+            raise ValueError(f"Geçersiz AVWAP anchor tarihi: {anchor_date!r}. YYYY-MM-DD biçimini kullanın.")
         if latest.tzinfo is not None and anchor.tzinfo is None:
             anchor = anchor.tz_localize(latest.tzinfo)
         elif latest.tzinfo is None and anchor.tzinfo is not None:
             anchor = anchor.tz_localize(None)
+        first = pd.Timestamp(index[0])
+        if anchor.normalize() < first.normalize():
+            raise ValueError(
+                f"AVWAP anchor tarihi {anchor.date()} indirilen verinin başlangıcından "
+                f"({first.date()}) önce. Daha uzun bir period seçin veya anchor tarihini değiştirin."
+            )
+        if anchor.normalize() > latest.normalize():
+            raise ValueError(
+                f"AVWAP anchor tarihi {anchor.date()} son mum tarihinden ({latest.date()}) sonra olamaz."
+            )
         result["manual"] = _anchored_vwap(data, pd.Series(index >= anchor, index=data.index))
         result["manual_anchor"] = anchor.isoformat()
     else:
@@ -145,6 +160,25 @@ def approximate_volume_profile(data: pd.DataFrame, lookback: int = 100, bins: in
     vah = float(edges[max(selected) + 1])
     poc = float(centers[poc_index])
     return {"poc": poc, "vah": vah, "val": val, "width_pct": (vah / val - 1) * 100 if val else math.nan}
+
+
+def rolling_volume_profile_levels(
+    data: pd.DataFrame,
+    lookback: int = 100,
+    bins: int = 48,
+    value_area: float = 0.70,
+    min_periods: int = 2,
+) -> pd.DataFrame:
+    """Her bar için yalnızca o anda mevcut olan OHLCV verisiyle profil seviyeleri üretir."""
+    result = pd.DataFrame(index=data.index, columns=["poc", "vah", "val"], dtype=float)
+    for position in range(len(data)):
+        start = max(0, position - lookback + 1)
+        window = data.iloc[start : position + 1]
+        if len(window) < min_periods:
+            continue
+        levels = approximate_volume_profile(window, lookback=lookback, bins=bins, value_area=value_area)
+        result.loc[data.index[position], ["poc", "vah", "val"]] = [levels["poc"], levels["vah"], levels["val"]]
+    return result
 
 
 def profile_context(data: pd.DataFrame, lookback: int = 100) -> dict[str, Any]:
@@ -386,18 +420,22 @@ def recent_events(data: pd.DataFrame, structure: dict[str, Any], profile: dict[s
     structure_age = structure.get("event_age")
     if structure_age is not None:
         events.append({"event": structure["event"], "age": structure_age, "state": "TEYİTLİ"})
-    price = data["Close"]
-    for label, level, upward in [
-        ("VAH ↑", profile["vah"], True),
-        ("VAH ↓", profile["vah"], False),
-        ("VAL ↑", profile["val"], True),
-        ("VAL ↓", profile["val"], False),
-        ("POC ↑", profile["poc"], True),
-        ("POC ↓", profile["poc"], False),
+    profile_lookback = 100
+    event_window = min(100, len(data))
+    profile_source = data.tail(profile_lookback + event_window - 1)
+    rolling_profile = rolling_volume_profile_levels(profile_source, lookback=profile_lookback)
+    price = profile_source["Close"].tail(event_window)
+    for label, column, upward in [
+        ("VAH ↑", "vah", True),
+        ("VAH ↓", "vah", False),
+        ("VAL ↑", "val", True),
+        ("VAL ↓", "val", False),
+        ("POC ↑", "poc", True),
+        ("POC ↓", "poc", False),
     ]:
-        age = _last_cross_age(price.tail(100), float(level), upward)
+        age = _last_cross_age(price, rolling_profile[column].tail(event_window), upward)
         if age is not None:
-            events.append({"event": label, "age": age, "state": "OHLCV PROFİL"})
+            events.append({"event": label, "age": age, "state": "TEYİTLİ OHLCV PROFİL"})
     events.sort(key=lambda item: item["age"])
     return events[:limit]
 

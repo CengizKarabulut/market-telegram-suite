@@ -26,7 +26,7 @@ Token'ı hiçbir dosyaya, issue'ya veya Actions loguna yazmayın.
 1. **Actions → Hisse Teknik Tarama → Run workflow** yolunu açın.
 2. `ticker` alanına `THYAO`, `ASELS`, `TUPRS` veya `AAPL` gibi sembolü girin.
 3. BIST hisselerinde `market=BIST`, `provider=AUTO` seçilmesi önerilir.
-4. İstenirse `anchor_date` alanına manuel AVWAP başlangıcı `YYYY-MM-DD` biçiminde yazılır. Boşsa yıl başlangıcı kullanılır.
+4. İstenirse `anchor_date` alanına manuel AVWAP başlangıcı `YYYY-MM-DD` biçiminde yazılır. Tarih indirilen mum aralığında olmalıdır; boşsa yıl başlangıcı kullanılır.
 5. SMA/EMA 377 için günlük grafikte en az `period=2y` kullanın.
 6. `send_telegram=true` olduğunda rapor Telegram grubunun Genel konusuna gönderilir.
 

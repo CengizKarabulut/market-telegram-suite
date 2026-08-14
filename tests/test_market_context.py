@@ -4,10 +4,12 @@ import numpy as np
 import pandas as pd
 
 from src.market_context import (
+    anchored_vwaps,
     approximate_volume_profile,
     build_market_context,
     market_structure,
     normalized_gap_state,
+    rolling_volume_profile_levels,
 )
 from src.stock_dashboard import MA_PERIODS, calculate_indicators
 
@@ -39,6 +41,28 @@ class MarketContextTests(unittest.TestCase):
         self.assertLessEqual(profile["val"], profile["poc"])
         self.assertLessEqual(profile["poc"], profile["vah"])
         self.assertGreater(profile["width_pct"], 0)
+
+    def test_manual_anchor_rejects_dates_outside_downloaded_history(self) -> None:
+        with self.assertRaisesRegex(ValueError, "verinin başlangıcından"):
+            anchored_vwaps(self.data, "2020-01-01")
+        with self.assertRaisesRegex(ValueError, "son mum tarihinden"):
+            anchored_vwaps(self.data, "2030-01-01")
+        with self.assertRaisesRegex(ValueError, "Geçersiz AVWAP anchor"):
+            anchored_vwaps(self.data, "NaT")
+
+    def test_manual_anchor_accepts_first_candle_calendar_date(self) -> None:
+        result = anchored_vwaps(self.data, str(self.data.index[0].date()))
+        self.assertTrue(np.isfinite(result["manual"]))
+
+    def test_rolling_profile_has_no_future_data_dependency(self) -> None:
+        lookback = 100
+        historical_position = 250
+        profiles = rolling_volume_profile_levels(self.data, lookback=lookback)
+        timestamp = self.data.index[historical_position]
+        expected = approximate_volume_profile(self.data.iloc[: historical_position + 1], lookback=lookback)
+        self.assertAlmostEqual(profiles.loc[timestamp, "poc"], expected["poc"])
+        self.assertAlmostEqual(profiles.loc[timestamp, "vah"], expected["vah"])
+        self.assertAlmostEqual(profiles.loc[timestamp, "val"], expected["val"])
 
     def test_market_structure_uses_confirmed_pivots(self) -> None:
         structure = market_structure(self.data)
