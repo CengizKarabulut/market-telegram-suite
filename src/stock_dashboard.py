@@ -26,6 +26,7 @@ from src.market_context import (
     normalized_gap_state,
     rolling_volume_profile_levels,
 )
+from src.technical_commentary import build_technical_commentary
 from src.telegram_client import send_photo
 
 MA_PERIODS = [5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
@@ -586,6 +587,20 @@ def build_status(
     resolved_market = str(data.attrs.get("market", config.market if config.market != "AUTO" else "BIST"))
     bar_state = build_bar_state(data, resolved_market, config.interval)
     context = build_market_context(data, MA_PERIODS, config.anchor_date, bar_state=bar_state)
+    for momentum_row in momentum:
+        divergence = context["divergences"]["indicators"].get(momentum_row[0])
+        if not divergence:
+            continue
+        if divergence["detected"]:
+            age_text = "bu bar" if divergence["event_age"] == 0 else f"{divergence['event_age']} bar önce"
+            detail = (
+                f"{divergence['state']} ({divergence['pivot_relation']}, {age_text}) | "
+                f"{divergence['interpretation']} | Fiyat {fmt(divergence['price_first'])}→{fmt(divergence['price_second'])} | "
+                f"Osilatör {fmt(divergence['oscillator_first'])}→{fmt(divergence['oscillator_second'])}"
+            )
+            momentum_row[2] += f"\nUyumsuzluk: {detail}"
+        else:
+            momentum_row[2] += f"\nUyumsuzluk: {divergence['state']}"
     decision = build_decision_context(
         data,
         benchmark_data,
@@ -597,12 +612,13 @@ def build_status(
         config.atr_multiple,
         bar_state,
     )
+    commentary = build_technical_commentary(data, context, decision, bar_state)
     executive = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["families"]]
     location = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["location_rows"]]
     participation = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["participation_rows"]]
     rs = decision["relative_strength"]
     rs_period = rs.get("periods", {}).get("20", {})
-    rs_values = f"20G fark {fmt(rs_period.get('excess_return_pct'))}% | Eğim5 {fmt(rs.get('ratio_slope_5_pct'))}%" if rs.get("available") else "Benchmark verisi alınamadı"
+    rs_values = f"20G getiri farkı {fmt(rs_period.get('excess_return_pct'))} puan | Eğim5 {fmt(rs.get('ratio_slope_5_pct'))}%" if rs.get("available") else "Benchmark verisi alınamadı"
     mtf = decision["multi_timeframe"]
     mtf_values = " | ".join(f"{item['label']}: {item['state']}" for item in mtf["frames"])
     liquidity = decision["liquidity"]
@@ -617,13 +633,14 @@ def build_status(
         ["Relative Strength", rs_values, f"vs {rs.get('benchmark', benchmark_symbol or '—')} | {rs.get('state', '—')}", tone_color(rs.get("tone", "warning"))],
         ["MTF Confluence", mtf_values, mtf["state"], tone_color(mtf["tone"])],
         ["Likidite", f"Ort.20 {fmt(liquidity['average_turnover_20'], 0)} TL | Halka açıklık {free_float_text}", liquidity["state"] + (" | " + "; ".join(liquidity["warnings"]) if liquidity["warnings"] else ""), tone_color(liquidity["tone"])],
-        ["Risk Referansı", risk_values, risk.get("state", "—") + " | Emir önerisi değildir", tone_color(risk.get("tone", "neutral"))],
+        ["ATR Volatilite Senaryosu", risk_values, risk.get("state", "—") + " | Emir önerisi değildir", tone_color(risk.get("tone", "neutral"))],
     ]
 
     events = []
     for item in context["events"]:
         age_text = "Bu bar" if item["age"] == 0 else f"{item['age']} bar önce"
-        event_color = GREEN if "↑" in item["event"] or "High üzeri" in item["event"] else RED if "↓" in item["event"] or "Low altı" in item["event"] else GRAY
+        event_name = item["event"].casefold()
+        event_color = GREEN if "↑" in item["event"] or "high üzeri" in event_name or "pozitif normal uyumsuzluk" in event_name or "pozitif gizli uyumsuzluk" in event_name else RED if "↓" in item["event"] or "low altı" in event_name or "negatif normal uyumsuzluk" in event_name or "negatif gizli uyumsuzluk" in event_name else GRAY
         events.append([item["event"], age_text, item["state"], event_color])
 
     return {
@@ -651,6 +668,7 @@ def build_status(
         "events": events,
         "decision_rows": decision_rows,
         "decision_context": decision,
+        "technical_commentary": commentary,
         "market_context": context,
     }
 
@@ -682,8 +700,8 @@ def draw_table(ax: plt.Axes, title: str, columns: list[str], rows: list[list[str
 def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     plt.rcParams["font.family"] = "DejaVu Sans"
-    figure = plt.figure(figsize=(18, 38), dpi=120, facecolor=BG)
-    grid = figure.add_gridspec(7, 2, height_ratios=[0.7, 2.2, 1.8, 3.0, 4.4, 4.2, 5.0], hspace=0.28, wspace=0.14)
+    figure = plt.figure(figsize=(18, 43), dpi=120, facecolor=BG)
+    grid = figure.add_gridspec(8, 2, height_ratios=[0.7, 2.2, 1.8, 2.8, 3.0, 4.4, 4.2, 5.0], hspace=0.28, wspace=0.14)
 
     header = figure.add_subplot(grid[0, :])
     header.set_facecolor(BG)
@@ -707,7 +725,12 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     decision_colors = [[HEADER, PANEL, item[3]] for item in status["decision_rows"]]
     draw_table(decision_ax, "Karar Bağlamı • RS • MTF • Likidite • Risk", ["Alan", "Değerler", "Durum"], decision_rows, decision_colors, font_size=9, col_widths=[0.16, 0.46, 0.38])
 
-    chart = figure.add_subplot(grid[3, :])
+    commentary_ax = figure.add_subplot(grid[3, :])
+    commentary_rows = [[item[0], item[1], item[2]] for item in status["technical_commentary"]["visual_rows"]]
+    commentary_colors = [[HEADER, tone_color(item[3]), PANEL] for item in status["technical_commentary"]["visual_rows"]]
+    draw_table(commentary_ax, "Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", ["Katman", "Durum", "Yorum"], commentary_rows, commentary_colors, font_size=8, col_widths=[0.15, 0.22, 0.63])
+
+    chart = figure.add_subplot(grid[4, :])
     chart.set_facecolor(PANEL)
     recent = data.tail(120)
     chart.plot(recent.index, recent["Close"], color=WHITE, linewidth=2.0, label="Kapanış")
@@ -727,33 +750,33 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     chart.legend(facecolor=HEADER, labelcolor=WHITE, loc="upper left", ncol=8)
     chart.set_title("Fiyat • Ortalamalar • Bollinger • Yaklaşık Hacim Profili — Son 120 Bar", color=WHITE, fontsize=15, fontweight="bold", loc="left")
 
-    ma_ax = figure.add_subplot(grid[4, 0])
+    ma_ax = figure.add_subplot(grid[5, 0])
     ma_rows = [[str(item["period"]), fmt(item["sma"]), fmt(item["ema"])] for item in status["ma"]]
     ma_colors = [[HEADER, item["sma_color"], item["ema_color"]] for item in status["ma"]]
     draw_table(ma_ax, "SMA / EMA Değerleri", ["Periyot", "SMA", "EMA"], ma_rows, ma_colors, font_size=10, col_widths=[0.20, 0.40, 0.40])
     ma_ax.text(0, -0.035, f"Yeşil: fiyat üstünde | Sarı: ±%{status['equality_tolerance_pct']:.2f} yakın | Kırmızı: fiyat altında", transform=ma_ax.transAxes, color=MUTED, fontsize=8)
 
-    momentum_ax = figure.add_subplot(grid[4, 1])
+    momentum_ax = figure.add_subplot(grid[5, 1])
     momentum_rows = [[item[0], item[1], item[2]] for item in status["momentum"]]
     momentum_colors = [[HEADER, PANEL, item[3]] for item in status["momentum"]]
     draw_table(momentum_ax, "Momentum • Kesişim • Eğim", ["Gösterge", "Değerler", "Durum"], momentum_rows, momentum_colors, font_size=7, col_widths=[0.12, 0.38, 0.50])
 
-    trend_ax = figure.add_subplot(grid[5, 0])
+    trend_ax = figure.add_subplot(grid[6, 0])
     trend_rows = [[item[0], item[1], item[2]] for item in status["trend_volatility_volume"]]
     trend_colors = [[HEADER, PANEL, item[3]] for item in status["trend_volatility_volume"]]
     draw_table(trend_ax, "Trend • Volatilite • Hacim", ["Gösterge", "Değerler", "Durum"], trend_rows, trend_colors, font_size=7, col_widths=[0.14, 0.31, 0.55])
 
-    location_ax = figure.add_subplot(grid[5, 1])
+    location_ax = figure.add_subplot(grid[6, 1])
     location_rows = [[item[0], item[1], item[2]] for item in status["location"]]
     location_colors = [[HEADER, PANEL, item[3]] for item in status["location"]]
     draw_table(location_ax, "Konum • AVWAP • POC/VA • Yapı Seviyeleri", ["Alan", "Değerler", "Durum"], location_rows, location_colors, font_size=7, col_widths=[0.14, 0.52, 0.34])
 
-    participation_ax = figure.add_subplot(grid[6, 0])
+    participation_ax = figure.add_subplot(grid[7, 0])
     participation_rows = [[item[0], item[1], item[2]] for item in status["participation"]]
     participation_colors = [[HEADER, PANEL, item[3]] for item in status["participation"]]
     draw_table(participation_ax, "Katılım • RVOL • Delta/CVD Tahmini", ["Alan", "Değerler", "Durum"], participation_rows, participation_colors, font_size=7, col_widths=[0.14, 0.34, 0.52])
 
-    events_ax = figure.add_subplot(grid[6, 1])
+    events_ax = figure.add_subplot(grid[7, 1])
     event_rows = [[item[0], item[1], item[2]] for item in status["events"]]
     event_colors = [[item[3], PANEL, HEADER] for item in status["events"]]
     draw_table(events_ax, "Son 12 Teyitli Olay", ["Olay", "Zaman", "Tür"], event_rows, event_colors, font_size=7, col_widths=[0.50, 0.24, 0.26])

@@ -18,6 +18,7 @@ def build_caption(status: dict[str, Any]) -> str:
     rs = decision.get("relative_strength", {})
     mtf = decision.get("multi_timeframe", {})
     liquidity = decision.get("liquidity", {})
+    commentary = status.get("technical_commentary", {})
     atr_percentile = context["regime"].get("atr_percentile")
     bb_percentile = context["regime"].get("bb_percentile")
     volatility = (
@@ -42,6 +43,16 @@ def build_caption(status: dict[str, Any]) -> str:
         lines.append(f"MTF: {mtf.get('state', '—')}")
     if liquidity:
         lines.append(f"Likidite: {liquidity.get('state', '—')}")
+    divergence_items = context.get("divergences", {}).get("indicators", {})
+    active_divergences = [
+        f"{name} {item['state']} ({item['event_age']} bar)"
+        for name, item in divergence_items.items()
+        if item.get("detected")
+    ]
+    if active_divergences:
+        lines.append("Uyumsuzluk: " + " | ".join(active_divergences))
+    if commentary.get("headline"):
+        lines.extend(["", "Teknik yorum:", commentary["headline"]])
     lines.extend(
         [
             "",

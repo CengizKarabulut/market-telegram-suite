@@ -18,12 +18,20 @@ STATUS = {
         "structure": {"state": "LH / LL", "event": "Swing Low altı BOS"},
         "profile": {"position": "Value Area içinde", "poc": 326.62, "vah": 336.25, "val": 301.25},
         "relative_volume": 0.68,
+        "divergences": {
+            "indicators": {
+                "RSI": {"detected": False, "state": "Son 5 barda aktif uyumsuzluk yok", "event_age": None},
+                "MACD": {"detected": False, "state": "Son 5 barda aktif uyumsuzluk yok", "event_age": None},
+                "SMI": {"detected": True, "state": "Negatif normal uyumsuzluk", "event_age": 3},
+            }
+        },
     },
     "momentum": [
         ["MACD", "değer", "Pozitif", "renk"],
         ["RSI", "değer", "50 üzeri", "renk"],
     ],
     "trend_volatility_volume": [["ADX/DMI", "değer", "+DI üstün", "renk"]],
+    "technical_commentary": {"headline": "Denge rejiminde hacim ve kabul teyidi bekleniyor."},
 }
 
 
@@ -52,6 +60,16 @@ class TelegramTests(unittest.TestCase):
     def test_explicit_topic_adds_message_thread_id(self) -> None:
         payload = self._send_and_payload("99")
         self.assertEqual(payload["message_thread_id"], "99")
+
+    def test_caption_contains_active_divergence(self) -> None:
+        payload = self._send_and_payload(None)
+        self.assertIn("SMI Negatif normal uyumsuzluk (3 bar)", payload["caption"])
+
+    def test_caption_contains_technical_commentary(self) -> None:
+        payload = self._send_and_payload(None)
+        self.assertIn("Teknik yorum:", payload["caption"])
+        self.assertIn("Denge rejiminde hacim ve kabul teyidi bekleniyor.", payload["caption"])
+        self.assertLessEqual(len(payload["caption"]), 1024)
 
 
 if __name__ == "__main__":

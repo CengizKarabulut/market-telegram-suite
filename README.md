@@ -101,6 +101,24 @@ Tabloda her periyodun kendi SMA ve EMA değeri bulunur:
 - MFI/MA14 ve CCI/MA20.
 - Yukarı/aşağı kesişimler, normalize fark ile “kesişime yakın” ayrımı.
 - Her ana osilatör için 1 bar değişim, 3 bar değişim ve 5 bar doğrusal eğim.
+- RSI, MACD ana çizgisi ve SMI için TradingView RSI örneğiyle aynı 5 sol/5 sağ teyitli osilatör pivotları kullanılır. Pivotlar arası mesafe 5–60 bardır.
+- Normal pozitif: fiyat LL/osilatör HL; normal negatif: fiyat HH/osilatör LH. Gizli pozitif: fiyat HL/osilatör LL; gizli negatif: fiyat LH/osilatör HH.
+- Pivot mesafesi ile güncellik ayrıdır: yalnız son 5 barda teyit edilen uyumsuzluklar aktif olarak momentum tablosu, olaylar, JSON ve Telegram'da gösterilir. Sağdaki 5 bar tamamlanmadan pivot teyitli kabul edilmez; uyumsuzluk tek başına AL/SAT sinyali değildir.
+
+## Katmanlı teknik yorum
+
+Rapor, ham tabloların yanında aynı verilerden deterministik bir teknik yorum üretir. Harici LLM/API çağrısı yapılmaz; aynı veri aynı metni üretir.
+
+Yorum sırası:
+
+`Rejim → Yön → Konum → Setup → Trigger → Confirmation → Risk → Exit`
+
+- Ana okuma, trend/yapı, momentum/katılım, konum/volatilite ve çelişki/teyit satırları görselde gösterilir.
+- Ayrıntılı kanıtlar, karşı kanıtlar, izlenecek seviyeler, yöntem ve veri sınırları JSON çıktısında saklanır.
+- Telegram açıklamasına kısa teknik yorum eklenir.
+- RSI, MACD, Stoch RSI ve SMI korelasyonlu momentum ailesi kabul edilir; dört bağımsız oy gibi puanlanmaz.
+- Sıkışma yön sinyali sayılmaz. Kapanışla kırılım, developing kabul, volatilite genişlemesi ve RVOL birlikte değerlendirilir.
+- Yorum otomatik AL/SAT kararı, birleşik skor veya yatırım tavsiyesi değildir.
 
 ## Trend, volatilite ve katılım
 
