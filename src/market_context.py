@@ -601,7 +601,7 @@ def build_market_context(
         for name, item in divergences["indicators"].items()
         if item["detected"]
     ]
-    divergence_state = " | ".join(active_divergences) if active_divergences else "Son 60 barda regular uyumsuzluk yok"
+    divergence_state = " | ".join(active_divergences) if active_divergences else "Son 5 barda aktif uyumsuzluk yok"
     volume_state = "Belirgin katılım" if rvol >= 1.5 else "Ortalama üstü katılım" if rvol >= 1.1 else "Düşük katılım" if rvol < 0.8 else "Normal katılım"
     volume_tone = "purple" if rvol >= 1.1 else "neutral"
     volatility_state = ("Genişliyor" if bb_widening else "Daralıyor") + f" | ATR perc %{atr_rank:.0f}"

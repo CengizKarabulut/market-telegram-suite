@@ -111,6 +111,7 @@ class MarketContextTests(unittest.TestCase):
         self.assertIn(context["regime"]["persistence_bars"], {2})
         self.assertEqual(set(context["divergences"]["indicators"]), {"RSI", "MACD", "SMI"})
         self.assertEqual(context["divergences"]["settings"]["lookback_right"], 5)
+        self.assertEqual(context["divergences"]["settings"]["active_max_age"], 5)
 
 
 if __name__ == "__main__":

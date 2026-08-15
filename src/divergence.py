@@ -31,18 +31,32 @@ def _event(
     second: int,
     right: int,
     bullish: bool,
+    hidden: bool,
 ) -> dict[str, Any]:
     confirmation_position = second + right
     price_column = "Low" if bullish else "High"
     tone = "positive" if bullish else "negative"
-    direction = "Pozitif normal uyumsuzluk" if bullish else "Negatif normal uyumsuzluk"
+    direction = "Pozitif" if bullish else "Negatif"
+    divergence_type = "gizli" if hidden else "normal"
+    if bullish and hidden:
+        pivot_relation, interpretation = "HL / LL", "Olası yükseliş devamı"
+    elif bullish:
+        pivot_relation, interpretation = "LL / HL", "Olası yukarı dönüş"
+    elif hidden:
+        pivot_relation, interpretation = "LH / HH", "Olası düşüş devamı"
+    else:
+        pivot_relation, interpretation = "HH / LH", "Olası aşağı dönüş"
+    state = f"{direction} {divergence_type} uyumsuzluk"
     return {
         "indicator": indicator,
-        "event": f"{indicator} {direction}",
-        "state": direction,
+        "event": f"{indicator} {state}",
+        "state": state,
         "tone": tone,
         "bullish": bullish,
-        "pivot_relation": "LL / HL" if bullish else "HH / LH",
+        "hidden": hidden,
+        "divergence_type": divergence_type,
+        "interpretation": interpretation,
+        "pivot_relation": pivot_relation,
         "first_pivot_time": data.index[first].isoformat(),
         "second_pivot_time": data.index[second].isoformat(),
         "confirmation_time": data.index[confirmation_position].isoformat(),
@@ -60,17 +74,17 @@ def detect_divergences(
     right: int = 5,
     range_lower: int = 5,
     range_upper: int = 60,
-    max_event_age: int = 60,
+    max_event_age: int = 5,
 ) -> dict[str, Any]:
-    """TradingView RSI örneğindeki regular divergence mantığını uygular.
+    """RSI, MACD ve SMI için teyitli normal/gizli uyumsuzlukları bulur.
 
-    Pivotlar osilatörde bulunur. Pozitif uyumsuzlukta osilatör HL ve aynı
-    pivot barlarındaki fiyat Low serisi LL; negatifte osilatör LH ve fiyat
-    High serisi HH yapmalıdır. Sağ pivot barları tamamlanmadan olay teyitli
-    sayılmaz.
+    Pivotlar osilatörde bulunur ve fiyat aynı pivot barlarından karşılaştırılır.
+    ``range_lower/range_upper`` iki pivotun mesafesidir; ``max_event_age`` ise
+    teyitten sonra tablonun olayı aktif göstermeye devam ettiği ayrı penceredir.
     """
     indicators: dict[str, dict[str, Any]] = {}
     events: list[dict[str, Any]] = []
+    settings = _settings(left, right, range_lower, range_upper, max_event_age)
     required = {"Low", "High", *INDICATORS.values()}
     if len(data) < left + right + range_lower + 1 or not required.issubset(data.columns):
         for name in INDICATORS:
@@ -80,7 +94,7 @@ def detect_divergences(
                 "tone": "neutral",
                 "event_age": None,
             }
-        return {"indicators": indicators, "events": events, "settings": _settings(left, right, range_lower, range_upper, max_event_age)}
+        return {"indicators": indicators, "events": events, "settings": settings}
 
     for name, column in INDICATORS.items():
         oscillator = data[column]
@@ -88,30 +102,36 @@ def detect_divergences(
         low_pivots = _pivot_positions(oscillator, left, right, low=True)
         high_pivots = _pivot_positions(oscillator, left, right, low=False)
         for first, second in itertools.pairwise(low_pivots):
-            distance = second - first
-            if not range_lower <= distance <= range_upper:
+            if not range_lower <= second - first <= range_upper:
                 continue
-            oscillator_higher_low = float(oscillator.iloc[second]) > float(oscillator.iloc[first])
-            price_lower_low = float(data["Low"].iloc[second]) < float(data["Low"].iloc[first])
-            if oscillator_higher_low and price_lower_low:
-                candidates.append(_event(data, name, oscillator, first, second, right, bullish=True))
+            oscillator_first = float(oscillator.iloc[first])
+            oscillator_second = float(oscillator.iloc[second])
+            price_first = float(data["Low"].iloc[first])
+            price_second = float(data["Low"].iloc[second])
+            if oscillator_second > oscillator_first and price_second < price_first:
+                candidates.append(_event(data, name, oscillator, first, second, right, bullish=True, hidden=False))
+            elif oscillator_second < oscillator_first and price_second > price_first:
+                candidates.append(_event(data, name, oscillator, first, second, right, bullish=True, hidden=True))
         for first, second in itertools.pairwise(high_pivots):
-            distance = second - first
-            if not range_lower <= distance <= range_upper:
+            if not range_lower <= second - first <= range_upper:
                 continue
-            oscillator_lower_high = float(oscillator.iloc[second]) < float(oscillator.iloc[first])
-            price_higher_high = float(data["High"].iloc[second]) > float(data["High"].iloc[first])
-            if oscillator_lower_high and price_higher_high:
-                candidates.append(_event(data, name, oscillator, first, second, right, bullish=False))
-        recent = [item for item in candidates if 0 <= int(item["event_age"]) <= max_event_age]
-        if recent:
-            latest = min(recent, key=lambda item: int(item["event_age"]))
+            oscillator_first = float(oscillator.iloc[first])
+            oscillator_second = float(oscillator.iloc[second])
+            price_first = float(data["High"].iloc[first])
+            price_second = float(data["High"].iloc[second])
+            if oscillator_second < oscillator_first and price_second > price_first:
+                candidates.append(_event(data, name, oscillator, first, second, right, bullish=False, hidden=False))
+            elif oscillator_second > oscillator_first and price_second < price_first:
+                candidates.append(_event(data, name, oscillator, first, second, right, bullish=False, hidden=True))
+        active = [item for item in candidates if 0 <= int(item["event_age"]) <= max_event_age]
+        if active:
+            latest = min(active, key=lambda item: int(item["event_age"]))
             indicators[name] = {"detected": True, **latest}
-            events.extend(recent)
+            events.extend(active)
         else:
             indicators[name] = {
                 "detected": False,
-                "state": f"Son {max_event_age} barda yok",
+                "state": f"Son {max_event_age} barda aktif uyumsuzluk yok",
                 "tone": "neutral",
                 "event_age": None,
             }
@@ -120,8 +140,8 @@ def detect_divergences(
     return {
         "indicators": indicators,
         "events": events,
-        "settings": _settings(left, right, range_lower, range_upper, max_event_age),
-        "method": "TradingView RSI regular divergence semantiği; pivotlar osilatörde 5/5 ile teyit edilir, fiyat aynı pivot barlarından karşılaştırılır.",
+        "settings": settings,
+        "method": "TradingView RSI pivot semantiği; normal ve gizli uyumsuzluk, osilatör 5/5 pivotlarında ve aynı barlardaki fiyatla hesaplanır. Yalnız son 5 teyit barı aktif gösterilir.",
     }
 
 
@@ -129,7 +149,7 @@ def _settings(left: int, right: int, range_lower: int, range_upper: int, max_eve
     return {
         "lookback_left": left,
         "lookback_right": right,
-        "range_lower": range_lower,
-        "range_upper": range_upper,
-        "max_event_age": max_event_age,
+        "pivot_range_lower": range_lower,
+        "pivot_range_upper": range_upper,
+        "active_max_age": max_event_age,
     }

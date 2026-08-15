@@ -594,7 +594,7 @@ def build_status(
             age_text = "bu bar" if divergence["event_age"] == 0 else f"{divergence['event_age']} bar önce"
             detail = (
                 f"{divergence['state']} ({divergence['pivot_relation']}, {age_text}) | "
-                f"Fiyat {fmt(divergence['price_first'])}→{fmt(divergence['price_second'])} | "
+                f"{divergence['interpretation']} | Fiyat {fmt(divergence['price_first'])}→{fmt(divergence['price_second'])} | "
                 f"Osilatör {fmt(divergence['oscillator_first'])}→{fmt(divergence['oscillator_second'])}"
             )
             momentum_row[2] += f"\nUyumsuzluk: {detail}"
@@ -638,7 +638,7 @@ def build_status(
     for item in context["events"]:
         age_text = "Bu bar" if item["age"] == 0 else f"{item['age']} bar önce"
         event_name = item["event"].casefold()
-        event_color = GREEN if "↑" in item["event"] or "high üzeri" in event_name or "pozitif normal uyumsuzluk" in event_name else RED if "↓" in item["event"] or "low altı" in event_name or "negatif normal uyumsuzluk" in event_name else GRAY
+        event_color = GREEN if "↑" in item["event"] or "high üzeri" in event_name or "pozitif normal uyumsuzluk" in event_name or "pozitif gizli uyumsuzluk" in event_name else RED if "↓" in item["event"] or "low altı" in event_name or "negatif normal uyumsuzluk" in event_name or "negatif gizli uyumsuzluk" in event_name else GRAY
         events.append([item["event"], age_text, item["state"], event_color])
 
     return {

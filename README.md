@@ -101,8 +101,9 @@ Tabloda her periyodun kendi SMA ve EMA değeri bulunur:
 - MFI/MA14 ve CCI/MA20.
 - Yukarı/aşağı kesişimler, normalize fark ile “kesişime yakın” ayrımı.
 - Her ana osilatör için 1 bar değişim, 3 bar değişim ve 5 bar doğrusal eğim.
-- RSI, MACD ana çizgisi ve SMI için TradingView RSI örneğiyle aynı regular uyumsuzluk mantığı: osilatörde 5 sol/5 sağ teyitli pivot, pivotlar arası 5–60 bar; pozitif durumda fiyat LL/osilatör HL, negatif durumda fiyat HH/osilatör LH.
-- Uyumsuzluk sonuçları momentum tablosunda, son olaylarda, JSON çıktısında ve Telegram açıklamasında gösterilir. Sağdaki 5 bar tamamlanmadan pivot teyitli kabul edilmez; bu tek başına AL/SAT sinyali değildir.
+- RSI, MACD ana çizgisi ve SMI için TradingView RSI örneğiyle aynı 5 sol/5 sağ teyitli osilatör pivotları kullanılır. Pivotlar arası mesafe 5–60 bardır.
+- Normal pozitif: fiyat LL/osilatör HL; normal negatif: fiyat HH/osilatör LH. Gizli pozitif: fiyat HL/osilatör LL; gizli negatif: fiyat LH/osilatör HH.
+- Pivot mesafesi ile güncellik ayrıdır: yalnız son 5 barda teyit edilen uyumsuzluklar aktif olarak momentum tablosu, olaylar, JSON ve Telegram'da gösterilir. Sağdaki 5 bar tamamlanmadan pivot teyitli kabul edilmez; uyumsuzluk tek başına AL/SAT sinyali değildir.
 
 ## Trend, volatilite ve katılım
 

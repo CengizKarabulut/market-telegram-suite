@@ -20,9 +20,9 @@ STATUS = {
         "relative_volume": 0.68,
         "divergences": {
             "indicators": {
-                "RSI": {"detected": False, "state": "Son 60 barda yok", "event_age": None},
-                "MACD": {"detected": False, "state": "Son 60 barda yok", "event_age": None},
-                "SMI": {"detected": True, "state": "Negatif normal uyumsuzluk", "event_age": 22},
+                "RSI": {"detected": False, "state": "Son 5 barda aktif uyumsuzluk yok", "event_age": None},
+                "MACD": {"detected": False, "state": "Son 5 barda aktif uyumsuzluk yok", "event_age": None},
+                "SMI": {"detected": True, "state": "Negatif normal uyumsuzluk", "event_age": 3},
             }
         },
     },
@@ -62,7 +62,7 @@ class TelegramTests(unittest.TestCase):
 
     def test_caption_contains_active_divergence(self) -> None:
         payload = self._send_and_payload(None)
-        self.assertIn("SMI Negatif normal uyumsuzluk (22 bar)", payload["caption"])
+        self.assertIn("SMI Negatif normal uyumsuzluk (3 bar)", payload["caption"])
 
 
 if __name__ == "__main__":
