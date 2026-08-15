@@ -18,6 +18,7 @@ def build_caption(status: dict[str, Any]) -> str:
     rs = decision.get("relative_strength", {})
     mtf = decision.get("multi_timeframe", {})
     liquidity = decision.get("liquidity", {})
+    commentary = status.get("technical_commentary", {})
     atr_percentile = context["regime"].get("atr_percentile")
     bb_percentile = context["regime"].get("bb_percentile")
     volatility = (
@@ -50,6 +51,8 @@ def build_caption(status: dict[str, Any]) -> str:
     ]
     if active_divergences:
         lines.append("Uyumsuzluk: " + " | ".join(active_divergences))
+    if commentary.get("headline"):
+        lines.extend(["", "Teknik yorum:", commentary["headline"]])
     lines.extend(
         [
             "",
