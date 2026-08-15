@@ -109,6 +109,8 @@ class MarketContextTests(unittest.TestCase):
         self.assertIn("gerçek footprint delta değildir", context["order_flow_proxy"]["method"])
         self.assertEqual(set(context["ma_structure"]["groups"]), {"Çok kısa", "Kısa", "Orta", "Uzun"})
         self.assertIn(context["regime"]["persistence_bars"], {2})
+        self.assertEqual(set(context["divergences"]["indicators"]), {"RSI", "MACD", "SMI"})
+        self.assertEqual(context["divergences"]["settings"]["lookback_right"], 5)
 
 
 if __name__ == "__main__":

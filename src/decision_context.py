@@ -103,7 +103,10 @@ def _rsi(series: pd.Series, length: int = 14) -> pd.Series:
     average_loss = loss.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
     rs = average_gain / average_loss.replace(0.0, np.nan)
     result = 100 - 100 / (1 + rs)
-    return result.where(average_loss != 0, 100.0)
+    both_zero = (average_gain == 0) & (average_loss == 0)
+    result = result.where(~both_zero, 50.0)
+    result = result.where(~((average_loss == 0) & (average_gain > 0)), 100.0)
+    return result.where(~((average_gain == 0) & (average_loss > 0)), 0.0)
 
 
 def _resample_ohlcv(data: pd.DataFrame, rule: str) -> pd.DataFrame:

@@ -586,6 +586,20 @@ def build_status(
     resolved_market = str(data.attrs.get("market", config.market if config.market != "AUTO" else "BIST"))
     bar_state = build_bar_state(data, resolved_market, config.interval)
     context = build_market_context(data, MA_PERIODS, config.anchor_date, bar_state=bar_state)
+    for momentum_row in momentum:
+        divergence = context["divergences"]["indicators"].get(momentum_row[0])
+        if not divergence:
+            continue
+        if divergence["detected"]:
+            age_text = "bu bar" if divergence["event_age"] == 0 else f"{divergence['event_age']} bar önce"
+            detail = (
+                f"{divergence['state']} ({divergence['pivot_relation']}, {age_text}) | "
+                f"Fiyat {fmt(divergence['price_first'])}→{fmt(divergence['price_second'])} | "
+                f"Osilatör {fmt(divergence['oscillator_first'])}→{fmt(divergence['oscillator_second'])}"
+            )
+            momentum_row[2] += f"\nUyumsuzluk: {detail}"
+        else:
+            momentum_row[2] += f"\nUyumsuzluk: {divergence['state']}"
     decision = build_decision_context(
         data,
         benchmark_data,
@@ -602,7 +616,7 @@ def build_status(
     participation = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["participation_rows"]]
     rs = decision["relative_strength"]
     rs_period = rs.get("periods", {}).get("20", {})
-    rs_values = f"20G fark {fmt(rs_period.get('excess_return_pct'))}% | Eğim5 {fmt(rs.get('ratio_slope_5_pct'))}%" if rs.get("available") else "Benchmark verisi alınamadı"
+    rs_values = f"20G getiri farkı {fmt(rs_period.get('excess_return_pct'))} puan | Eğim5 {fmt(rs.get('ratio_slope_5_pct'))}%" if rs.get("available") else "Benchmark verisi alınamadı"
     mtf = decision["multi_timeframe"]
     mtf_values = " | ".join(f"{item['label']}: {item['state']}" for item in mtf["frames"])
     liquidity = decision["liquidity"]
@@ -617,13 +631,14 @@ def build_status(
         ["Relative Strength", rs_values, f"vs {rs.get('benchmark', benchmark_symbol or '—')} | {rs.get('state', '—')}", tone_color(rs.get("tone", "warning"))],
         ["MTF Confluence", mtf_values, mtf["state"], tone_color(mtf["tone"])],
         ["Likidite", f"Ort.20 {fmt(liquidity['average_turnover_20'], 0)} TL | Halka açıklık {free_float_text}", liquidity["state"] + (" | " + "; ".join(liquidity["warnings"]) if liquidity["warnings"] else ""), tone_color(liquidity["tone"])],
-        ["Risk Referansı", risk_values, risk.get("state", "—") + " | Emir önerisi değildir", tone_color(risk.get("tone", "neutral"))],
+        ["ATR Volatilite Senaryosu", risk_values, risk.get("state", "—") + " | Emir önerisi değildir", tone_color(risk.get("tone", "neutral"))],
     ]
 
     events = []
     for item in context["events"]:
         age_text = "Bu bar" if item["age"] == 0 else f"{item['age']} bar önce"
-        event_color = GREEN if "↑" in item["event"] or "High üzeri" in item["event"] else RED if "↓" in item["event"] or "Low altı" in item["event"] else GRAY
+        event_name = item["event"].casefold()
+        event_color = GREEN if "↑" in item["event"] or "high üzeri" in event_name or "pozitif normal uyumsuzluk" in event_name else RED if "↓" in item["event"] or "low altı" in event_name or "negatif normal uyumsuzluk" in event_name else GRAY
         events.append([item["event"], age_text, item["state"], event_color])
 
     return {

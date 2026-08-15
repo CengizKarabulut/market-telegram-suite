@@ -18,6 +18,13 @@ STATUS = {
         "structure": {"state": "LH / LL", "event": "Swing Low altı BOS"},
         "profile": {"position": "Value Area içinde", "poc": 326.62, "vah": 336.25, "val": 301.25},
         "relative_volume": 0.68,
+        "divergences": {
+            "indicators": {
+                "RSI": {"detected": False, "state": "Son 60 barda yok", "event_age": None},
+                "MACD": {"detected": False, "state": "Son 60 barda yok", "event_age": None},
+                "SMI": {"detected": True, "state": "Negatif normal uyumsuzluk", "event_age": 22},
+            }
+        },
     },
     "momentum": [
         ["MACD", "değer", "Pozitif", "renk"],
@@ -52,6 +59,10 @@ class TelegramTests(unittest.TestCase):
     def test_explicit_topic_adds_message_thread_id(self) -> None:
         payload = self._send_and_payload("99")
         self.assertEqual(payload["message_thread_id"], "99")
+
+    def test_caption_contains_active_divergence(self) -> None:
+        payload = self._send_and_payload(None)
+        self.assertIn("SMI Negatif normal uyumsuzluk (22 bar)", payload["caption"])
 
 
 if __name__ == "__main__":

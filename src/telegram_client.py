@@ -42,6 +42,14 @@ def build_caption(status: dict[str, Any]) -> str:
         lines.append(f"MTF: {mtf.get('state', '—')}")
     if liquidity:
         lines.append(f"Likidite: {liquidity.get('state', '—')}")
+    divergence_items = context.get("divergences", {}).get("indicators", {})
+    active_divergences = [
+        f"{name} {item['state']} ({item['event_age']} bar)"
+        for name, item in divergence_items.items()
+        if item.get("detected")
+    ]
+    if active_divergences:
+        lines.append("Uyumsuzluk: " + " | ".join(active_divergences))
     lines.extend(
         [
             "",

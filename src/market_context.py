@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.divergence import detect_divergences
+
 
 def _number(value: Any, default: float = math.nan) -> float:
     try:
@@ -413,6 +415,7 @@ def recent_events(
     profile: dict[str, Any],
     limit: int = 12,
     bar_state: dict[str, Any] | None = None,
+    divergences: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     definitions: list[tuple[str, pd.Series, pd.Series | float, bool]] = [
         ("MACD ↑ Signal", data["MACD"], data["MACD_SIGNAL"], True),
@@ -488,9 +491,16 @@ def recent_events(
         ("POC ↑", "poc", True),
         ("POC ↓", "poc", False),
     ]:
-        age = _last_cross_age(price, rolling_profile[column].tail(event_window), upward)
+        known_level = rolling_profile[column].shift(1).tail(event_window)
+        previous_relation = price.shift(1) <= known_level if upward else price.shift(1) >= known_level
+        current_relation = price > known_level if upward else price < known_level
+        positions = np.flatnonzero((previous_relation & current_relation).fillna(False).to_numpy())
+        age = int(len(price) - 1 - positions[-1]) if len(positions) else None
         if age is not None:
-            events.append({"event": label, "age": age, "state": confirmation(age, "OHLCV PROFİL")})
+            events.append({"event": label, "age": age, "state": confirmation(age, "OHLCV PROFİL t-1")})
+    for item in (divergences or {}).get("events", []):
+        age = int(item["event_age"])
+        events.append({"event": item["event"], "age": age, "state": confirmation(age, "PİVOT 5/5")})
     events.sort(key=lambda item: item["age"])
     return events[:limit]
 
@@ -505,6 +515,7 @@ def build_market_context(
     price = float(row["Close"])
     profile = profile_context(data)
     structure = market_structure(data)
+    divergences = detect_divergences(data)
     levels = previous_levels(data)
     vwaps = anchored_vwaps(data, anchor_date)
     flow = order_flow_proxy(data)
@@ -585,6 +596,12 @@ def build_market_context(
         0: "Tam aşağı uyum",
     }[positive_momentum]
     momentum_tone = "positive" if positive_momentum >= 3 else "negative" if positive_momentum <= 1 else "warning"
+    active_divergences = [
+        f"{name} {item['state']} ({item['event_age']} bar)"
+        for name, item in divergences["indicators"].items()
+        if item["detected"]
+    ]
+    divergence_state = " | ".join(active_divergences) if active_divergences else "Son 60 barda regular uyumsuzluk yok"
     volume_state = "Belirgin katılım" if rvol >= 1.5 else "Ortalama üstü katılım" if rvol >= 1.1 else "Düşük katılım" if rvol < 0.8 else "Normal katılım"
     volume_tone = "purple" if rvol >= 1.1 else "neutral"
     volatility_state = ("Genişliyor" if bb_widening else "Daralıyor") + f" | ATR perc %{atr_rank:.0f}"
@@ -612,7 +629,7 @@ def build_market_context(
         ["YAPI", structure["state"], structure["event"], structure["tone"]],
         ["KONUM", location_state, profile["developing_acceptance"], profile["tone"]],
         ["TREND", ma_state, f"EMA spread %{ma_spread_pct:.2f} | perc %{ma_spread_rank:.0f}", "positive" if ma_above >= 10 else "negative" if ma_above <= 5 else "warning"],
-        ["MOMENTUM", momentum_state, f"{positive_momentum}/4 ana çizgi sinyal üstünde", momentum_tone],
+        ["MOMENTUM", momentum_state, f"{positive_momentum}/4 ana çizgi sinyal üstünde | {divergence_state}", momentum_tone],
         ["KATILIM", volume_state, f"RVOL {rvol:.2f}x | Delta tah. %{flow['delta_pct']:.1f}", volume_tone],
         ["VOLATİLİTE", volatility_state, f"BB perc %{bb_rank:.0f}", volatility_tone],
     ]
@@ -653,7 +670,8 @@ def build_market_context(
         "order_flow_proxy": flow,
         "relative_volume": rvol,
         "ma_structure": {"above": ma_above, "rising": ma_rising, "total": len(valid_ma), "spread_pct": ma_spread_pct, "spread_percentile": ma_spread_rank, "groups": ma_groups},
+        "divergences": divergences,
         "location_rows": location_rows,
         "participation_rows": participation_rows,
-        "events": recent_events(data, structure, profile, bar_state=bar_state),
+        "events": recent_events(data, structure, profile, bar_state=bar_state, divergences=divergences),
     }

@@ -41,6 +41,12 @@ class DecisionContextTests(unittest.TestCase):
         self.assertEqual([item["label"] for item in result["frames"]], ["Günlük", "Haftalık", "Aylık"])
         self.assertTrue(all(item["available"] for item in result["frames"]))
 
+    def test_flat_mtf_rsi_is_neutral(self) -> None:
+        flat = prices(growth=0.0)
+        flat.loc[:, "Close"] = 50.0
+        result = multi_timeframe_context(flat)
+        self.assertEqual(result["frames"][0]["rsi14"], 50.0)
+
     def test_liquidity_warns_for_low_free_float(self) -> None:
         result = liquidity_context(prices(volume=1_000_000), "BIST", free_float_pct=7.5)
         self.assertIn("Halka açıklık %10 altında", result["warnings"])
