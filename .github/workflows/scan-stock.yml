@@ -116,13 +116,13 @@ jobs:
             --risk-pct "$INPUT_RISK_PCT" \
             --atr-multiple "$INPUT_ATR_MULTIPLE"
 
-      - name: Telegram grubunun Genel konusuna gönder
+      - name: Telegram grubunun 3982 konusuna gönder
         if: ${{ inputs.send_telegram }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "-1003502567927"
-          # Boş bırakıldığında Telegram grubunun Genel konusuna gönderilir.
-          TELEGRAM_MESSAGE_THREAD_ID: ""
+          # Telegram forum konu kimliği (web bağlantısındaki son sayı).
+          TELEGRAM_MESSAGE_THREAD_ID: "3982"
         run: python -m src.send_telegram
 
       - name: Raporu Actions artifact olarak sakla
