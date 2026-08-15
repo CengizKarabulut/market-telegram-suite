@@ -55,7 +55,7 @@ jobs:
           SEND_TELEGRAM: ${{ github.event_name == 'schedule' || inputs.send_telegram }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "-1003502567927"
-          TELEGRAM_MESSAGE_THREAD_ID: ""
+          TELEGRAM_MESSAGE_THREAD_ID: "3982"
         run: |
           SEND_FLAG=""
           if [ "$SEND_TELEGRAM" = "true" ]; then SEND_FLAG="--send-telegram"; fi

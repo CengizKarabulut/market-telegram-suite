@@ -1,6 +1,6 @@
 # Stock Technical Telegram
 
-GitHub Actions ekranından bir hisse sembolü girerek kapsamlı teknik piyasa durum raporu üretir. PNG ve JSON raporları Actions artifact olarak saklanır; PNG ayrıca Telegram grubunun Genel konusuna gönderilir.
+GitHub Actions ekranından bir hisse sembolü girerek kapsamlı teknik piyasa durum raporu üretir. PNG ve JSON raporları Actions artifact olarak saklanır; PNG ayrıca Telegram grubunun `3982` kimlikli forum konusuna gönderilir.
 
 Sistem otomatik AL/SAT kararı veya birleşik puan üretmez. Rejim, yapı, konum, trend, momentum, katılım ve volatilite durumlarını tarafsız biçimde raporlar.
 
@@ -14,10 +14,10 @@ Ana kullanım swing/pozisyon araştırması ve kapanış sonrası izlemedir. Kim
 ## Telegram hedefi
 
 - Grup kimliği: `-1003502567927`
-- Konu: Genel
-- Genel konuya gönderimde `message_thread_id` boş bırakılır.
+- Konu kimliği: `3982`
+- Gönderimde `message_thread_id=3982` kullanılır.
 
-Telegram bağlantısındaki `_1` değeri Bot API konu kimliği değildir. `message_thread_id=1` kullanılması `message thread not found` hatasına neden olur.
+Forum konu kimliği, hedef konu bağlantısının sonundaki sayıdan alınır: `#-1003502567927_3982`.
 
 ## İlk kurulum
 
@@ -37,7 +37,7 @@ Token'ı hiçbir dosyaya, issue'ya veya Actions loguna yazmayın.
 5. `period=6mo` veya `1y` seçilebilir; sistem 377 bar göstergeler için arka planda en az `warmup_period=2y` indirir. İstenen dönem ile gösterge warm-up dönemi ayrıdır.
 6. `benchmark` boşsa BIST için `XU100`, ABD için `SPY` kullanılır.
 7. `account_size=0` risk bütçesi/adet hesabını kapatır; ATR mesafe referansı yine gösterilir.
-8. `send_telegram=true` olduğunda rapor Telegram grubunun Genel konusuna gönderilir.
+8. `send_telegram=true` olduğunda rapor Telegram grubunun `3982` kimlikli konusuna gönderilir.
 
 Sağlayıcı seçenekleri:
 
@@ -177,7 +177,7 @@ Telegram gönderimi:
 python -m src.send_telegram
 ```
 
-`TELEGRAM_MESSAGE_THREAD_ID` boş olduğunda Genel konu kullanılır. Başka bir forum konusu için Bot API'den alınan gerçek konu kimliği verilebilir.
+Hedef forum konusu için `TELEGRAM_MESSAGE_THREAD_ID=3982` kullanılır. Genel konuya gönderim gerekiyorsa değişken boş bırakılır.
 
 ## Veri ve sorumluluk reddi
 
