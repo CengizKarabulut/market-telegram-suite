@@ -422,7 +422,7 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
 
     cumulative_volume = out["Volume"].cumsum().replace(0, np.nan)
     out["VWAP"] = (typical * out["Volume"]).cumsum() / cumulative_volume
-    out["VOLUME_MA"] = out["Volume"].rolling(20).mean()
+    out["VOLUME_MA"] = out["Volume"].shift(1).rolling(20, min_periods=5).mean()
     out["VOLUME_RATIO"] = out["Volume"] / out["VOLUME_MA"].replace(0, np.nan)
     out["VOLUME_RANK"] = percentile_rank(out["Volume"], 252)
 
