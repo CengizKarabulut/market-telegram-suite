@@ -717,12 +717,12 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
 
     executive_ax = figure.add_subplot(grid[1, :])
     executive_rows = [[item[0], item[1], item[2]] for item in status["executive"]]
-    executive_colors = [[HEADER, item[3], PANEL] for item in status["executive"]]
+    executive_colors = [[HEADER, tone_color(item[3]), PANEL] for item in status["executive"]]
     draw_table(executive_ax, "Piyasa Durum Haritası", ["Aile", "Durum", "Bağlam"], executive_rows, executive_colors, font_size=11, col_widths=[0.16, 0.38, 0.46])
 
     decision_ax = figure.add_subplot(grid[2, :])
     decision_rows = [[item[0], item[1], item[2]] for item in status["decision_rows"]]
-    decision_colors = [[HEADER, PANEL, item[3]] for item in status["decision_rows"]]
+    decision_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["decision_rows"]]
     draw_table(decision_ax, "Karar Bağlamı • RS • MTF • Likidite • Risk", ["Alan", "Değerler", "Durum"], decision_rows, decision_colors, font_size=9, col_widths=[0.16, 0.46, 0.38])
 
     commentary_ax = figure.add_subplot(grid[3, :])
@@ -758,27 +758,27 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
 
     momentum_ax = figure.add_subplot(grid[5, 1])
     momentum_rows = [[item[0], item[1], item[2]] for item in status["momentum"]]
-    momentum_colors = [[HEADER, PANEL, item[3]] for item in status["momentum"]]
+    momentum_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["momentum"]]
     draw_table(momentum_ax, "Momentum • Kesişim • Eğim", ["Gösterge", "Değerler", "Durum"], momentum_rows, momentum_colors, font_size=7, col_widths=[0.12, 0.38, 0.50])
 
     trend_ax = figure.add_subplot(grid[6, 0])
     trend_rows = [[item[0], item[1], item[2]] for item in status["trend_volatility_volume"]]
-    trend_colors = [[HEADER, PANEL, item[3]] for item in status["trend_volatility_volume"]]
+    trend_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["trend_volatility_volume"]]
     draw_table(trend_ax, "Trend • Volatilite • Hacim", ["Gösterge", "Değerler", "Durum"], trend_rows, trend_colors, font_size=7, col_widths=[0.14, 0.31, 0.55])
 
     location_ax = figure.add_subplot(grid[6, 1])
     location_rows = [[item[0], item[1], item[2]] for item in status["location"]]
-    location_colors = [[HEADER, PANEL, item[3]] for item in status["location"]]
+    location_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["location"]]
     draw_table(location_ax, "Konum • AVWAP • POC/VA • Yapı Seviyeleri", ["Alan", "Değerler", "Durum"], location_rows, location_colors, font_size=7, col_widths=[0.14, 0.52, 0.34])
 
     participation_ax = figure.add_subplot(grid[7, 0])
     participation_rows = [[item[0], item[1], item[2]] for item in status["participation"]]
-    participation_colors = [[HEADER, PANEL, item[3]] for item in status["participation"]]
+    participation_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["participation"]]
     draw_table(participation_ax, "Katılım • RVOL • Delta/CVD Tahmini", ["Alan", "Değerler", "Durum"], participation_rows, participation_colors, font_size=7, col_widths=[0.14, 0.34, 0.52])
 
     events_ax = figure.add_subplot(grid[7, 1])
     event_rows = [[item[0], item[1], item[2]] for item in status["events"]]
-    event_colors = [[item[3], PANEL, HEADER] for item in status["events"]]
+    event_colors = [[tone_color(item[3]), PANEL, HEADER] for item in status["events"]]
     draw_table(events_ax, "Son 12 Teyitli Olay", ["Olay", "Zaman", "Tür"], event_rows, event_colors, font_size=7, col_widths=[0.50, 0.24, 0.26])
 
     figure.savefig(output, facecolor=figure.get_facecolor(), bbox_inches="tight")
