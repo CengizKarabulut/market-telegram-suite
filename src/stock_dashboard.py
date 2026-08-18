@@ -26,6 +26,7 @@ from src.intervals import (
     INTERVALS,
     key_ema_periods,
     minimum_bars,
+    rank_window,
     resample,
     resolve,
     usable_ma_periods,
@@ -225,18 +226,23 @@ def download_benchmark(config: ScanConfig) -> tuple[str, pd.DataFrame]:
     market = config.market.upper()
     benchmark = config.benchmark.strip().upper() or ("XU100" if market == "BIST" else "SPY")
     period = effective_download_period(config.period, config.warmup_period)
+    # Benchmark hissenin mum aralığıyla aynı olmalı; aksi halde göreceli güç
+    # karşılaştırması farklı zaman ölçeklerini kıyaslar.
+    spec = resolve(config.interval)
     if market == "BIST" and config.provider.upper() != "YFINANCE":
         try:
             import borsapy as bp
 
-            data = bp.Index(benchmark.removesuffix(".IS")).history(period=period, interval=config.interval)
-            return benchmark.removesuffix(".IS"), _validate_context_prices(data, benchmark, "borsapy/TradingView")
+            data = bp.Index(benchmark.removesuffix(".IS")).history(period=period, interval=spec.source_interval)
+            validated = _validate_context_prices(data, benchmark, "borsapy/TradingView")
+            return benchmark.removesuffix(".IS"), resample(validated, spec)
         except Exception:
             if config.provider.upper() == "BORSAPY":
                 raise
     yahoo_symbol = f"{benchmark}.IS" if market == "BIST" and not benchmark.endswith(".IS") else benchmark
-    data = yf.download(yahoo_symbol, period=period, interval=config.interval, auto_adjust=False, progress=False, threads=False)
-    return yahoo_symbol, _validate_context_prices(data, yahoo_symbol, "yfinance")
+    source = "60m" if spec.source_interval == "1h" else spec.source_interval
+    data = yf.download(yahoo_symbol, period=period, interval=source, auto_adjust=False, progress=False, threads=False)
+    return yahoo_symbol, resample(_validate_context_prices(data, yahoo_symbol, "yfinance"), spec)
 
 
 def download_free_float(config: ScanConfig) -> float | None:
@@ -375,8 +381,10 @@ def percentile_rank(series: pd.Series, length: int) -> pd.Series:
     return series.rolling(length, min_periods=max(10, length // 3)).apply(rank, raw=True)
 
 
-def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
+def calculate_indicators(data: pd.DataFrame, interval: str = "1d") -> pd.DataFrame:
     out = data.copy()
+    window = rank_window(interval)
+    out.attrs["rank_window"] = window
     close = out["Close"]
     periods = usable_ma_periods(len(out), MA_PERIODS)
     out.attrs["ma_periods"] = periods
@@ -385,7 +393,7 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
         out[f"EMA_{length}"] = ema(close, length)
     ema_columns = [f"EMA_{length}" for length in periods]
     out["MA_SPREAD_PCT"] = 100 * (out[ema_columns].max(axis=1) - out[ema_columns].min(axis=1)) / close
-    out["MA_SPREAD_RANK"] = percentile_rank(out["MA_SPREAD_PCT"], 252)
+    out["MA_SPREAD_RANK"] = percentile_rank(out["MA_SPREAD_PCT"], window)
 
     out["RSI"] = rsi(close, 14)
     out["RSI_MA"] = out["RSI"].rolling(14).mean()
@@ -393,7 +401,7 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     out["MACD"] = ema(close, 12) - ema(close, 26)
     out["MACD_SIGNAL"] = ema(out["MACD"], 9)
     out["MACD_HIST"] = out["MACD"] - out["MACD_SIGNAL"]
-    out["MACD_HIST_RANK"] = percentile_rank(out["MACD_HIST"].abs(), 252)
+    out["MACD_HIST_RANK"] = percentile_rank(out["MACD_HIST"].abs(), window)
 
     stoch_rsi = rsi(close, 14)
     stoch_low = stoch_rsi.rolling(14).min()
@@ -420,9 +428,9 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
 
     out["ATR"] = rma(true_range(out), 14)
     out["ATR_PCT"] = 100 * out["ATR"] / close
-    out["ATR_RANK"] = percentile_rank(out["ATR_PCT"], 252)
+    out["ATR_RANK"] = percentile_rank(out["ATR_PCT"], window)
     out["PLUS_DI"], out["MINUS_DI"], out["ADX"] = adx_dmi(out, 14)
-    out["ADX_RANK"] = percentile_rank(out["ADX"], 252)
+    out["ADX_RANK"] = percentile_rank(out["ADX"], window)
     out["SUPERTREND"], out["SUPERTREND_DIR"] = supertrend(out, 10, 3.0)
 
     typical = (out["High"] + out["Low"] + close) / 3
@@ -449,7 +457,7 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     out["VWAP"] = (typical * out["Volume"]).cumsum() / cumulative_volume
     out["VOLUME_MA"] = out["Volume"].shift(1).rolling(20, min_periods=5).mean()
     out["VOLUME_RATIO"] = out["Volume"] / out["VOLUME_MA"].replace(0, np.nan)
-    out["VOLUME_RANK"] = percentile_rank(out["Volume"], 252)
+    out["VOLUME_RANK"] = percentile_rank(out["Volume"], window)
 
     out["TENKAN"] = (out["High"].rolling(9).max() + out["Low"].rolling(9).min()) / 2
     out["KIJUN"] = (out["High"].rolling(26).max() + out["Low"].rolling(26).min()) / 2
@@ -1040,7 +1048,7 @@ def main() -> None:
         print(f"Uyarı: benchmark verisi alınamadı ({exc}).")
         benchmark_symbol, benchmark_data = resolved_config.benchmark or ("XU100" if resolved_config.market == "BIST" else "SPY"), None
     free_float_pct = download_free_float(resolved_config)
-    calculated = calculate_indicators(prices)
+    calculated = calculate_indicators(prices, resolved_config.interval)
     status = build_status(calculated, resolved_config, symbol, benchmark_data, benchmark_symbol, free_float_pct)
     image_path = Path(args.output)
     json_path = Path(args.json_output)

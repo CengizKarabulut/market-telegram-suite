@@ -47,9 +47,11 @@ def build_bar_state(
         if minutes:
             is_live = bool(same_session_date and market_open and current < timestamp.to_pydatetime() + pd.Timedelta(minutes=minutes))
         elif interval == "1wk":
-            is_live = bool(market_open and timestamp.isocalendar()[:2] == pd.Timestamp(current).isocalendar()[:2])
+            # Haftalık/aylık barlar dönem dolmadan tamamlanmaz; piyasa kapalıyken de
+            # devam eden bir haftanın barı "teyitli" sayılmamalıdır.
+            is_live = pd.Timestamp(current).isocalendar()[:2] == timestamp.isocalendar()[:2]
         elif interval == "1mo":
-            is_live = bool(market_open and (timestamp.year, timestamp.month) == (current.year, current.month))
+            is_live = (current.year, current.month) == (timestamp.year, timestamp.month)
         else:
             is_live = False
 

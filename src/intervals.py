@@ -59,18 +59,53 @@ def resolve(interval: str) -> IntervalSpec:
     return INTERVALS[key]
 
 
+def _session_chunks(data: pd.DataFrame, bars_per_group: int, columns: dict[str, str]) -> pd.DataFrame:
+    """Gün içi barları seans içindeki konumlarına göre gruplar.
+
+    Takvim saatine hizalama, seans sonundaki kapanış barını ayrı bir kutuya
+    düşürüp tek barlık sahte mum üretir. Borsalar (ve TradingView) barları
+    seans başından itibaren sayar; burada da aynı yöntem kullanılır.
+    Gün sonunda artan barlar, sahte kısa mum oluşmasın diye son gruba eklenir.
+    """
+    frames = []
+    for _, day in data.groupby(pd.DatetimeIndex(data.index).date, sort=True):
+        count = len(day)
+        if not count:
+            continue
+        full_groups = count // bars_per_group
+        remainder = count % bars_per_group
+        last_group = max(full_groups - 1, 0)
+        # Artan barlar (ör. 18:00 kapanış seansı) tek barlık sahte mum üretmesin
+        # diye günün son tam grubuna eklenir.
+        groups = [
+            last_group if (remainder and full_groups and index >= full_groups * bars_per_group) else min(index // bars_per_group, last_group)
+            for index in range(count)
+        ]
+        aggregated = day.groupby(groups).agg(columns)
+        aggregated.index = [day.index[group * bars_per_group] for group in aggregated.index]
+        frames.append(aggregated)
+    if not frames:
+        return data.iloc[:0]
+    result = pd.concat(frames)
+    result.index = pd.DatetimeIndex(result.index)
+    return result.sort_index()
+
+
 def resample(data: pd.DataFrame, spec: IntervalSpec) -> pd.DataFrame:
     """Ham barları hedef aralığa toplar; eksik dönemleri düşürür."""
     if not spec.resample_rule:
         return data
     columns = {name: rule for name, rule in RESAMPLE_AGGREGATION.items() if name in data.columns}
-    # Gün içi kutuları takvim saatine değil seans başlangıcına hizalanır; aksi halde
-    # 10:00–18:00 seansı 4 saatlikte üç eşitsiz bara bölünür.
-    origin = "start" if spec.intraday else "start_day"
-    resampled = data.resample(spec.resample_rule, label="left", closed="left", origin=origin).agg(columns)
+    if spec.intraday:
+        source = INTERVALS.get(spec.source_interval)
+        bars_per_group = max(int(spec.minutes // source.minutes), 1) if source else 1
+        resampled = _session_chunks(data, bars_per_group, columns)
+    else:
+        resampled = data.resample(spec.resample_rule, label="left", closed="left", origin="start_day").agg(columns)
     resampled = resampled.dropna(subset=["Open", "High", "Low", "Close"])
     resampled.attrs.update(data.attrs)
     resampled.attrs["resampled_from"] = spec.source_interval
+    resampled.attrs["bars_per_group"] = spec.minutes
     return resampled
 
 
@@ -113,3 +148,23 @@ def describe(spec: IntervalSpec) -> dict[str, Any]:
         "intraday": spec.intraday,
         "minutes": spec.minutes,
     }
+
+# Yüzdelik hesaplarında kullanılacak geriye bakış penceresi (bar sayısı).
+# Amaç her aralıkta benzer bir takvim süresine karşılık gelmesidir; sabit 252
+# bar günlükte bir yıl, 5 dakikalıkta ise yalnızca üç güne denk gelir.
+RANK_WINDOWS = {
+    "5m": 1900,   # ~3 ay
+    "15m": 1300,  # ~6 ay
+    "30m": 800,   # ~7 ay
+    "1h": 500,    # ~9 ay
+    "2h": 300,    # ~1 yıl
+    "4h": 250,    # ~1 yıl
+    "1d": 252,    # 1 yıl
+    "1wk": 104,   # 2 yıl
+    "1mo": 60,    # 5 yıl
+}
+
+
+def rank_window(interval: str) -> int:
+    """Yüzdelik sıralamalarının bu aralıktaki geriye bakış penceresi."""
+    return RANK_WINDOWS.get(resolve(interval).key, 252)

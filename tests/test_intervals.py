@@ -69,6 +69,20 @@ class ResampleTests(unittest.TestCase):
         self.assertEqual(result.index[0].hour, 10)
         self.assertEqual(result.index[1].hour, 14)
 
+    def test_closing_auction_bar_is_merged_not_left_as_stub(self) -> None:
+        """Seans 9 saatlik bar içerdiğinde 18:00 kapanışı ayrı mum olmamalı."""
+        frame = hourly_session(days=2, hours=9)
+        result = resample(frame, resolve("4h"))
+        self.assertEqual(len(result), 4, "günde iki 4 saatlik mum beklenir")
+        volumes = result["Volume"].tolist()
+        self.assertNotIn(100.0, volumes, "tek barlık sahte mum üretilmemeli")
+        self.assertEqual(volumes[1], 500.0)
+
+    def test_every_source_bar_is_accounted_for(self) -> None:
+        frame = hourly_session(days=3, hours=9)
+        result = resample(frame, resolve("4h"))
+        self.assertAlmostEqual(float(result["Volume"].sum()), float(frame["Volume"].sum()), places=6)
+
     def test_no_empty_overnight_bars_are_produced(self) -> None:
         result = resample(hourly_session(days=2, hours=8), resolve("2h"))
         self.assertFalse(result["Close"].isna().any())
@@ -122,3 +136,23 @@ class AdaptivePeriodTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RankWindowTests(unittest.TestCase):
+    def test_window_scales_with_interval_length(self) -> None:
+        from src.intervals import rank_window
+
+        self.assertGreater(rank_window("5m"), rank_window("1h"))
+        self.assertGreater(rank_window("1h"), rank_window("1d"))
+        self.assertGreater(rank_window("1d"), rank_window("1wk"))
+        self.assertGreater(rank_window("1wk"), rank_window("1mo"))
+
+    def test_daily_window_stays_one_trading_year(self) -> None:
+        from src.intervals import rank_window
+
+        self.assertEqual(rank_window("1d"), 252)
+
+    def test_unknown_interval_falls_back_to_daily_window(self) -> None:
+        from src.intervals import rank_window
+
+        self.assertEqual(rank_window("60m"), rank_window("1h"))
