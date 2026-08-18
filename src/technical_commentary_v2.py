@@ -5,6 +5,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.setup_recognition import evidence_weight, reconcile
+
 
 def _number(value: Any, default: float = math.nan) -> float:
     try:
@@ -20,16 +22,20 @@ def _fmt(value: Any, digits: int = 2) -> str:
 
 
 def _direction(context: dict[str, Any]) -> tuple[str, str]:
+    """Yönü yapıdan uzatmak yerine tanınan kurulumun eğiliminden türetir."""
+    setup = context.get("setup_context", {}).get("setup", {})
+    bias = str(setup.get("bias", ""))
     structure = context.get("structure", {}).get("state", "Yetersiz pivot")
-    trend = context.get("semantic", {}).get("trend_quality", {})
+    if bias == "yukarı":
+        return f"{setup.get('name', 'Yukarı kurulum')} — yukarı eğilimli", "positive"
+    if bias == "aşağı":
+        return f"{setup.get('name', 'Aşağı kurulum')} — aşağı eğilimli", "negative"
+    if bias == "iki yönlü":
+        return f"{setup.get('name', 'Koşullu kurulum')} — koşullu", "warning"
     if structure == "HH / HL":
         return "Yukarı yönlü yapı", "positive"
     if structure == "LH / LL":
         return "Aşağı yönlü yapı", "negative"
-    if trend.get("tone") == "positive":
-        return "Ortalamalar yukarı eğilimli", "positive"
-    if trend.get("tone") == "negative":
-        return "Ortalamalar aşağı eğilimli", "negative"
     return "Yön teyidi karışık", "warning"
 
 
@@ -159,7 +165,13 @@ def _scenario_map(
     strengthen: list[str] = []
     weaken: list[str] = []
     neutral: list[str] = []
-    if direction_tone == "positive":
+    setup = context.get("setup_context", {}).get("setup", {})
+    bias = str(setup.get("bias", ""))
+    if bias == "iki yönlü":
+        strengthen.append(f"{_fmt(structure.get('high'))} üzerinde kapanış: yukarı çözülme")
+        strengthen.append(f"{_fmt(structure.get('low'))} altında kapanış: aşağı çözülme")
+        weaken.append("Her iki uçta da kapanışla kabul oluşmadan aralık içinde kalınması")
+    elif direction_tone == "positive":
         strengthen.append(f"{_fmt(structure.get('high'))} swing zirvesi üzerinde kapanış ve retest başarısı")
         weaken.append(levels["invalidation"])
     elif direction_tone == "negative":
@@ -184,7 +196,12 @@ def _scenario_map(
         neutral.append("Bantlar genişlemeden ve kapanışla seviye kabulü oluşmadan sıkışmanın sürmesi")
     if decision.get("multi_timeframe", {}).get("tone") == "warning":
         weaken.append("Zaman dilimi ayrışmasının sürmesi")
-    return {"strengthen": strengthen[:3], "weaken": weaken[:3], "neutral": neutral[:3]}
+    labels = (
+        {"strengthen": "Yukarı/aşağı çözülme koşulları", "weaken": "Kurulumu geçersiz kılacak gelişmeler", "neutral": "Durumu koruyacak gelişmeler"}
+        if bias == "iki yönlü"
+        else {"strengthen": "Mevcut okumayı teyit edecek gelişmeler", "weaken": "Mevcut okumayı zayıflatacak gelişmeler", "neutral": "Durumu nötr tutacak gelişmeler"}
+    )
+    return {"strengthen": strengthen[:3], "weaken": weaken[:3], "neutral": neutral[:3], "labels": labels}
 
 
 def _evidence_and_clarity(
@@ -205,9 +222,15 @@ def _evidence_and_clarity(
     ]
     supporting: list[dict[str, str]] = []
     counter: list[dict[str, str]] = []
+    two_sided = str(context.get("setup_context", {}).get("setup", {}).get("bias", "")) == "iki yönlü"
     for family, state, tone in families:
         item = {"family": family, "state": str(state), "tone": str(tone)}
-        if tone == direction_tone:
+        if two_sided:
+            if tone == "positive":
+                supporting.append(item)
+            elif tone == "negative":
+                counter.append(item)
+        elif tone == direction_tone:
             supporting.append(item)
         elif tone in {"positive", "negative"} and direction_tone in {"positive", "negative"}:
             counter.append(item)
@@ -215,12 +238,20 @@ def _evidence_and_clarity(
         counter.append({"family": "MTF", "state": "Günlük/haftalık/aylık yönler tam uyumlu değil", "tone": "warning"})
     if bar_state and bar_state.get("is_live"):
         counter.append({"family": "Bar", "state": "Son mum CANLI; kapanışa kadar sınıflamalar değişebilir", "tone": "warning"})
-    if len(counter) <= 1 and len(supporting) >= 4:
-        clarity = {"state": "Yüksek", "tone": "positive", "reason": "Bağımsız teknik aileler büyük ölçüde aynı yönde."}
-    elif len(counter) >= 3:
-        clarity = {"state": "Düşük", "tone": "warning", "reason": "Bağımsız teknik aileler belirgin biçimde ayrışıyor."}
+    regime = str(context.get("regime", {}).get("state", ""))
+    supporting_weight = sum(evidence_weight(regime, item["family"]) for item in supporting)
+    counter_weight = sum(evidence_weight(regime, item["family"]) for item in counter)
+    supporting.sort(key=lambda item: evidence_weight(regime, item["family"]), reverse=True)
+    counter.sort(key=lambda item: evidence_weight(regime, item["family"]), reverse=True)
+    weight_note = f"Rejime göre ağırlıklı kanıt {supporting_weight:.1f}, karşı kanıt {counter_weight:.1f}."
+    if counter_weight <= 1.0 and supporting_weight >= 4.0:
+        clarity = {"state": "Yüksek", "tone": "positive", "reason": f"Rejimde ağırlığı yüksek aileler aynı yönde. {weight_note}"}
+    elif counter_weight >= supporting_weight * 0.8:
+        clarity = {"state": "Düşük", "tone": "warning", "reason": f"Rejimde ağırlığı yüksek aileler belirgin biçimde ayrışıyor. {weight_note}"}
     else:
-        clarity = {"state": "Orta", "tone": "neutral", "reason": "Ana yön mevcut ancak bazı katmanlar teyidi sınırlıyor."}
+        clarity = {"state": "Orta", "tone": "neutral", "reason": f"Ana okuma mevcut ancak bazı katmanlar teyidi sınırlıyor. {weight_note}"}
+    clarity["supporting_weight"] = round(supporting_weight, 2)
+    clarity["counter_weight"] = round(counter_weight, 2)
     return supporting[:4], counter[:4], clarity
 
 
@@ -229,6 +260,7 @@ def _analyst_note(
     context: dict[str, Any],
     decision: dict[str, Any],
     scenario: dict[str, list[str]],
+    reconciliation: str = "",
 ) -> str:
     semantic = context.get("semantic", {})
     trend = semantic.get("trend_quality", {}).get("summary", "Trend kalitesi hesaplanamadı.")
@@ -248,10 +280,30 @@ def _analyst_note(
     strengthen_first = scenario["strengthen"][0].rstrip(". ")
     weaken_first = scenario["weaken"][0].rstrip(". ")
     closing = f"Mevcut okumayı teyit edecek ilk koşul: {strengthen_first}. Okumayı geçersizleştirecek ilk koşul: {weaken_first}."
-    return (
-        f"{opening} {trend} {momentum}{divergence_text} {price_action} {participation} "
-        f"{location} {rs} {closing}"
-    )
+    setup_context = context.get("setup_context", {})
+    setup = setup_context.get("setup", {})
+    duration = setup_context.get("duration", {})
+    participation_reading = setup_context.get("participation_reading", {})
+    if participation_reading.get("meaning"):
+        participation = participation_reading["meaning"]
+    setup_paragraph = ""
+    if setup:
+        reasons = "; ".join(setup.get("reasons", [])[:3])
+        setup_paragraph = (
+            f"Kurulum: {setup['name']} (eğilim: {setup['bias']}). {setup['description']}"
+            + (f" Bu sınıflamanın dayanağı: {reasons}." if reasons else "")
+        )
+    duration_paragraph = ""
+    if duration.get("summary") and duration["summary"] != "Belirgin bir süre birikimi yok":
+        duration_paragraph = f"Süre bağlamı: {duration['summary']}."
+    paragraphs = [
+        f"{opening} {setup_paragraph}".strip(),
+        f"{trend} {momentum}{divergence_text}".strip(),
+        f"{price_action} {participation} {duration_paragraph}".strip(),
+        f"{location} {rs}".strip(),
+        f"{reconciliation} {closing}".strip() if reconciliation else closing,
+    ]
+    return "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
 
 
 def build_technical_commentary(
@@ -270,9 +322,13 @@ def build_technical_commentary(
     scenario = _scenario_map(context, decision, direction_tone, levels)
     supporting, counter, clarity = _evidence_and_clarity(context, decision, direction_tone, bar_state)
     changes = _changes(data, context)
-    analyst_note = _analyst_note(opening, context, decision, scenario)
+    reconciliation = reconcile(context.get("setup_context", {}).get("setup", {"name": direction}), supporting, counter)
+    analyst_note = _analyst_note(opening, context, decision, scenario, reconciliation)
     rs_state, rs_tone, rs_meaning = _rs_text(decision)
+    setup_context = context.get("setup_context", {})
+    setup = setup_context.get("setup", {})
     state_map = [
+        ["Kurulum", setup.get("name", "—"), f"Eğilim: {setup.get('bias', '—')}", f"{setup.get('description', '—')} {setup_context.get('duration', {}).get('summary', '')}".strip(), setup.get("tone", "warning")],
         ["Rejim", regime, f"ADX Δ {adx_delta:+.2f}", opening, context.get("regime", {}).get("tone", "warning")],
         ["Yapı / trend", direction, semantic.get("trend_quality", {}).get("spread_state", "—"), semantic.get("trend_quality", {}).get("summary", "—"), direction_tone],
         ["Momentum", semantic.get("momentum_character", {}).get("state", "—"), semantic.get("momentum_character", {}).get("macd", {}).get("histogram_character", "—"), semantic.get("momentum_character", {}).get("summary", "—"), semantic.get("momentum_character", {}).get("tone", "warning")],
@@ -287,16 +343,19 @@ def build_technical_commentary(
             "🧭 Analist Notu",
             analyst_note,
             "",
+            "⚖️ Neden bu okuma?",
+            reconciliation,
+            "",
             "🔄 Dünden Bugüne",
             *[f"• {item}" for item in changes],
             "",
-            "✅ Görünümü güçlendirecek",
+            f"✅ {scenario['labels']['strengthen']}",
             *[f"• {item}" for item in scenario["strengthen"]],
             "",
-            "⚠️ Görünümü zayıflatacak",
+            f"⚠️ {scenario['labels']['weaken']}",
             *[f"• {item}" for item in scenario["weaken"]],
             "",
-            "↔️ Nötr tutacak",
+            f"↔️ {scenario['labels']['neutral']}",
             *[f"• {item}" for item in scenario["neutral"]],
             "",
             f"Okuma netliği: {clarity['state']} — {clarity['reason']}",
@@ -304,7 +363,10 @@ def build_technical_commentary(
         ]
     )
     return {
-        "version": "2.0",
+        "version": "2.1",
+        "setup": setup,
+        "duration": setup_context.get("duration", {}),
+        "reconciliation": reconciliation,
         "stance": stance,
         "tone": tone,
         "headline": headline,

@@ -78,7 +78,7 @@ def decision() -> dict:
 class TechnicalCommentaryV2Tests(unittest.TestCase):
     def test_squeeze_requires_expansion_and_acceptance(self) -> None:
         result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
-        self.assertEqual(result["version"], "2.0")
+        self.assertEqual(result["version"], "2.1")
         self.assertIn("Denge / teyit bekliyor", result["stance"])
         self.assertIn("bant genişlemesi", result["headline"])
         self.assertTrue(any("Bantlar genişlemeden" in item for item in result["scenario_map"]["neutral"]))
@@ -93,7 +93,7 @@ class TechnicalCommentaryV2Tests(unittest.TestCase):
     def test_method_uses_independent_families_without_vote_score(self) -> None:
         result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
         self.assertIn("birleşik AL/SAT puanı üretmez", result["method"])
-        self.assertEqual(len(result["state_map"]), 7)
+        self.assertEqual(len(result["state_map"]), 8)
         self.assertNotIn("/4", result["analyst_note"])
         self.assertIn(result["clarity"]["state"], {"Yüksek", "Orta", "Düşük"})
 

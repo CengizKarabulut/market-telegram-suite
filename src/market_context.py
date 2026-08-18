@@ -8,6 +8,7 @@ import pandas as pd
 
 from src.divergence import detect_divergences
 from src.semantic_features import build_semantic_features
+from src.setup_recognition import build_setup_context
 
 
 def _number(value: Any, default: float = math.nan) -> float:
@@ -619,13 +620,22 @@ def build_market_context(
     ma_state = " | ".join(f"{name} {item['above']}/{item['total']}" for name, item in ma_groups.items())
     location_state = profile["position"]
 
+    setup_context = build_setup_context(
+        data,
+        {"regime": {"state": regime, "adx": adx}, "structure": structure, "profile": profile},
+        semantic,
+    )
+    setup = setup_context["setup"]
+    participation_reading = setup_context["participation_reading"]
+
     families = [
+        ["KURULUM", setup["name"], f"Eğilim: {setup['bias']} | {setup_context['duration']['summary']}", setup["tone"]],
         ["REJİM", regime, f"Aday {current_candidate} | ADX Δ {adx_delta:+.2f} | Spread Δ {spread_delta:+.3f}", regime_tone],
         ["YAPI", structure["state"], structure["event"], structure["tone"]],
         ["KONUM", location_state, profile["developing_acceptance"], profile["tone"]],
         ["TREND", ma_state, f"EMA spread %{ma_spread_pct:.2f} | perc %{ma_spread_rank:.0f}", "positive" if ma_above >= 10 else "negative" if ma_above <= 5 else "warning"],
         ["MOMENTUM", momentum_state, momentum_headline, momentum_tone],
-        ["KATILIM", volume_state, f"RVOL 1b {participation_feature['rvol_1']:.2f}x | 3b {participation_feature['rvol_3_average']:.2f}x | Delta tah. %{flow['delta_pct']:.1f}", volume_tone],
+        ["KATILIM", participation_reading["state"], f"RVOL 1b {participation_feature['rvol_1']:.2f}x | 3b {participation_feature['rvol_3_average']:.2f}x | Delta tah. %{flow['delta_pct']:.1f}", participation_reading["tone"]],
         ["VOLATİLİTE", volatility_state, f"BB perc %{bb_rank:.0f}", volatility_tone],
     ]
 
@@ -665,6 +675,7 @@ def build_market_context(
         "order_flow_proxy": flow,
         "relative_volume": rvol,
         "semantic": semantic,
+        "setup_context": setup_context,
         "ma_structure": {"above": ma_above, "rising": ma_rising, "total": len(valid_ma), "spread_pct": ma_spread_pct, "spread_percentile": ma_spread_rank, "groups": ma_groups},
         "divergences": divergences,
         "location_rows": location_rows,
