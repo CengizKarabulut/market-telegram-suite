@@ -30,12 +30,12 @@ LIGHT_RED = "#ef4444"
 YELLOW = "#eab308"
 GRAY = "#64748b"
 
-CARD_WIDTH_INCHES = 10.0
+CARD_WIDTH_INCHES = 12.0
 DPI = 100
-MARGIN = 0.55
-LINE_HEIGHT = 0.285
-TITLE_HEIGHT = 0.52
-SECTION_GAP = 0.26
+MARGIN = 0.66
+LINE_HEIGHT = 0.342
+TITLE_HEIGHT = 0.62
+SECTION_GAP = 0.31
 
 
 def tone_colour(tone: str) -> str:
@@ -83,20 +83,20 @@ def _summary_blocks(commentary: dict[str, Any]) -> list[_Block]:
     clarity = commentary.get("clarity", {})
     duration = commentary.get("duration", {}).get("summary", "")
     blocks = [
-        _Block("section", "SADE ÖZET", 19, ACCENT),
-        _Block("body", plain.get("text", "—"), 17, WHITE),
+        _Block("section", "SADE ÖZET", 23, ACCENT),
+        _Block("body", plain.get("text", "—"), 20, WHITE),
         _Block("gap", "", 12, WHITE),
-        _Block("section", "KURULUM", 19, ACCENT),
-        _Block("body", f"{setup.get('name', '—')}  •  eğilim: {setup.get('bias', '—')}", 18, tone_colour(setup.get("tone", "neutral")), "bold"),
+        _Block("section", "KURULUM", 23, ACCENT),
+        _Block("body", f"{setup.get('name', '—')}  •  eğilim: {setup.get('bias', '—')}", 22, tone_colour(setup.get("tone", "neutral")), "bold"),
     ]
     if setup.get("description"):
-        blocks.append(_Block("body", setup["description"], 15, MUTED))
+        blocks.append(_Block("body", setup["description"], 18, MUTED))
     if duration and duration != "Belirgin bir süre birikimi yok":
         blocks.append(_Block("gap", "", 12, WHITE))
-        blocks.append(_Block("body", f"Süre bağlamı: {duration}.", 15, MUTED))
+        blocks.append(_Block("body", f"Süre bağlamı: {duration}.", 18, MUTED))
     blocks.append(_Block("gap", "", 12, WHITE))
     blocks.append(
-        _Block("body", f"Okuma netliği: {clarity.get('state', '—')} — {clarity.get('reason', '')}", 15, tone_colour(clarity.get("tone", "neutral")))
+        _Block("body", f"Okuma netliği: {clarity.get('state', '—')} — {clarity.get('reason', '')}", 18, tone_colour(clarity.get("tone", "neutral")))
     )
     return blocks
 
@@ -109,21 +109,21 @@ def _note_blocks(commentary: dict[str, Any]) -> list[_Block]:
     if setup.get("name") and len(paragraphs) > 1:
         paragraphs = paragraphs[1:]
     if paragraphs:
-        blocks.append(_Block("section", "ANALİST NOTU", 19, ACCENT))
+        blocks.append(_Block("section", "ANALİST NOTU", 23, ACCENT))
         for paragraph in paragraphs:
-            blocks.append(_Block("body", paragraph, 15, WHITE))
+            blocks.append(_Block("body", paragraph, 18, WHITE))
             blocks.append(_Block("gap", "", 11, WHITE))
-    blocks.append(_Block("section", "NEDEN BU OKUMA?", 19, ACCENT))
-    blocks.append(_Block("body", commentary.get("reconciliation", "—"), 15, MUTED))
+    blocks.append(_Block("section", "NEDEN BU OKUMA?", 23, ACCENT))
+    blocks.append(_Block("body", commentary.get("reconciliation", "—"), 18, MUTED))
     supporting = commentary.get("supporting_evidence", [])
     counter = commentary.get("counter_evidence", [])
     if supporting or counter:
         blocks.append(_Block("gap", "", 12, WHITE))
-        blocks.append(_Block("section", "KANIT DENGESİ", 19, ACCENT))
+        blocks.append(_Block("section", "KANIT DENGESİ", 23, ACCENT))
         for item in supporting:
-            blocks.append(_Block("body", f"▲  {item['family']}: {item['state']}", 15, LIGHT_GREEN))
+            blocks.append(_Block("body", f"▲  {item['family']}: {item['state']}", 18, LIGHT_GREEN))
         for item in counter:
-            blocks.append(_Block("body", f"▼  {item['family']}: {item['state']}", 15, LIGHT_RED))
+            blocks.append(_Block("body", f"▼  {item['family']}: {item['state']}", 18, LIGHT_RED))
     return blocks
 
 
@@ -135,14 +135,16 @@ def _level_blocks(commentary: dict[str, Any]) -> list[_Block]:
     clusters = commentary.get("levels", {}).get("clusters", [])
     blocks: list[_Block] = []
     if clusters:
-        blocks.append(_Block("section", "TEKNİK YOĞUNLAŞMA BÖLGELERİ", 19, ACCENT))
+        blocks.append(_Block("section", "TEKNİK YOĞUNLAŞMA BÖLGELERİ", 23, ACCENT))
         for cluster in clusters[:4]:
             members = ", ".join(cluster.get("members", [])[:5])
+            low, high = float(cluster["low"]), float(cluster["high"])
+            span = f"{low:,.2f}" if abs(high - low) < 0.005 else f"{low:,.2f} – {high:,.2f}"
             blocks.append(
                 _Block(
                     "body",
-                    f"{cluster['low']:,.2f} – {cluster['high']:,.2f}   {cluster.get('side', '')} ({cluster.get('strength', '')})   →  {members}",
-                    15,
+                    f"{span}   {cluster.get('side', '')} ({cluster.get('strength', '')})   →  {members}",
+                    18,
                     MUTED,
                 )
             )
@@ -152,20 +154,20 @@ def _level_blocks(commentary: dict[str, Any]) -> list[_Block]:
         items = scenario.get(key, [])
         if not items:
             continue
-        blocks.append(_Block("section", str(labels.get(key, key)).upper(), 18, ACCENT))
+        blocks.append(_Block("section", str(labels.get(key, key)).upper(), 22, ACCENT))
         for item in items:
             if two_sided and key == "strengthen":
                 lowered = item.casefold()
                 line_colour = LIGHT_GREEN if "yukarı" in lowered else LIGHT_RED if "aşağı" in lowered else MUTED
             else:
                 line_colour = colour
-            blocks.append(_Block("body", f"•  {item}", 15, line_colour))
+            blocks.append(_Block("body", f"•  {item}", 18, line_colour))
         blocks.append(_Block("gap", "", 12, WHITE))
     changes = commentary.get("changes", [])
     if changes:
-        blocks.append(_Block("section", "DÜNDEN BUGÜNE", 18, ACCENT))
+        blocks.append(_Block("section", "DÜNDEN BUGÜNE", 22, ACCENT))
         for item in changes[:4]:
-            blocks.append(_Block("body", f"•  {item}", 15, MUTED))
+            blocks.append(_Block("body", f"•  {item}", 18, MUTED))
     return blocks
 
 
@@ -176,11 +178,11 @@ def _overview_blocks(commentary: dict[str, Any]) -> list[_Block]:
     counter = commentary.get("counter_evidence", [])
     if supporting or counter:
         blocks.append(_Block("gap", "", 12, WHITE))
-        blocks.append(_Block("section", "KANIT DENGESİ", 19, ACCENT))
+        blocks.append(_Block("section", "KANIT DENGESİ", 23, ACCENT))
         for item in supporting:
-            blocks.append(_Block("body", f"▲  {item['family']}: {item['state']}", 15, LIGHT_GREEN))
+            blocks.append(_Block("body", f"▲  {item['family']}: {item['state']}", 18, LIGHT_GREEN))
         for item in counter:
-            blocks.append(_Block("body", f"▼  {item['family']}: {item['state']}", 15, LIGHT_RED))
+            blocks.append(_Block("body", f"▼  {item['family']}: {item['state']}", 18, LIGHT_RED))
     return blocks
 
 
@@ -220,7 +222,7 @@ def render_analyst_card(status: dict[str, Any], output: Path, blocks: list[_Bloc
     text_width = CARD_WIDTH_INCHES - 2 * MARGIN
     blocks = _blocks(status) if blocks is None else blocks
     heights = [block.measure(text_width) for block in blocks]
-    header_height = 1.55
+    header_height = 1.86
     total = header_height + sum(heights) + 2 * MARGIN
 
     figure = plt.figure(figsize=(CARD_WIDTH_INCHES, total), dpi=DPI, facecolor=BG)
@@ -246,37 +248,37 @@ def render_analyst_card(status: dict[str, Any], output: Path, blocks: list[_Bloc
     change = status.get("change_pct", 0.0)
     bar_state = status.get("bar_state", {})
     heading = f"{symbol} — {page_label}" if page_label else f"{symbol} — Analist Kartı"
-    axes.text(MARGIN, cursor - 0.28, heading, color=WHITE, fontsize=30, fontweight="bold", va="top")
-    cursor -= 0.78
+    axes.text(MARGIN, cursor - 0.34, heading, color=WHITE, fontsize=36, fontweight="bold", va="top")
+    cursor -= 0.94
     change_colour = LIGHT_GREEN if change >= 0 else LIGHT_RED
-    axes.text(MARGIN, cursor - 0.18, f"{price:,.2f}", color=WHITE, fontsize=24, fontweight="bold", va="top")
-    axes.text(MARGIN + 1.70, cursor - 0.22, f"{change:+.2f}%", color=change_colour, fontsize=20, fontweight="bold", va="top")
+    axes.text(MARGIN, cursor - 0.18, f"{price:,.2f}", color=WHITE, fontsize=29, fontweight="bold", va="top")
+    axes.text(MARGIN + 2.05, cursor - 0.26, f"{change:+.2f}%", color=change_colour, fontsize=24, fontweight="bold", va="top")
     axes.text(
-        MARGIN + 3.35,
-        cursor - 0.16,
+        MARGIN + 4.02,
+        cursor - 0.19,
         bar_state_plain(bar_state),
         color=MUTED,
+        fontsize=14,
+        va="top",
+    )
+    axes.text(
+        MARGIN + 4.02,
+        cursor - 0.50,
+        f"{status.get('timestamp', '—')}  |  {status.get('data_provider', '—')}",
+        color=GRAY,
         fontsize=12,
         va="top",
     )
-    axes.text(
-        MARGIN + 3.35,
-        cursor - 0.42,
-        f"{status.get('timestamp', '—')}  |  {status.get('data_provider', '—')}",
-        color=GRAY,
-        fontsize=10,
-        va="top",
-    )
-    cursor -= 0.62
+    cursor -= 0.74
     axes.plot([MARGIN, CARD_WIDTH_INCHES - MARGIN], [cursor, cursor], color="#233046", linewidth=1.4)
-    cursor -= 0.18
+    cursor -= 0.22
 
     for block, height in zip(blocks, heights, strict=True):
         if block.kind == "gap":
             cursor -= height
             continue
         if block.kind == "section":
-            axes.text(MARGIN, cursor - 0.20, block.text, color=block.colour, fontsize=block.font_size, fontweight="bold", va="top")
+            axes.text(MARGIN, cursor - 0.24, block.text, color=block.colour, fontsize=block.font_size, fontweight="bold", va="top")
             cursor -= height
             continue
         step = LINE_HEIGHT * (block.font_size / 12.0)

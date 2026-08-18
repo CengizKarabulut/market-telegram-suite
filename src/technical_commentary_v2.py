@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 import pandas as pd
@@ -153,6 +154,20 @@ def _changes(data: pd.DataFrame, context: dict[str, Any]) -> list[str]:
     return changes[:5] or ["Son barda ana teknik sınıflamayı değiştiren yeni bir olay oluşmadı."]
 
 
+def _threshold_distance(text: str, price: float) -> float:
+    """Senaryo metnindeki seviyenin fiyata uzaklığını bulur; yakın eşikler öne alınır."""
+    distances = []
+    for token in re.findall(r"\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?", text):
+        cleaned = token.replace(",", "") if token.count(".") == 1 and "," in token else token.replace(",", ".")
+        try:
+            value = float(cleaned)
+        except ValueError:
+            continue
+        if price * 0.5 <= value <= price * 2.0:
+            distances.append(abs(value - price) / price)
+    return min(distances) if distances else math.inf
+
+
 def _scenario_map(
     context: dict[str, Any],
     decision: dict[str, Any],
@@ -202,6 +217,10 @@ def _scenario_map(
         if bias == "iki yönlü"
         else {"strengthen": "Mevcut okumayı teyit edecek gelişmeler", "weaken": "Mevcut okumayı zayıflatacak gelişmeler", "neutral": "Durumu nötr tutacak gelişmeler"}
     )
+    price = _number(context.get("last_price"))
+    if math.isfinite(price):
+        strengthen.sort(key=lambda item: _threshold_distance(item, price))
+        weaken.sort(key=lambda item: _threshold_distance(item, price))
     return {"strengthen": strengthen[:3], "weaken": weaken[:3], "neutral": neutral[:3], "labels": labels}
 
 

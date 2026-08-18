@@ -119,3 +119,57 @@ class TestTableWrapping(unittest.TestCase):
         self.assertLess(capacities[0], capacities[1])
         self.assertLess(capacities[1], capacities[2])
         self.assertTrue(all(capacity >= 8 for capacity in capacities))
+
+
+class PageConsistencyTests(unittest.TestCase):
+    def test_all_four_images_share_the_same_width(self) -> None:
+        import numpy as np
+        import pandas as pd
+        from PIL import Image
+
+        from src.analyst_card import render_analyst_cards
+        from src.stock_dashboard import (
+            ScanConfig,
+            build_status,
+            calculate_indicators,
+            render_report_pages,
+        )
+
+        rng = np.random.default_rng(3)
+        bars = 300
+        index = pd.bdate_range("2024-01-01", periods=bars)
+        close = 300 * np.exp(np.cumsum(rng.normal(0, 0.015, bars)))
+        frame = pd.DataFrame(
+            {
+                "Open": close,
+                "High": close * 1.01,
+                "Low": close * 0.99,
+                "Close": close,
+                "Volume": rng.lognormal(16, 0.3, bars),
+            },
+            index=index,
+        )
+        data = calculate_indicators(frame)
+        status = build_status(data, ScanConfig(ticker="TEST"), "TEST")
+        with tempfile.TemporaryDirectory() as directory:
+            paths = render_report_pages(data, status, Path(directory)) + render_analyst_cards(status, Path(directory))
+            widths = {Image.open(path).size[0] for path in paths}
+            self.assertEqual(len(paths), 4)
+            self.assertEqual(len(widths), 1, f"Görsel genişlikleri aynı olmalı, bulunan: {widths}")
+
+    def test_estimated_table_height_grows_with_wrapped_text(self) -> None:
+        from src.stock_dashboard import estimate_table_height
+
+        short_rows = [["A", "kısa", "kısa"]]
+        long_rows = [["A", "kısa", "çok uzun bir metin " * 15]]
+        self.assertGreater(
+            estimate_table_height(long_rows, [0.2, 0.3, 0.5], 11, 11.0),
+            estimate_table_height(short_rows, [0.2, 0.3, 0.5], 11, 11.0),
+        )
+
+    def test_multiline_cells_are_summed_not_maxed(self) -> None:
+        from src.stock_dashboard import estimate_table_height
+
+        single = estimate_table_height([["A", "satır", "satır"]], [0.2, 0.3, 0.5], 11, 11.0)
+        multi = estimate_table_height([["A", "satır", "satır\nsatır\nsatır"]], [0.2, 0.3, 0.5], 11, 11.0)
+        self.assertGreater(multi, single)

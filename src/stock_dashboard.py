@@ -36,6 +36,8 @@ from src.telegram_client import (
     send_report_pages,
 )
 
+PAGE_WIDTH_INCHES = 12.0
+PAGE_DPI = 100
 MA_PERIODS = [5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
 # Grafikte ve trend analizinde öne çıkarılan Fibonacci üçlüsü.
 KEY_EMA_PERIODS = (21, 55, 233)
@@ -635,6 +637,7 @@ def build_status(
         bar_state,
     )
     context["symbol"] = symbol
+    context["last_price"] = price
     context["change_pct"] = (price / float(previous["Close"]) - 1) * 100
     commentary = build_technical_commentary(data, context, decision, bar_state)
     executive = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["families"]]
@@ -649,7 +652,7 @@ def build_status(
     free_float_text = fmt(liquidity.get("free_float_pct")) + "%" if liquidity.get("free_float_pct") is not None else "—"
     risk = decision["risk_reference"]
     risk_values = (
-        f"Mesafe {fmt(risk.get('distance'))} | Long ref. {fmt(risk.get('long_reference_stop'))} / 2R {fmt(risk.get('long_reference_2r'))}"
+        f"Mesafe {fmt(risk.get('distance'))} | Yukarı ref. {fmt(risk.get('long_reference_stop'))}↓ / {fmt(risk.get('long_reference_2r'))}↑ | Aşağı ref. {fmt(risk.get('short_reference_stop'))}↑ / {fmt(risk.get('short_reference_2r'))}↓"
         if risk.get("available")
         else "ATR referansı hesaplanamadı"
     )
@@ -748,6 +751,38 @@ def draw_table(ax: plt.Axes, title: str, columns: list[str], rows: list[list[str
         table.auto_set_column_width(col=list(range(len(columns))))
 
 
+def estimate_table_height(rows: list[list[str]], col_widths: list[float] | None, font_size: int, width_inches: float) -> float:
+    """Tablonun sarma sonrası kaç satır tutacağını tahmin ederek inç cinsinden yükseklik verir."""
+    columns = len(col_widths) if col_widths else (len(rows[0]) if rows else 1)
+    widths = col_widths or [1.0 / columns] * columns
+    average_char_pt = font_size * 0.58
+    capacities = [max(int((width_inches * 72 * width) / average_char_pt) - 2, 8) for width in widths]
+    total_lines = 2.0
+    for row in rows:
+        row_lines = 1
+        for index, value in enumerate(row):
+            capacity = capacities[index] if index < len(capacities) else capacities[-1]
+            cell_lines = sum(max(-(-len(paragraph) // capacity), 1) for paragraph in str(value).split("\n"))
+            row_lines = max(row_lines, cell_lines)
+        total_lines += row_lines + 0.6
+    return total_lines * font_size * 1.75 / 72 + 0.55
+
+
+def _draw_page_header(figure: plt.Figure, grid, status: dict[str, Any], subtitle: str) -> None:
+    """Dar sayfa düzenine uygun, satırları üst üste binmeyen başlık."""
+    header = figure.add_subplot(grid[0, :])
+    header.set_facecolor(BG)
+    header.axis("off")
+    change_color = LIGHT_GREEN if status["change_pct"] >= 0 else LIGHT_RED
+    header.text(0.0, 0.92, f"{status['symbol']} — Technical Market State", color=WHITE, fontsize=20, fontweight="bold", va="top")
+    header.text(1.0, 0.93, subtitle, color=MUTED, fontsize=11, fontweight="bold", ha="right", va="top")
+    header.text(0.0, 0.56, f"Fiyat: {fmt(status['price'])}", color=WHITE, fontsize=16, fontweight="bold", va="top")
+    header.text(0.22, 0.56, f"Değişim: {status['change_pct']:+.2f}%", color=change_color, fontsize=15, fontweight="bold", va="top")
+    bar_color = YELLOW if status["bar_state"]["is_live"] else LIGHT_GREEN
+    header.text(0.0, 0.28, f"Bar: {status['timestamp']} | {status['interval']} | {status['bar_state']['label']} ({bar_state_plain(status['bar_state']).casefold()})", color=bar_color, fontsize=11, fontweight="bold", va="top")
+    header.text(0.0, 0.10, f"Kaynak: {status['data_provider']} | Warm-up: {status['download_period']} | Durum raporudur; otomatik AL/SAT puanı değildir. Yatırım tavsiyesi değildir.", color=MUTED, fontsize=10, va="top")
+
+
 def _draw_header(figure: plt.Figure, grid, status: dict[str, Any], subtitle: str = "") -> None:
     """Her rapor sayfasının üst bilgisini çizer."""
     header = figure.add_subplot(grid[0, :])
@@ -770,23 +805,28 @@ def render_report_page_one(data: pd.DataFrame, status: dict[str, Any], output: P
     """1. sayfa: durum haritası, karar bağlamı, katmanlı yorum ve fiyat grafiği."""
     output.parent.mkdir(parents=True, exist_ok=True)
     plt.rcParams["font.family"] = "DejaVu Sans"
-    figure = plt.figure(figsize=(18, 22), dpi=120, facecolor=BG)
-    grid = figure.add_gridspec(5, 2, height_ratios=[0.7, 2.2, 1.8, 2.8, 3.0], hspace=0.28, wspace=0.14)
-    _draw_header(figure, grid, status, "Sayfa 1/2 — Durum ve Grafik")
+    text_width = PAGE_WIDTH_INCHES - 1.0
+    executive_height = estimate_table_height([[item[0], item[1], item[2]] for item in status["executive"]], [0.16, 0.38, 0.46], 13, text_width)
+    decision_height = estimate_table_height([[item[0], item[1], item[2]] for item in status["decision_rows"]], [0.16, 0.46, 0.38], 12, text_width)
+    commentary_height = estimate_table_height([[item[0], item[1], item[2]] for item in status["technical_commentary"]["visual_rows"]], [0.15, 0.22, 0.63], 12, text_width)
+    heights = [1.5, executive_height, decision_height, commentary_height, 6.5]
+    figure = plt.figure(figsize=(PAGE_WIDTH_INCHES, sum(heights) + 1.2), dpi=PAGE_DPI, facecolor=BG)
+    grid = figure.add_gridspec(5, 1, height_ratios=heights, hspace=0.30, top=0.985, bottom=0.012, left=0.035, right=0.972)
+    _draw_page_header(figure, grid, status, "Sayfa 1/2 — Durum ve Grafik")
     executive_ax = figure.add_subplot(grid[1, :])
     executive_rows = [[item[0], item[1], item[2]] for item in status["executive"]]
     executive_colors = [[HEADER, tone_color(item[3]), PANEL] for item in status["executive"]]
-    draw_table(executive_ax, "Piyasa Durum Haritası", ["Aile", "Durum", "Bağlam"], executive_rows, executive_colors, font_size=11, col_widths=[0.16, 0.38, 0.46])
+    draw_table(executive_ax, "Piyasa Durum Haritası", ["Aile", "Durum", "Bağlam"], executive_rows, executive_colors, font_size=13, col_widths=[0.16, 0.38, 0.46])
 
     decision_ax = figure.add_subplot(grid[2, :])
     decision_rows = [[item[0], item[1], item[2]] for item in status["decision_rows"]]
     decision_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["decision_rows"]]
-    draw_table(decision_ax, "Karar Bağlamı • RS • MTF • Likidite • Risk", ["Alan", "Değerler", "Durum"], decision_rows, decision_colors, font_size=9, col_widths=[0.16, 0.46, 0.38])
+    draw_table(decision_ax, "Karar Bağlamı • RS • MTF • Likidite • Risk", ["Alan", "Değerler", "Durum"], decision_rows, decision_colors, font_size=12, col_widths=[0.16, 0.46, 0.38])
 
     commentary_ax = figure.add_subplot(grid[3, :])
     commentary_rows = [[item[0], item[1], item[2]] for item in status["technical_commentary"]["visual_rows"]]
     commentary_colors = [[HEADER, tone_color(item[3]), PANEL] for item in status["technical_commentary"]["visual_rows"]]
-    draw_table(commentary_ax, "Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", ["Katman", "Durum", "Yorum"], commentary_rows, commentary_colors, font_size=8, col_widths=[0.15, 0.22, 0.63])
+    draw_table(commentary_ax, "Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", ["Katman", "Durum", "Yorum"], commentary_rows, commentary_colors, font_size=12, col_widths=[0.15, 0.22, 0.63])
 
     chart = figure.add_subplot(grid[4, :])
     chart.set_facecolor(PANEL)
@@ -808,7 +848,7 @@ def render_report_page_one(data: pd.DataFrame, status: dict[str, Any], output: P
     chart.set_title("Fiyat • Ortalamalar • Bollinger • Yaklaşık Hacim Profili — Son 120 Bar", color=WHITE, fontsize=15, fontweight="bold", loc="left")
 
 
-    figure.savefig(output, facecolor=figure.get_facecolor(), bbox_inches="tight")
+    figure.savefig(output, facecolor=figure.get_facecolor())
     plt.close(figure)
     return output
 
@@ -817,10 +857,20 @@ def render_report_page_two(data: pd.DataFrame, status: dict[str, Any], output: P
     """2. sayfa: gösterge tabloları ve teyitli olaylar."""
     output.parent.mkdir(parents=True, exist_ok=True)
     plt.rcParams["font.family"] = "DejaVu Sans"
-    figure = plt.figure(figsize=(18, 21), dpi=120, facecolor=BG)
-    grid = figure.add_gridspec(4, 2, height_ratios=[0.7, 4.4, 4.2, 5.0], hspace=0.28, wspace=0.14)
-    _draw_header(figure, grid, status, "Sayfa 2/2 — Gösterge Tabloları")
-    ma_ax = figure.add_subplot(grid[1, 0])
+    text_width = PAGE_WIDTH_INCHES - 1.0
+    panel_heights = [
+        estimate_table_height([[str(item["period"]), "000.00 ▼ 0.0 ATR", "000.00 ▼ 0.0 ATR"] for item in status["ma"]], [0.20, 0.40, 0.40], 13, text_width),
+        estimate_table_height([[item[0], item[1], item[2]] for item in status["momentum"]], [0.12, 0.38, 0.50], 11, text_width),
+        estimate_table_height([[item[0], item[1], item[2]] for item in status["trend_volatility_volume"]], [0.14, 0.31, 0.55], 11, text_width),
+        estimate_table_height([[item[0], item[1], item[2]] for item in status["location"]], [0.14, 0.52, 0.34], 11, text_width),
+        estimate_table_height([[item[0], item[1], item[2]] for item in status["participation"]], [0.14, 0.34, 0.52], 11, text_width),
+        estimate_table_height([[item[0], item[1], item[2]] for item in status["events"]], [0.50, 0.24, 0.26], 11, text_width),
+    ]
+    heights = [1.5, *panel_heights]
+    figure = plt.figure(figsize=(PAGE_WIDTH_INCHES, sum(heights) + 1.2), dpi=PAGE_DPI, facecolor=BG)
+    grid = figure.add_gridspec(7, 1, height_ratios=heights, hspace=0.30, top=0.985, bottom=0.012, left=0.035, right=0.972)
+    _draw_page_header(figure, grid, status, "Sayfa 2/2 — Gösterge Tabloları")
+    ma_ax = figure.add_subplot(grid[1, :])
     def ma_cell(value: Any, relation: str) -> str:
         """Değerin yanına yön oku ve ATR mesafesini yazar; renk tek bilgi kanalı kalmasın."""
         marker = relation.split(" ")[0] if relation[:1] in {"▲", "▼"} else "="
@@ -832,36 +882,36 @@ def render_report_page_two(data: pd.DataFrame, status: dict[str, Any], output: P
         for item in status["ma"]
     ]
     ma_colors = [[HEADER, item["sma_color"], item["ema_color"]] for item in status["ma"]]
-    draw_table(ma_ax, "SMA / EMA Değerleri", ["Periyot", "SMA", "EMA"], ma_rows, ma_colors, font_size=10, col_widths=[0.20, 0.40, 0.40])
+    draw_table(ma_ax, "SMA / EMA Değerleri", ["Periyot", "SMA", "EMA"], ma_rows, ma_colors, font_size=13, col_widths=[0.20, 0.40, 0.40])
     ma_ax.text(0, -0.035, f"▲ yeşil: fiyat ortalamanın üstünde | sarı: ±%{status['equality_tolerance_pct']:.2f} yakın | ▼ kırmızı: altında. Ton koyuluğu ATR cinsinden mesafeyle artar.", transform=ma_ax.transAxes, color=MUTED, fontsize=8)
 
-    momentum_ax = figure.add_subplot(grid[1, 1])
+    momentum_ax = figure.add_subplot(grid[2, :])
     momentum_rows = [[item[0], item[1], item[2]] for item in status["momentum"]]
     momentum_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["momentum"]]
-    draw_table(momentum_ax, "Momentum • Kesişim • Eğim", ["Gösterge", "Değerler", "Durum"], momentum_rows, momentum_colors, font_size=7, col_widths=[0.12, 0.38, 0.50])
+    draw_table(momentum_ax, "Momentum • Kesişim • Eğim", ["Gösterge", "Değerler", "Durum"], momentum_rows, momentum_colors, font_size=11, col_widths=[0.12, 0.38, 0.50])
 
-    trend_ax = figure.add_subplot(grid[2, 0])
+    trend_ax = figure.add_subplot(grid[3, :])
     trend_rows = [[item[0], item[1], item[2]] for item in status["trend_volatility_volume"]]
     trend_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["trend_volatility_volume"]]
-    draw_table(trend_ax, "Trend • Volatilite • Hacim", ["Gösterge", "Değerler", "Durum"], trend_rows, trend_colors, font_size=7, col_widths=[0.14, 0.31, 0.55])
+    draw_table(trend_ax, "Trend • Volatilite • Hacim", ["Gösterge", "Değerler", "Durum"], trend_rows, trend_colors, font_size=11, col_widths=[0.14, 0.31, 0.55])
 
-    location_ax = figure.add_subplot(grid[2, 1])
+    location_ax = figure.add_subplot(grid[4, :])
     location_rows = [[item[0], item[1], item[2]] for item in status["location"]]
     location_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["location"]]
-    draw_table(location_ax, "Konum • AVWAP • POC/VA • Yapı Seviyeleri", ["Alan", "Değerler", "Durum"], location_rows, location_colors, font_size=7, col_widths=[0.14, 0.52, 0.34])
+    draw_table(location_ax, "Konum • AVWAP • POC/VA • Yapı Seviyeleri", ["Alan", "Değerler", "Durum"], location_rows, location_colors, font_size=11, col_widths=[0.14, 0.52, 0.34])
 
-    participation_ax = figure.add_subplot(grid[3, 0])
+    participation_ax = figure.add_subplot(grid[5, :])
     participation_rows = [[item[0], item[1], item[2]] for item in status["participation"]]
     participation_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["participation"]]
-    draw_table(participation_ax, "Katılım • RVOL • Delta/CVD Tahmini", ["Alan", "Değerler", "Durum"], participation_rows, participation_colors, font_size=7, col_widths=[0.14, 0.34, 0.52])
+    draw_table(participation_ax, "Katılım • RVOL • Delta/CVD Tahmini", ["Alan", "Değerler", "Durum"], participation_rows, participation_colors, font_size=11, col_widths=[0.14, 0.34, 0.52])
 
-    events_ax = figure.add_subplot(grid[3, 1])
+    events_ax = figure.add_subplot(grid[6, :])
     event_rows = [[item[0], item[1], item[2]] for item in status["events"]]
     event_colors = [[tone_color(item[3]), PANEL, HEADER] for item in status["events"]]
-    draw_table(events_ax, "Son 12 Teyitli Olay", ["Olay", "Zaman", "Tür"], event_rows, event_colors, font_size=7, col_widths=[0.50, 0.24, 0.26])
+    draw_table(events_ax, "Son 12 Teyitli Olay", ["Olay", "Zaman", "Tür"], event_rows, event_colors, font_size=11, col_widths=[0.50, 0.24, 0.26])
 
 
-    figure.savefig(output, facecolor=figure.get_facecolor(), bbox_inches="tight")
+    figure.savefig(output, facecolor=figure.get_facecolor())
     plt.close(figure)
     return output
 
