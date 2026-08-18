@@ -121,15 +121,52 @@ def send_photo(image_path: Path, status: dict[str, Any]) -> None:
         raise RuntimeError(f"Telegram gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}")
 
 
+def text_detail_enabled() -> bool:
+    """Ayrıntılı metin mesajı varsayılan olarak kapalıdır; kart görseli onun yerini alır."""
+    return os.getenv("TELEGRAM_SEND_TEXT_DETAIL", "0").strip().lower() in {"1", "true", "yes", "evet"}
+
+
 def send_report_detail(status: dict[str, Any]) -> bool:
-    """Fotoğraf açıklamasına sığmayan V2 analist notunu ayrı mesaj olarak gönderir."""
+    """Ayrıntılı analist notunu düz metin olarak gönderir (yalnızca açıkça istendiğinde)."""
     commentary = status.get("technical_commentary", {})
     detail = str(commentary.get("telegram_detail", "")).strip()
-    if not detail:
+    if not detail or not text_detail_enabled():
         return False
     header = f"📝 {status.get('symbol', '—')} — Ayrıntılı Teknik Okuma ({status.get('timestamp', '—')})"
     send_text(f"{header}\n\n{detail}")
     return True
+
+
+def card_caption(status: dict[str, Any]) -> str:
+    """Analist kartı için kısa açıklama; ayrıntı görselin içindedir."""
+    commentary = status.get("technical_commentary", {})
+    setup = commentary.get("setup", {})
+    clarity = commentary.get("clarity", {})
+    lines = [
+        f"🗣️ {status.get('symbol', '—')} — Analist Kartı",
+        f"Kurulum: {setup.get('name', '—')} ({setup.get('bias', '—')})",
+        f"Okuma netliği: {clarity.get('state', '—')}",
+        "",
+        "Ayrıntılı okuma görselin içindedir. Yatırım tavsiyesi değildir.",
+    ]
+    return clip("\n".join(lines), CAPTION_LIMIT)
+
+
+def send_analyst_card(image_path: Path, status: dict[str, Any]) -> None:
+    """Analist kartını ikinci fotoğraf olarak gönderir."""
+    token, chat_id, thread_id = _destination()
+    payload = {"chat_id": chat_id, "caption": card_caption(status)}
+    if thread_id:
+        payload["message_thread_id"] = thread_id
+    with image_path.open("rb") as image:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendPhoto",
+            data=payload,
+            files={"photo": (image_path.name, image, "image/png")},
+            timeout=60,
+        )
+    if not response.ok:
+        raise RuntimeError(f"Telegram kart gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}")
 
 
 def send_text(text: str) -> None:

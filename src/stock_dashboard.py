@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from src.analyst_card import render_analyst_card
 from src.bar_state import build_bar_state
 from src.decision_context import build_decision_context
 from src.market_context import (
@@ -28,7 +29,7 @@ from src.market_context import (
     rolling_volume_profile_levels,
 )
 from src.technical_commentary import build_technical_commentary
-from src.telegram_client import send_photo, send_report_detail
+from src.telegram_client import send_analyst_card, send_photo, send_report_detail
 
 MA_PERIODS = [5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
 BG = "#0f172a"
@@ -830,6 +831,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--atr-multiple", type=float, default=1.5)
     parser.add_argument("--output", default="reports/technical_report.png")
     parser.add_argument("--json-output", default="reports/technical_report.json")
+    parser.add_argument("--card-output", default="reports/analyst_card.png")
     parser.add_argument("--send-telegram", action="store_true")
     return parser.parse_args()
 
@@ -866,10 +868,13 @@ def main() -> None:
     json_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Rapor oluşturuldu: {image_path}")
     print(f"JSON oluşturuldu: {json_path}")
+    card_path = render_analyst_card(status, Path(args.card_output))
+    print(f"Analist kartı oluşturuldu: {card_path}")
     if args.send_telegram:
         send_photo(image_path, status)
+        send_analyst_card(card_path, status)
         detail_sent = send_report_detail(status)
-        print("Telegram raporu gönderildi." + (" Ayrıntılı analist notu da iletildi." if detail_sent else ""))
+        print("Telegram raporu ve analist kartı gönderildi." + (" Ayrıntılı metin de iletildi." if detail_sent else ""))
 
 
 if __name__ == "__main__":
