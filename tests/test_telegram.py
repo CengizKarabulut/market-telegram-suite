@@ -42,6 +42,7 @@ class TelegramTests(unittest.TestCase):
         environment = {
             "TELEGRAM_BOT_TOKEN": "test-token",
             "TELEGRAM_CHAT_ID": "-1003502567927",
+            "TELEGRAM_SEND_CAPTION": "1",
         }
         if thread_id is not None:
             environment["TELEGRAM_MESSAGE_THREAD_ID"] = thread_id
@@ -77,7 +78,11 @@ class TelegramTests(unittest.TestCase):
     def test_long_caption_is_clipped_to_telegram_limit(self) -> None:
         status = json.loads(json.dumps(STATUS))
         status["technical_commentary"]["headline"] = "Uzun teknik yorum. " * 200
-        environment = {"TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_CHAT_ID": "-1003502567927"}
+        environment = {
+            "TELEGRAM_BOT_TOKEN": "test-token",
+            "TELEGRAM_CHAT_ID": "-1003502567927",
+            "TELEGRAM_SEND_CAPTION": "1",
+        }
         response = Mock(ok=True, status_code=200, text='{"ok":true}')
         with (
             patch.dict(os.environ, environment, clear=True),
@@ -109,6 +114,21 @@ class TelegramTests(unittest.TestCase):
         self.assertEqual(post.call_count, 2)
         self.assertIn("sendPhoto", post.call_args_list[0].args[0])
         self.assertIn("sendPhoto", post.call_args_list[1].args[0])
+
+    def test_photos_carry_no_caption_by_default(self) -> None:
+        environment = {"TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_CHAT_ID": "-1003502567927"}
+        post = self._send_with_environment(environment, json.loads(json.dumps(STATUS)))
+        for call in post.call_args_list:
+            self.assertNotIn("caption", call.kwargs["data"])
+
+    def test_captions_can_be_enabled_with_environment_flag(self) -> None:
+        environment = {
+            "TELEGRAM_BOT_TOKEN": "test-token",
+            "TELEGRAM_CHAT_ID": "-1003502567927",
+            "TELEGRAM_SEND_CAPTION": "1",
+        }
+        post = self._send_with_environment(environment, json.loads(json.dumps(STATUS)))
+        self.assertIn("Teknik Piyasa Durumu", post.call_args_list[0].kwargs["data"]["caption"])
         self.assertIn("Analist Kartı", post.call_args_list[1].kwargs["data"]["caption"])
 
     def test_text_detail_is_disabled_by_default(self) -> None:

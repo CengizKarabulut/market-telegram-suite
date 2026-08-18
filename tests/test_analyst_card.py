@@ -69,3 +69,19 @@ class AnalystCardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CardWrappingTests(unittest.TestCase):
+    def test_bold_text_wraps_earlier_than_regular_text(self) -> None:
+        from src.analyst_card import _wrap
+
+        text = "Dirençte reddedilme / başarısız yukarı kırılım • eğilim: iki yönlü uzun başlık"
+        regular = _wrap(text, 18, 9.0, "normal")
+        bold = _wrap(text, 18, 9.0, "bold")
+        self.assertGreaterEqual(len(bold), len(regular))
+
+    def test_analyst_note_first_paragraph_is_not_duplicated(self) -> None:
+        blocks = _blocks(STATUS)
+        texts = [block.text for block in blocks]
+        self.assertNotIn("Birinci paragraf.", texts)
+        self.assertIn("İkinci paragraf.", texts)

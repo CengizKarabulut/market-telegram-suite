@@ -107,7 +107,9 @@ def _destination() -> tuple[str, str, str]:
 
 def send_photo(image_path: Path, status: dict[str, Any]) -> None:
     token, chat_id, thread_id = _destination()
-    payload = {"chat_id": chat_id, "caption": clip(build_caption(status), CAPTION_LIMIT)}
+    payload: dict[str, Any] = {"chat_id": chat_id}
+    if caption_enabled():
+        payload["caption"] = clip(build_caption(status), CAPTION_LIMIT)
     if thread_id:
         payload["message_thread_id"] = thread_id
     with image_path.open("rb") as image:
@@ -119,6 +121,11 @@ def send_photo(image_path: Path, status: dict[str, Any]) -> None:
         )
     if not response.ok:
         raise RuntimeError(f"Telegram gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}")
+
+
+def caption_enabled() -> bool:
+    """Görsel altı açıklama varsayılan olarak kapalıdır; tüm bilgi görselin içindedir."""
+    return os.getenv("TELEGRAM_SEND_CAPTION", "0").strip().lower() in {"1", "true", "yes", "evet"}
 
 
 def text_detail_enabled() -> bool:
@@ -155,7 +162,9 @@ def card_caption(status: dict[str, Any]) -> str:
 def send_analyst_card(image_path: Path, status: dict[str, Any]) -> None:
     """Analist kartını ikinci fotoğraf olarak gönderir."""
     token, chat_id, thread_id = _destination()
-    payload = {"chat_id": chat_id, "caption": card_caption(status)}
+    payload: dict[str, Any] = {"chat_id": chat_id}
+    if caption_enabled():
+        payload["caption"] = card_caption(status)
     if thread_id:
         payload["message_thread_id"] = thread_id
     with image_path.open("rb") as image:

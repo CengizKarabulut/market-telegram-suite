@@ -123,6 +123,8 @@ jobs:
           TELEGRAM_CHAT_ID: "-1003502567927"
           # Telegram forum konu kimliği (web bağlantısındaki son sayı).
           TELEGRAM_MESSAGE_THREAD_ID: "3982"
+          # Görsel altı açıklama isteniyorsa: "1"
+          TELEGRAM_SEND_CAPTION: "0"
           # Kart görseline ek olarak düz metin de isteniyorsa: "1"
           TELEGRAM_SEND_TEXT_DETAIL: "0"
         run: python -m src.send_telegram
