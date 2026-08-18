@@ -11,13 +11,29 @@ import argparse
 import json
 import math
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from src.analyst_card import render_analyst_cards, standardize_pages
+from src.scan_card import render_scan_cards
+from src.scan_state import (
+    MARKET_TIMEZONE,
+    load_state,
+    mark_reported,
+    save_state,
+    select_new,
+)
 from src.screener import SCREENS, chunked, default_options, run_screen
-from src.telegram_client import send_text
+from src.stock_dashboard import (
+    ScanConfig,
+    build_status,
+    calculate_indicators,
+    render_report_pages,
+)
+from src.telegram_client import send_analyst_cards
 from src.universe import load_universe
 
 MAX_RETRIES = 3
@@ -104,6 +120,24 @@ def _error_lines(payload: dict[str, Any]) -> list[str]:
     return lines
 
 
+def build_symbol_report(
+    ticker: str,
+    prices: pd.DataFrame,
+    directory: Path,
+    interval: str,
+    detail: str = "kompakt",
+) -> list[Path]:
+    """Eşleşen sembol için tek hisse raporunun aynısını üretir."""
+    data = calculate_indicators(prices, interval)
+    config = ScanConfig(ticker=ticker, market="BIST", interval=interval, report_detail=detail)
+    status = build_status(data, config, ticker)
+    target = directory / ticker
+    pages = render_report_pages(data, status, target, f"{ticker}_rapor")
+    cards = render_analyst_cards(status, target, f"{ticker}_kart")
+    standardize_pages(pages + cards)
+    return pages + cards
+
+
 def fetch_benchmark(symbol: str, period: str, interval: str) -> pd.Series | None:
     """Göreceli güç için endeksi bir kez indirir; hata taramayı durdurmaz."""
     if not symbol:
@@ -157,6 +191,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-turnover", type=float, default=default_options()["min_turnover"])
     parser.add_argument("--benchmark", default="XU100", help="Göreceli güç endeksi (boş = kapalı)")
     parser.add_argument("--output", default="reports/screener.json")
+    parser.add_argument("--report-top", type=int, default=3, help="Kaç yeni eşleşme için tam rapor üretilsin (0 = kapalı)")
+    parser.add_argument("--report-detail", default="kompakt", choices=["kompakt", "dengeli", "tam"])
+    parser.add_argument("--state", default="reports/scan_state.json", help="Gün içi tekrar önleme durumu")
+    parser.add_argument("--title", default="BIST Teknik Tarama")
     parser.add_argument("--send-telegram", action="store_true")
     return parser.parse_args()
 
@@ -197,9 +235,47 @@ def main() -> None:
     output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Tarama bitti: {payload['processed']} işlendi, {payload['matched']} eşleşme, {len(payload['errors'])} hata, {elapsed / 60:.1f} dk.")
     print(f"JSON: {output}")
+
+    stamp = datetime.now(MARKET_TIMEZONE).strftime("%d.%m.%Y %H:%M")
+    payload["timestamp"] = stamp
+    payload["interval"] = args.interval
+    payload["header_line"] = f"{stamp} · {args.interval} tarama"
+
+    reports_dir = output.parent
+    scan_cards = render_scan_cards(payload, reports_dir, universe.source, elapsed, title=args.title)
+    print(f"{len(scan_cards)} tarama kartı üretildi.")
+
+    # Aynı sembol gün boyu her saat eşleşir; yalnızca yeni veya durumu değişmiş
+    # olanlar için tam rapor üretilir, aksi halde kanal tekrarla dolar.
+    state_path = Path(args.state)
+    reported = load_state(state_path)
+    fresh = select_new(payload["results"], reported, args.report_top)
+    symbol_images: list[Path] = []
+    produced: list[dict[str, Any]] = []
+    for item in fresh:
+        ticker = item["ticker"]
+        try:
+            frames = build_fetcher(args.period, args.interval)([ticker])
+            prices = frames.get(ticker)
+            if prices is None or prices.empty:
+                print(f"  {ticker}: rapor için veri alınamadı, atlanıyor.")
+                continue
+            images = build_symbol_report(ticker, prices, reports_dir, args.interval, args.report_detail)
+            symbol_images.extend(images)
+            produced.append(item)
+            print(f"  {ticker}: {len(images)} sayfalık rapor üretildi.")
+        except Exception as error:  # noqa: BLE001 -- tek sembol raporu taramayı bozmasın
+            print(f"  {ticker}: rapor üretilemedi ({type(error).__name__}: {error}).")
+    if produced:
+        save_state(mark_reported(produced, reported), state_path)
+
     if args.send_telegram:
-        send_text(summary_text(payload, universe.source, elapsed))
-        print("Özet Telegram'a gönderildi.")
+        send_analyst_cards(scan_cards, {})
+        if symbol_images:
+            send_analyst_cards(symbol_images, {})
+        print(f"Telegram'a {len(scan_cards) + len(symbol_images)} görsel gönderildi.")
+    else:
+        print(f"Üretilen görsel: {len(scan_cards) + len(symbol_images)} (gönderim kapalı).")
 
 
 if __name__ == "__main__":

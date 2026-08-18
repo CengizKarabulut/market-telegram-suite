@@ -1,0 +1,126 @@
+"""Tarama özeti görseli.
+
+Tarama sonucunu analist kartlarıyla aynı tasarım diliyle bir PNG'ye dönüştürür;
+böylece Telegram akışında metin ve görsel karışımı olmaz. Kart altyapısı
+yeniden kullanıldığı için boyut eşitleme ve sayfalama kendiliğinden çalışır.
+"""
+
+from __future__ import annotations
+
+import math
+from pathlib import Path
+from typing import Any
+
+from src.analyst_card import (
+    ACCENT,
+    CARD_WIDTH_INCHES,
+    GRAY,
+    LIGHT_GREEN,
+    LIGHT_RED,
+    MARGIN,
+    MUTED,
+    WHITE,
+    YELLOW,
+    _Block,
+    _paginate,
+    render_analyst_card,
+)
+from src.screener import SCREENS
+
+
+def _tone_for(item: dict[str, Any]) -> str:
+    excess = item.get("excess_return_20")
+    if isinstance(excess, (int, float)) and math.isfinite(float(excess)):
+        if excess >= 3:
+            return LIGHT_GREEN
+        if excess <= -3:
+            return LIGHT_RED
+    return WHITE
+
+
+def _summary_blocks(payload: dict[str, Any], universe_source: str, elapsed: float, limit: int) -> list[_Block]:
+    labels = {name: SCREENS[name]["label"] for name in SCREENS}
+    broken = len(payload.get("error_kinds", {}).get("ariza", []))
+    blocks = [
+        _Block("section", "TARAMA ÖZETİ", 23, ACCENT),
+        _Block(
+            "body",
+            f"Evren {payload['requested']} sembol ({universe_source}) · İşlenen {payload['processed']} · "
+            f"Eşleşen {payload['matched']} · Likidite elemesi {payload['filtered_out']} · Arıza {broken} · Süre {elapsed / 60:.1f} dk",
+            16,
+            MUTED,
+        ),
+        _Block("gap", "", 14, WHITE),
+    ]
+    results = payload.get("results", [])[:limit]
+    if not results:
+        blocks.append(_Block("body", "Bu taramada koşulları karşılayan sembol bulunamadı.", 18, MUTED))
+        return blocks
+
+    blocks.append(_Block("section", "EŞLEŞEN SEMBOLLER", 23, ACCENT))
+    for index, item in enumerate(results, start=1):
+        setup = str(item.get("setup", ""))
+        tags = [labels.get(name, name) for name in item.get("screens", [])]
+        tags = [tag for tag in tags if tag.casefold() != setup.casefold()]
+        excess = item.get("excess_return_20")
+        rs = f"XU100 {excess:+.1f}p" if isinstance(excess, (int, float)) and math.isfinite(float(excess)) else "XU100 —"
+        blocks.append(
+            _Block(
+                "body",
+                f"{index}. {item['ticker']}   {item['close']:,.2f}   RVOL {item['rvol']:.2f}x   BB %{item['bb_width_percentile']:.0f}   {rs}",
+                18,
+                _tone_for(item),
+                "bold",
+            )
+        )
+        detail = " — ".join(part for part in (setup, ", ".join(tags)) if part)
+        if detail:
+            blocks.append(_Block("body", f"      {detail}", 15, MUTED))
+        for note in item.get("notes", [])[:1]:
+            blocks.append(_Block("body", f"      ⚠ {note}", 14, YELLOW))
+        blocks.append(_Block("gap", "", 11, WHITE))
+
+    if payload["matched"] > len(results):
+        blocks.append(_Block("body", f"… ve {payload['matched'] - len(results)} sembol daha (tam liste JSON çıktısında).", 15, MUTED))
+
+    gaps = payload.get("error_kinds", {})
+    skipped = len(gaps.get("kisa_gecmis", [])) + len(gaps.get("veri_yok", []))
+    if skipped:
+        blocks.append(_Block("body", f"Taranamayan {skipped} sembol: yetersiz geçmiş veya veri yok.", 14, GRAY))
+    if gaps.get("ariza"):
+        blocks.append(_Block("body", "Gerçek hata veren semboller: " + ", ".join(gaps["ariza"][:8]), 14, YELLOW))
+    blocks.append(_Block("gap", "", 12, WHITE))
+    blocks.append(_Block("body", "Durum taramasıdır; AL/SAT sinyali veya yatırım tavsiyesi değildir.", 13, GRAY))
+    return blocks
+
+
+def render_scan_cards(
+    payload: dict[str, Any],
+    directory: Path,
+    universe_source: str,
+    elapsed: float,
+    title: str = "BIST Teknik Tarama",
+    limit: int = 20,
+    stem: str = "scan_card",
+) -> list[Path]:
+    """Tarama özetini bir veya birkaç karta çizer."""
+    directory.mkdir(parents=True, exist_ok=True)
+    status = {
+        "symbol": title,
+        "header_line": payload.get("header_line", ""),
+        "price": 0.0,
+        "change_pct": 0.0,
+        "timestamp": payload.get("timestamp", ""),
+        "data_provider": universe_source,
+        "bar_state": {"label": "TEYİTLİ", "is_live": False, "interval": payload.get("interval", "1d")},
+        "report_detail": "dengeli",
+    }
+    blocks = _summary_blocks(payload, universe_source, elapsed, limit)
+    text_width = CARD_WIDTH_INCHES - 2 * MARGIN
+    budget = CARD_WIDTH_INCHES * 2.2 - 2.6
+    chunks = _paginate(blocks, text_width, budget)
+    paths: list[Path] = []
+    for index, chunk in enumerate(chunks, start=1):
+        label = "Tarama" if len(chunks) == 1 else f"Tarama {index}/{len(chunks)}"
+        paths.append(render_analyst_card(status, directory / f"{stem}_{index}.png", chunk, label))
+    return paths

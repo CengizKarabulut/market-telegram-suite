@@ -251,17 +251,22 @@ def render_analyst_card(status: dict[str, Any], output: Path, blocks: list[_Bloc
     heading = f"{symbol} — {page_label}" if page_label else f"{symbol} — Analist Kartı"
     axes.text(MARGIN, cursor - 0.34, heading, color=WHITE, fontsize=36, fontweight="bold", va="top")
     cursor -= 0.94
-    change_colour = LIGHT_GREEN if change >= 0 else LIGHT_RED
-    axes.text(MARGIN, cursor - 0.18, f"{price:,.2f}", color=WHITE, fontsize=29, fontweight="bold", va="top")
-    axes.text(MARGIN + 2.05, cursor - 0.26, f"{change:+.2f}%", color=change_colour, fontsize=24, fontweight="bold", va="top")
-    axes.text(
-        MARGIN + 4.02,
-        cursor - 0.19,
-        bar_state_plain(bar_state),
-        color=MUTED,
-        fontsize=14,
-        va="top",
-    )
+    # Tarama kartında fiyat/değişim yerine serbest bir başlık satırı kullanılır.
+    headline = status.get("header_line")
+    if headline:
+        axes.text(MARGIN, cursor - 0.20, str(headline), color=WHITE, fontsize=22, fontweight="bold", va="top")
+    else:
+        change_colour = LIGHT_GREEN if change >= 0 else LIGHT_RED
+        axes.text(MARGIN, cursor - 0.18, f"{price:,.2f}", color=WHITE, fontsize=29, fontweight="bold", va="top")
+        axes.text(MARGIN + 2.05, cursor - 0.26, f"{change:+.2f}%", color=change_colour, fontsize=24, fontweight="bold", va="top")
+        axes.text(
+            MARGIN + 4.02,
+            cursor - 0.19,
+            bar_state_plain(bar_state),
+            color=MUTED,
+            fontsize=14,
+            va="top",
+        )
     axes.text(
         MARGIN + 4.02,
         cursor - 0.50,
