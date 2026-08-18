@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from pathlib import Path
 from typing import Any
@@ -64,32 +65,79 @@ def build_fetcher(period: str, interval: str, sleep: float = BACKOFF_SECONDS):
     return fetch
 
 
+def _result_line(item: dict[str, Any], labels: dict[str, str]) -> list[str]:
+    """Bir eşleşmenin iki satırlık gösterimi; kurulum adı etiketle tekrarlanmaz."""
+    setup = str(item.get("setup", ""))
+    tags = [labels.get(name, name) for name in item["screens"]]
+    # "Trend devamı | Trend devamı" gibi tekrarları önle.
+    tags = [tag for tag in tags if tag.casefold() != setup.casefold()]
+    excess = item.get("excess_return_20")
+    rs = ""
+    if isinstance(excess, (int, float)) and math.isfinite(float(excess)):
+        rs = f" | XU100 {excess:+.1f} puan"
+    head = f"• {item['ticker']} {item['close']:.2f} | RVOL {item['rvol']:.2f}x | BB %{item['bb_width_percentile']:.0f}{rs}"
+    detail = setup or ""
+    if tags:
+        detail = f"{detail} — {', '.join(tags)}" if detail else ", ".join(tags)
+    lines = [head, f"   {detail}"]
+    for note in item.get("notes", [])[:1]:
+        lines.append(f"   ⚠ {note}")
+    return lines
+
+
+def _error_lines(payload: dict[str, Any]) -> list[str]:
+    """Veri yetersizliğini gerçek arızadan ayırır."""
+    kinds = payload.get("error_kinds", {})
+    if not kinds:
+        return []
+    lines = [""]
+    short = kinds.get("kisa_gecmis", [])
+    missing = kinds.get("veri_yok", [])
+    broken = kinds.get("ariza", [])
+    if short or missing:
+        lines.append(f"ℹ Taranamayan {len(short) + len(missing)} sembol: yetersiz geçmiş veya veri yok (yeni halka arz, fon, varant).")
+    if broken:
+        sample = ", ".join(broken[:6])
+        lines.append(f"⚠ Gerçek hata veren {len(broken)} sembol: {sample}")
+        if len(broken) > 6:
+            lines.append("   (tam liste JSON çıktısında)")
+    return lines
+
+
+def fetch_benchmark(symbol: str, period: str, interval: str) -> pd.Series | None:
+    """Göreceli güç için endeksi bir kez indirir; hata taramayı durdurmaz."""
+    if not symbol:
+        return None
+    try:
+        import borsapy as bp
+
+        frame = bp.Index(symbol.removesuffix(".IS")).history(period=period, interval=interval)
+        clean = _normalize(frame)
+        return clean["Close"] if not clean.empty else None
+    except Exception:  # noqa: BLE001 -- benchmark yoksa tarama yine de çalışmalı
+        return None
+
+
 def summary_text(payload: dict[str, Any], universe_source: str, elapsed: float) -> str:
     """Eşleşme olsun olmasın gönderilen özet."""
     results = payload["results"][:MAX_TELEGRAM_ROWS]
+    broken = len(payload.get("error_kinds", {}).get("ariza", []))
     lines = [
         "🔎 BIST Teknik Tarama",
         f"Evren: {payload['requested']} sembol ({universe_source})",
-        f"İşlenen: {payload['processed']} | Eşleşen: {payload['matched']} | Likidite elemesi: {payload['filtered_out']} | Hata: {len(payload['errors'])}",
+        f"İşlenen: {payload['processed']} | Eşleşen: {payload['matched']} | Likidite elemesi: {payload['filtered_out']} | Arıza: {broken}",
         f"Süre: {elapsed / 60:.1f} dk",
         "",
     ]
     if results:
         labels = {name: SCREENS[name]["label"] for name in SCREENS}
         for item in results:
-            tags = ", ".join(labels.get(name, name) for name in item["screens"])
-            setup = f" | {item['setup']}" if item.get("setup") else ""
-            lines.append(f"• {item['ticker']} {item['close']:.2f} | RVOL {item['rvol']:.2f}x | BB %{item['bb_width_percentile']:.0f}{setup}")
-            lines.append(f"   {tags}")
+            lines.extend(_result_line(item, labels))
         if payload["matched"] > len(results):
             lines.append(f"… ve {payload['matched'] - len(results)} sembol daha (tam liste JSON çıktısında).")
     else:
         lines.append("Bu taramada koşulları karşılayan sembol bulunamadı.")
-    if payload["errors"]:
-        sample = list(payload["errors"].items())[:5]
-        lines.extend(["", "⚠ Hata veren semboller: " + ", ".join(ticker for ticker, _ in sample)])
-        if len(payload["errors"]) > len(sample):
-            lines.append(f"   (toplam {len(payload['errors'])} sembol; ayrıntı JSON çıktısında)")
+    lines.extend(_error_lines(payload))
     lines.extend(["", "Durum taramasıdır; AL/SAT sinyali veya yatırım tavsiyesi değildir."])
     return "\n".join(lines)
 
@@ -107,6 +155,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rvol-min", type=float, default=default_options()["rvol_min"])
     parser.add_argument("--rvol-spike", type=float, default=default_options()["rvol_spike"])
     parser.add_argument("--min-turnover", type=float, default=default_options()["min_turnover"])
+    parser.add_argument("--benchmark", default="XU100", help="Göreceli güç endeksi (boş = kapalı)")
     parser.add_argument("--output", default="reports/screener.json")
     parser.add_argument("--send-telegram", action="store_true")
     return parser.parse_args()
@@ -125,6 +174,9 @@ def main() -> None:
         "rvol_spike": args.rvol_spike,
         "min_turnover": args.min_turnover,
     }
+    benchmark = fetch_benchmark(args.benchmark, args.period, args.interval)
+    if benchmark is None:
+        print(f"Uyarı: {args.benchmark} verisi alınamadı; göreceli güç hesaplanmayacak.")
     started = time.perf_counter()
     payload = run_screen(
         symbols,
@@ -133,6 +185,7 @@ def main() -> None:
         enabled=enabled,
         interval=args.interval,
         batch_size=args.batch_size,
+        benchmark=benchmark,
     )
     elapsed = time.perf_counter() - started
     payload["universe_source"] = universe.source

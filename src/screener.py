@@ -38,6 +38,22 @@ def _number(value: Any, default: float = math.nan) -> float:
     return number if math.isfinite(number) else default
 
 
+# Hata sınıfları: veri yetersizliği gerçek arıza değildir; 600 sembolde yüzlerce
+# yeni halka arz ve hisse olmayan kayıt bu gruba düşer ve asıl arızaları gizler.
+ERROR_KINDS = {
+    "kisa_gecmis": ("bar gerekli", "en az", "yeterli geçmiş"),
+    "veri_yok": ("veri yok", "boş", "empty", "not found", "bulunamadı"),
+}
+
+
+def classify_error(message: str) -> str:
+    lowered = str(message).casefold()
+    for kind, needles in ERROR_KINDS.items():
+        if any(needle.casefold() in lowered for needle in needles):
+            return kind
+    return "ariza"
+
+
 @dataclass
 class ScreenResult:
     ticker: str
@@ -51,6 +67,9 @@ class ScreenResult:
     setup: str = ""
     setup_bias: str = ""
     relative_strength: str = ""
+    excess_return_20: float = math.nan
+    score: float = 0.0
+    notes: list[str] = field(default_factory=list)
     detail: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -66,8 +85,37 @@ class ScreenResult:
             "setup": self.setup,
             "setup_bias": self.setup_bias,
             "relative_strength": self.relative_strength,
+            "excess_return_20": self.excess_return_20,
+            "score": self.score,
+            "notes": self.notes,
             **self.detail,
         }
+
+
+def excess_return(data: pd.DataFrame, benchmark: pd.Series | None, bars: int = 20) -> float:
+    """Sembolün benchmarka göre son N bardaki getiri farkını puan olarak verir."""
+    if benchmark is None or len(data) <= bars or len(benchmark) <= bars:
+        return math.nan
+    aligned = benchmark.reindex(data.index).ffill()
+    if aligned.isna().iloc[-1] or aligned.isna().iloc[-bars - 1]:
+        return math.nan
+    stock = _number(data["Close"].iloc[-1]) / _number(data["Close"].iloc[-bars - 1]) - 1
+    index = _number(aligned.iloc[-1]) / _number(aligned.iloc[-bars - 1]) - 1
+    return (stock - index) * 100 if math.isfinite(stock) and math.isfinite(index) else math.nan
+
+
+def relative_strength_label(excess: float) -> str:
+    if not math.isfinite(excess):
+        return "Benchmark verisi yok"
+    if excess >= 3:
+        return "Endeksten belirgin güçlü"
+    if excess >= 0.5:
+        return "Endeksten güçlü"
+    if excess <= -3:
+        return "Endeksten belirgin zayıf"
+    if excess <= -0.5:
+        return "Endeksten zayıf"
+    return "Endeksle paralel"
 
 
 def basic_metrics(data: pd.DataFrame) -> dict[str, float]:
@@ -149,6 +197,18 @@ SCREENS: dict[str, dict[str, Any]] = {
 
 DEEP_SCREENS = {name for name, screen in SCREENS.items() if screen["deep"]}
 
+# Sıralama ağırlıkları: koşullu kurulum tanıyan taramalar, tek göstergeye dayalı
+# olanlardan daha bilgilendiricidir.
+SCREEN_WEIGHTS = {
+    "basarisiz_kirilim": 3.0,
+    "tukenme": 3.0,
+    "sikisma_hacim": 3.0,
+    "karar_bolgesi": 2.0,
+    "trend_devami": 2.0,
+    "hacim_patlamasi": 2.0,
+    "asiri_bolge": 1.0,
+}
+
 
 def default_options() -> dict[str, float]:
     return {
@@ -187,6 +247,7 @@ def screen_symbol(
     options: dict[str, float],
     enabled: Iterable[str],
     interval: str = "1d",
+    benchmark: pd.Series | None = None,
 ) -> ScreenResult | None:
     """Tek sembolü tarar; eşleşme yoksa None döner."""
     enabled = list(enabled)
@@ -219,12 +280,25 @@ def screen_symbol(
     if not matched:
         return None
     result.screens = matched
+    result.excess_return_20 = excess_return(data, benchmark)
+    result.relative_strength = relative_strength_label(result.excess_return_20)
+    result.score = sum(SCREEN_WEIGHTS.get(name, 1.0) for name in matched)
+    # Geniş bant üzerine gelen hacim patlaması, hareketin başı değil sonu olabilir.
+    if "hacim_patlamasi" in matched and _number(metrics["bb_rank"], 0) >= 80:
+        result.notes.append("Bantlar zaten geniş; hareketin geç aşaması olabilir")
+    if result.setup_bias == "iki yönlü":
+        result.notes.append("Kurulum koşullu; yön kapanışla netleşir")
     return result
 
 
 def rank_key(result: ScreenResult) -> tuple:
-    """Eşleşmeleri önem sırasına koyar: çok koşul, yüksek katılım, yüksek likidite."""
-    return (-len(result.screens), -_number(result.rvol, 0.0), -_number(result.turnover, 0.0))
+    """Eşleşmeleri ağırlıklı puana göre sıralar.
+
+    Farklı türden taramaları ham RVOL ile kıyaslamak yanıltıcıdır; önce tarama
+    ağırlıkları toplamı, sonra endeksten ayrışma büyüklüğü, en son likidite.
+    """
+    excess = abs(_number(result.excess_return_20, 0.0))
+    return (-_number(result.score, 0.0), -excess, -_number(result.turnover, 0.0))
 
 
 def chunked(items: list[str], size: int = BATCH_SIZE) -> list[list[str]]:
@@ -238,6 +312,7 @@ def run_screen(
     enabled: Iterable[str] | None = None,
     interval: str = "1d",
     batch_size: int = BATCH_SIZE,
+    benchmark: pd.Series | None = None,
 ) -> dict[str, Any]:
     """Sembol listesini tarar ve her durumda özet döndürür."""
     options = {**default_options(), **(options or {})}
@@ -264,7 +339,7 @@ def run_screen(
                 continue
             try:
                 processed += 1
-                result = screen_symbol(ticker, frame, options, enabled, interval)
+                result = screen_symbol(ticker, frame, options, enabled, interval, benchmark)
                 if result is None:
                     skipped_liquidity += 1
                     continue
@@ -272,12 +347,16 @@ def run_screen(
             except Exception as error:  # noqa: BLE001 -- tek sembol tüm taramayı bozmasın
                 errors[ticker] = f"{type(error).__name__}: {error}"[:160]
     matches.sort(key=rank_key)
+    error_kinds: dict[str, list[str]] = {}
+    for ticker, message in errors.items():
+        error_kinds.setdefault(classify_error(message), []).append(ticker)
     return {
         "requested": len(symbols),
         "processed": processed,
         "matched": len(matches),
         "filtered_out": skipped_liquidity,
         "errors": errors,
+        "error_kinds": {kind: sorted(tickers) for kind, tickers in error_kinds.items()},
         "options": options,
         "screens": enabled,
         "results": [item.as_dict() for item in matches],

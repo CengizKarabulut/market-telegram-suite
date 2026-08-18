@@ -80,11 +80,11 @@ class ScreenTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_screen(["A"], lambda batch: {}, enabled=["olmayan_tarama"])
 
-    def test_ranking_prefers_more_screens_then_volume(self) -> None:
+    def test_ranking_prefers_higher_weighted_score(self) -> None:
         from src.screener import ScreenResult
 
-        many = ScreenResult("A", 10, 1e8, 10, 1.2, 2, 50, screens=["a", "b"])
-        loud = ScreenResult("B", 10, 1e8, 10, 5.0, 2, 50, screens=["a"])
+        many = ScreenResult("A", 10, 1e8, 10, 1.2, 2, 50, screens=["a", "b"], score=5.0)
+        loud = ScreenResult("B", 10, 1e8, 10, 5.0, 2, 50, screens=["a"], score=2.0)
         self.assertLess(rank_key(many), rank_key(loud))
 
 
@@ -116,10 +116,14 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("600 sembol", text)
         self.assertIn("koşulları karşılayan sembol bulunamadı", text)
 
-    def test_summary_lists_errors(self) -> None:
-        payload = {"requested": 10, "processed": 7, "matched": 0, "filtered_out": 0, "errors": {"AAA": "x", "BBB": "y"}, "results": []}
+    def test_summary_lists_real_faults_by_name(self) -> None:
+        payload = {
+            "requested": 10, "processed": 7, "matched": 0, "filtered_out": 0,
+            "errors": {"AAA": "ConnectionError", "BBB": "TypeError"},
+            "error_kinds": {"ariza": ["AAA", "BBB"]}, "results": [],
+        }
         text = summary_text(payload, "borsapy", 10.0)
-        self.assertIn("Hata veren semboller", text)
+        self.assertIn("Gerçek hata veren 2 sembol", text)
         self.assertIn("AAA", text)
 
     def test_summary_caps_long_result_lists(self) -> None:
@@ -187,3 +191,78 @@ class ScreenCatalogueTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ErrorClassificationTests(unittest.TestCase):
+    def test_short_history_is_not_treated_as_a_real_failure(self) -> None:
+        from src.screener import classify_error
+
+        self.assertEqual(classify_error("ZGYO için en az 120 bar gerekli; yalnızca 60 bar geldi."), "kisa_gecmis")
+        self.assertEqual(classify_error("veri yok"), "veri_yok")
+        self.assertEqual(classify_error("ConnectionError: ağ kesildi"), "ariza")
+
+    def test_run_screen_groups_errors_by_kind(self) -> None:
+        store = {"KISA": pd.DataFrame({"Close": [1.0]}), "OK": frame(seed=2, spike=8.0)}
+        payload = run_screen(["KISA", "OK"], lambda batch: {t: store[t] for t in batch}, enabled=["hacim_patlamasi"])
+        self.assertIn("error_kinds", payload)
+        self.assertTrue(payload["error_kinds"])
+
+    def test_summary_separates_data_gaps_from_real_faults(self) -> None:
+        payload = {
+            "requested": 600, "processed": 500, "matched": 0, "filtered_out": 50, "errors": {},
+            "error_kinds": {"kisa_gecmis": ["A", "B"], "ariza": ["C"]}, "results": [],
+        }
+        text = summary_text(payload, "borsapy", 600.0)
+        self.assertIn("Taranamayan 2 sembol", text)
+        self.assertIn("Gerçek hata veren 1 sembol", text)
+        self.assertIn("Arıza: 1", text)
+
+
+class RelativeStrengthTests(unittest.TestCase):
+    def test_excess_return_is_positive_when_stock_outperforms(self) -> None:
+        from src.screener import excess_return
+
+        index = pd.bdate_range("2024-01-01", periods=100)
+        stock = pd.DataFrame({"Close": np.linspace(100, 130, 100)}, index=index)
+        benchmark = pd.Series(np.linspace(100, 110, 100), index=index)
+        self.assertGreater(excess_return(stock, benchmark), 0)
+
+    def test_missing_benchmark_yields_nan_and_label(self) -> None:
+        from src.screener import excess_return, relative_strength_label
+
+        index = pd.bdate_range("2024-01-01", periods=100)
+        stock = pd.DataFrame({"Close": np.linspace(100, 130, 100)}, index=index)
+        self.assertTrue(np.isnan(excess_return(stock, None)))
+        self.assertEqual(relative_strength_label(float("nan")), "Benchmark verisi yok")
+
+    def test_labels_cover_the_range(self) -> None:
+        from src.screener import relative_strength_label
+
+        self.assertIn("belirgin güçlü", relative_strength_label(5.0))
+        self.assertIn("paralel", relative_strength_label(0.0))
+        self.assertIn("belirgin zayıf", relative_strength_label(-5.0))
+
+
+class PresentationTests(unittest.TestCase):
+    def test_setup_name_is_not_repeated_as_a_tag(self) -> None:
+        from src.screener_cli import _result_line
+
+        item = {
+            "ticker": "AKGRT", "close": 6.3, "rvol": 0.77, "bb_width_percentile": 87.0,
+            "screens": ["trend_devami"], "setup": "Trend devamı", "notes": [], "excess_return_20": float("nan"),
+        }
+        text = " ".join(_result_line(item, {"trend_devami": "Trend devamı"}))
+        self.assertEqual(text.count("Trend devamı"), 1)
+
+    def test_late_move_note_is_added_for_wide_bands(self) -> None:
+        result = screen_symbol("TEST", frame(seed=11, spike=9.0), default_options(), ["hacim_patlamasi"])
+        self.assertIsNotNone(result)
+        if result.bb_rank >= 80:
+            self.assertTrue(any("geç aşaması" in note for note in result.notes))
+
+    def test_ranking_uses_weighted_score_not_raw_rvol(self) -> None:
+        from src.screener import ScreenResult
+
+        strong = ScreenResult("A", 10, 1e8, 10, 0.6, 2, 50, screens=["basarisiz_kirilim"], score=3.0)
+        noisy = ScreenResult("B", 10, 1e8, 90, 9.0, 2, 50, screens=["asiri_bolge"], score=1.0)
+        self.assertLess(rank_key(strong), rank_key(noisy))
