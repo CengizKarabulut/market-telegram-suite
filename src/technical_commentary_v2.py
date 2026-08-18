@@ -311,7 +311,7 @@ def _analyst_note(
     divergence_text = ""
     if divergences:
         details = "; ".join(
-            f"{item.get('indicator', 'Osilatör')} {item.get('state', 'uyumsuzluk')} ({item.get('quality', '—')} kalite, {item.get('event_age', '—')} bar)"
+            f"{item.get('indicator', 'Osilatör')} {item.get('state', 'uyumsuzluk')} ({item.get('quality', '—')} kalite; teyit {item.get('event_age', '—')} bar önce, pivotu 5 bar öncesinde)"
             for item in divergences
         )
         divergence_text = f" Aktif uyumsuzluklar: {details}; bunlar erken kanıttır ve yapı/seviye teyidi gerektirir."

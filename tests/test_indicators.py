@@ -113,3 +113,48 @@ class IndicatorTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class TradingViewParityTests(unittest.TestCase):
+    def test_cci_matches_tradingview_formula(self) -> None:
+        import numpy as np
+
+        from src.stock_dashboard import calculate_indicators
+
+        rng = np.random.default_rng(5)
+        bars = 200
+        index = pd.bdate_range("2024-01-01", periods=bars)
+        close = 100 * np.exp(np.cumsum(rng.normal(0.0003, 0.015, bars)))
+        frame = pd.DataFrame(
+            {
+                "Open": close,
+                "High": close * 1.01,
+                "Low": close * 0.99,
+                "Close": close,
+                "Volume": np.full(bars, 1_000_000.0),
+            },
+            index=index,
+        )
+        result = calculate_indicators(frame)
+        source = (frame["High"] + frame["Low"] + frame["Close"]) / 3
+        average = source.rolling(20).mean()
+        deviation = source.rolling(20).apply(lambda values: np.mean(np.abs(values - values.mean())), raw=True)
+        expected = (source - average) / (0.015 * deviation)
+        difference = (result["CCI"] - expected).abs().max()
+        self.assertLess(difference, 1e-9)
+
+    def test_cci_smoothing_uses_tradingview_default_length(self) -> None:
+        import numpy as np
+
+        from src.stock_dashboard import calculate_indicators
+
+        bars = 120
+        index = pd.bdate_range("2024-01-01", periods=bars)
+        close = np.linspace(100, 130, bars)
+        frame = pd.DataFrame(
+            {"Open": close, "High": close * 1.01, "Low": close * 0.99, "Close": close, "Volume": np.full(bars, 1_000.0)},
+            index=index,
+        )
+        result = calculate_indicators(frame)
+        expected = result["CCI"].rolling(14).mean()
+        self.assertAlmostEqual(float(result["CCI_MA"].iloc[-1]), float(expected.iloc[-1]), places=9)

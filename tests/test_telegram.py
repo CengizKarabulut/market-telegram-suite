@@ -34,6 +34,7 @@ STATUS = {
     ],
     "trend_volatility_volume": [["ADX/DMI", "değer", "+DI üstün", "renk"]],
     "technical_commentary": {"headline": "Denge rejiminde hacim ve kabul teyidi bekleniyor."},
+    "report_images": ["reports/technical_report_1.png", "reports/technical_report_2.png"],
 }
 
 
@@ -51,11 +52,11 @@ class TelegramTests(unittest.TestCase):
             patch.dict(os.environ, environment, clear=True),
             patch.object(Path, "read_text", return_value=json.dumps(STATUS)),
             patch.object(Path, "open", side_effect=lambda *args, **kwargs: io.BytesIO(b"png")),
-            patch("src.send_telegram.render_analyst_cards", return_value=[Path("c1.png"), Path("c2.png"), Path("c3.png")]),
+            patch("src.send_telegram.render_analyst_cards", return_value=[Path("c1.png"), Path("c2.png")]),
             patch("src.telegram_client.requests.post", return_value=response) as post,
         ):
             send(Path("report.png"), Path("report.json"))
-        return post.call_args_list[-1].kwargs["data"]
+        return post.call_args_list[0].kwargs["data"]
 
     def test_general_topic_omits_message_thread_id(self) -> None:
         payload = self._send_and_payload(None)
@@ -88,11 +89,11 @@ class TelegramTests(unittest.TestCase):
             patch.dict(os.environ, environment, clear=True),
             patch.object(Path, "read_text", return_value=json.dumps(status)),
             patch.object(Path, "open", side_effect=lambda *args, **kwargs: io.BytesIO(b"png")),
-            patch("src.send_telegram.render_analyst_cards", return_value=[Path("c1.png"), Path("c2.png"), Path("c3.png")]),
+            patch("src.send_telegram.render_analyst_cards", return_value=[Path("c1.png"), Path("c2.png")]),
             patch("src.telegram_client.requests.post", return_value=response) as post,
         ):
             send(Path("report.png"), Path("report.json"))
-        caption = post.call_args_list[-1].kwargs["data"]["caption"]
+        caption = post.call_args_list[0].kwargs["data"]["caption"]
         self.assertLessEqual(len(caption), CAPTION_LIMIT)
         self.assertTrue(caption.endswith("…"))
 
@@ -102,18 +103,37 @@ class TelegramTests(unittest.TestCase):
             patch.dict(os.environ, environment, clear=True),
             patch.object(Path, "read_text", return_value=json.dumps(status)),
             patch.object(Path, "open", side_effect=lambda *args, **kwargs: io.BytesIO(b"png")),
-            patch("src.send_telegram.render_analyst_cards", return_value=[Path("c1.png"), Path("c2.png"), Path("c3.png")]),
+            patch("src.send_telegram.render_analyst_cards", return_value=[Path("c1.png"), Path("c2.png")]),
             patch("src.telegram_client.requests.post", return_value=response) as post,
         ):
             send(Path("report.png"), Path("report.json"))
         return post
 
-    def test_three_cards_and_report_are_sent_as_four_photos(self) -> None:
+    def test_two_cards_and_two_report_pages_are_sent_as_four_photos(self) -> None:
         environment = {"TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_CHAT_ID": "-1003502567927"}
         post = self._send_with_environment(environment, json.loads(json.dumps(STATUS)))
         self.assertEqual(post.call_count, 4)
         for call in post.call_args_list:
             self.assertIn("sendPhoto", call.args[0])
+
+    def test_report_pages_are_sent_before_analyst_cards(self) -> None:
+        environment = {"TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_CHAT_ID": "-1003502567927"}
+        opened: list[str] = []
+
+        def record(self, *args, **kwargs):
+            opened.append(self.name)
+            return io.BytesIO(b"png")
+
+        response = Mock(ok=True, status_code=200, text='{"ok":true}')
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(Path, "read_text", return_value=json.dumps(STATUS)),
+            patch.object(Path, "open", record),
+            patch("src.send_telegram.render_analyst_cards", return_value=[Path("c1.png"), Path("c2.png")]),
+            patch("src.telegram_client.requests.post", return_value=response),
+        ):
+            send(Path("report.png"), Path("report.json"))
+        self.assertEqual(opened, ["technical_report_1.png", "technical_report_2.png", "c1.png", "c2.png"])
 
     def test_photos_carry_no_caption_by_default(self) -> None:
         environment = {"TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_CHAT_ID": "-1003502567927"}
@@ -128,8 +148,8 @@ class TelegramTests(unittest.TestCase):
             "TELEGRAM_SEND_CAPTION": "1",
         }
         post = self._send_with_environment(environment, json.loads(json.dumps(STATUS)))
-        self.assertIn("Analist Kartı", post.call_args_list[0].kwargs["data"]["caption"])
-        self.assertIn("Teknik Piyasa Durumu", post.call_args_list[-1].kwargs["data"]["caption"])
+        self.assertIn("Teknik Piyasa Durumu", post.call_args_list[0].kwargs["data"]["caption"])
+        self.assertIn("Analist Kartı", post.call_args_list[-1].kwargs["data"]["caption"])
 
     def test_text_detail_is_disabled_by_default(self) -> None:
         status = json.loads(json.dumps(STATUS))

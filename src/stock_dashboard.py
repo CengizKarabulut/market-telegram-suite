@@ -30,7 +30,11 @@ from src.market_context import (
 )
 from src.plain_language import bar_state_plain
 from src.technical_commentary import build_technical_commentary
-from src.telegram_client import send_analyst_cards, send_photo, send_report_detail
+from src.telegram_client import (
+    send_analyst_cards,
+    send_report_detail,
+    send_report_pages,
+)
 
 MA_PERIODS = [5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
 # Grafikte ve trend analizinde öne çıkarılan Fibonacci üçlüsü.
@@ -423,7 +427,8 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     mean_typical = typical.rolling(20).mean()
     mean_deviation = typical.rolling(20).apply(lambda values: np.mean(np.abs(values - values.mean())), raw=True)
     out["CCI"] = (typical - mean_typical) / (0.015 * mean_deviation.replace(0, np.nan))
-    out["CCI_MA"] = out["CCI"].rolling(20).mean()
+    # TradingView "Commodity Channel Index" varsayılan yumuşatması 14 periyot SMA'dır.
+    out["CCI_MA"] = out["CCI"].rolling(14).mean()
 
     cumulative_volume = out["Volume"].cumsum().replace(0, np.nan)
     out["VWAP"] = (typical * out["Volume"]).cumsum() / cumulative_volume
@@ -455,15 +460,26 @@ def crossed_down(main: pd.Series, signal: pd.Series | float) -> bool:
     return bool(main.iloc[-1] < signal.iloc[-1] and main.iloc[-2] >= signal.iloc[-2])
 
 
-def relation_color(price: float, average: float, tolerance_pct: float) -> tuple[str, str]:
+GREEN_SHADES = ("#14532d", "#166534", "#15803d")
+RED_SHADES = ("#7f1d1d", "#991b1b", "#b91c1c")
+
+
+def relation_color(price: float, average: float, tolerance_pct: float, atr: float = math.nan) -> tuple[str, str]:
+    """Fiyat-ortalama ilişkisini ve mesafeye göre tonlanmış rengi verir."""
     if not math.isfinite(average):
         return "—", GRAY
     distance_pct = abs(price - average) / abs(average) * 100 if average else math.inf
     if distance_pct <= tolerance_pct:
         return "Eşit/Yakın", YELLOW
+    distance_atr = abs(price - average) / atr if math.isfinite(atr) and atr > 0 else math.nan
+    if math.isfinite(distance_atr):
+        shade = 0 if distance_atr < 0.5 else 1 if distance_atr < 1.5 else 2
+        suffix = f" ({distance_atr:.1f} ATR)"
+    else:
+        shade, suffix = 1, ""
     if price > average:
-        return "Fiyat üstünde", GREEN
-    return "Fiyat altında", RED
+        return f"▲ Fiyat üstünde{suffix}", GREEN_SHADES[shade]
+    return f"▼ Fiyat altında{suffix}", RED_SHADES[shade]
 
 
 def gap_state(main: pd.Series, signal: pd.Series) -> str:
@@ -524,8 +540,9 @@ def build_status(
     for length in MA_PERIODS:
         sma_value = float(row[f"SMA_{length}"])
         ema_value = float(row[f"EMA_{length}"])
-        sma_relation, sma_color = relation_color(price, sma_value, config.equality_tolerance_pct)
-        ema_relation, ema_color = relation_color(price, ema_value, config.equality_tolerance_pct)
+        current_atr = float(row["ATR"]) if "ATR" in row and math.isfinite(float(row["ATR"])) else math.nan
+        sma_relation, sma_color = relation_color(price, sma_value, config.equality_tolerance_pct, current_atr)
+        ema_relation, ema_color = relation_color(price, ema_value, config.equality_tolerance_pct, current_atr)
         ma_rows.append(
             {
                 "period": length,
@@ -567,7 +584,7 @@ def build_status(
         ["Stoch RSI", f"K {fmt(row['STOCH_K'])} | D {fmt(row['STOCH_D'])}\n{diagnostic_text(data['STOCH_K'])}", f"{cross_text(data['STOCH_K'], data['STOCH_D'], stoch_zone)}\n{normalized_gap_state(data['STOCH_K'], data['STOCH_D'])}", GREEN if row["STOCH_K"] > row["STOCH_D"] else RED],
         ["SMI", f"SMI {fmt(smi_value)} | EMA3 {fmt(row['SMI_EMA'])}\n{diagnostic_text(data['SMI'])}", f"{cross_text(data['SMI'], data['SMI_EMA'], smi_zone)}\n{normalized_gap_state(data['SMI'], data['SMI_EMA'])}", GREEN if smi_value > row["SMI_EMA"] else RED],
         ["MFI", f"MFI {fmt(mfi_value)} | MA14 {fmt(row['MFI_MA'])}\n{diagnostic_text(data['MFI'])}", f"{cross_text(data['MFI'], data['MFI_MA'], '20/50/80')}\n{normalized_gap_state(data['MFI'], data['MFI_MA'])}", GREEN if mfi_value > row["MFI_MA"] else RED],
-        ["CCI", f"CCI {fmt(cci_value)} | MA20 {fmt(row['CCI_MA'])}\n{diagnostic_text(data['CCI'])}", f"{cross_text(data['CCI'], data['CCI_MA'], '-100/0/+100')}\n{normalized_gap_state(data['CCI'], data['CCI_MA'])}", GREEN if cci_value > row["CCI_MA"] else RED],
+        ["CCI", f"CCI {fmt(cci_value)} | MA14 {fmt(row['CCI_MA'])}\n{diagnostic_text(data['CCI'])}", f"{cross_text(data['CCI'], data['CCI_MA'], '-100/0/+100')}\n{normalized_gap_state(data['CCI'], data['CCI_MA'])}", GREEN if cci_value > row["CCI_MA"] else RED],
     ]
 
     bb_rank = float(row["BB_WIDTH_RANK"])
@@ -731,12 +748,8 @@ def draw_table(ax: plt.Axes, title: str, columns: list[str], rows: list[list[str
         table.auto_set_column_width(col=list(range(len(columns))))
 
 
-def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    plt.rcParams["font.family"] = "DejaVu Sans"
-    figure = plt.figure(figsize=(18, 43), dpi=120, facecolor=BG)
-    grid = figure.add_gridspec(8, 2, height_ratios=[0.7, 2.2, 1.8, 2.8, 3.0, 4.4, 4.2, 5.0], hspace=0.28, wspace=0.14)
-
+def _draw_header(figure: plt.Figure, grid, status: dict[str, Any], subtitle: str = "") -> None:
+    """Her rapor sayfasının üst bilgisini çizer."""
     header = figure.add_subplot(grid[0, :])
     header.set_facecolor(BG)
     header.axis("off")
@@ -748,7 +761,18 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     header.text(0.46, 0.30, f"Bar: {status['timestamp']} | {status['interval']} | {status['bar_state']['label']} ({bar_state_plain(status['bar_state']).casefold()})", color=bar_color, fontsize=11, fontweight="bold")
     header.text(0.46, 0.08, f"Kaynak: {status['data_provider']} | Warm-up: {status['download_period']}", color=MUTED, fontsize=10)
     header.text(0.0, -0.02, "Durum raporudur; otomatik AL/SAT puanı değildir. Yatırım tavsiyesi değildir.", color="#94a3b8", fontsize=10)
+    if subtitle:
+        header.text(1.0, 0.72, subtitle, color=MUTED, fontsize=14, fontweight="bold", ha="right")
 
+
+
+def render_report_page_one(data: pd.DataFrame, status: dict[str, Any], output: Path) -> Path:
+    """1. sayfa: durum haritası, karar bağlamı, katmanlı yorum ve fiyat grafiği."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    plt.rcParams["font.family"] = "DejaVu Sans"
+    figure = plt.figure(figsize=(18, 22), dpi=120, facecolor=BG)
+    grid = figure.add_gridspec(5, 2, height_ratios=[0.7, 2.2, 1.8, 2.8, 3.0], hspace=0.28, wspace=0.14)
+    _draw_header(figure, grid, status, "Sayfa 1/2 — Durum ve Grafik")
     executive_ax = figure.add_subplot(grid[1, :])
     executive_rows = [[item[0], item[1], item[2]] for item in status["executive"]]
     executive_colors = [[HEADER, tone_color(item[3]), PANEL] for item in status["executive"]]
@@ -783,39 +807,76 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     chart.legend(facecolor=HEADER, labelcolor=WHITE, loc="upper left", ncol=8)
     chart.set_title("Fiyat • Ortalamalar • Bollinger • Yaklaşık Hacim Profili — Son 120 Bar", color=WHITE, fontsize=15, fontweight="bold", loc="left")
 
-    ma_ax = figure.add_subplot(grid[5, 0])
-    ma_rows = [[str(item["period"]), fmt(item["sma"]), fmt(item["ema"])] for item in status["ma"]]
+
+    figure.savefig(output, facecolor=figure.get_facecolor(), bbox_inches="tight")
+    plt.close(figure)
+    return output
+
+
+def render_report_page_two(data: pd.DataFrame, status: dict[str, Any], output: Path) -> Path:
+    """2. sayfa: gösterge tabloları ve teyitli olaylar."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    plt.rcParams["font.family"] = "DejaVu Sans"
+    figure = plt.figure(figsize=(18, 21), dpi=120, facecolor=BG)
+    grid = figure.add_gridspec(4, 2, height_ratios=[0.7, 4.4, 4.2, 5.0], hspace=0.28, wspace=0.14)
+    _draw_header(figure, grid, status, "Sayfa 2/2 — Gösterge Tabloları")
+    ma_ax = figure.add_subplot(grid[1, 0])
+    def ma_cell(value: Any, relation: str) -> str:
+        """Değerin yanına yön oku ve ATR mesafesini yazar; renk tek bilgi kanalı kalmasın."""
+        marker = relation.split(" ")[0] if relation[:1] in {"▲", "▼"} else "="
+        distance = relation.split("(")[-1].rstrip(")") if "(" in relation else ""
+        return f"{fmt(value)}  {marker} {distance}".rstrip()
+
+    ma_rows = [
+        [str(item["period"]), ma_cell(item["sma"], item["sma_relation"]), ma_cell(item["ema"], item["ema_relation"])]
+        for item in status["ma"]
+    ]
     ma_colors = [[HEADER, item["sma_color"], item["ema_color"]] for item in status["ma"]]
     draw_table(ma_ax, "SMA / EMA Değerleri", ["Periyot", "SMA", "EMA"], ma_rows, ma_colors, font_size=10, col_widths=[0.20, 0.40, 0.40])
-    ma_ax.text(0, -0.035, f"Yeşil: fiyat üstünde | Sarı: ±%{status['equality_tolerance_pct']:.2f} yakın | Kırmızı: fiyat altında", transform=ma_ax.transAxes, color=MUTED, fontsize=8)
+    ma_ax.text(0, -0.035, f"▲ yeşil: fiyat ortalamanın üstünde | sarı: ±%{status['equality_tolerance_pct']:.2f} yakın | ▼ kırmızı: altında. Ton koyuluğu ATR cinsinden mesafeyle artar.", transform=ma_ax.transAxes, color=MUTED, fontsize=8)
 
-    momentum_ax = figure.add_subplot(grid[5, 1])
+    momentum_ax = figure.add_subplot(grid[1, 1])
     momentum_rows = [[item[0], item[1], item[2]] for item in status["momentum"]]
     momentum_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["momentum"]]
     draw_table(momentum_ax, "Momentum • Kesişim • Eğim", ["Gösterge", "Değerler", "Durum"], momentum_rows, momentum_colors, font_size=7, col_widths=[0.12, 0.38, 0.50])
 
-    trend_ax = figure.add_subplot(grid[6, 0])
+    trend_ax = figure.add_subplot(grid[2, 0])
     trend_rows = [[item[0], item[1], item[2]] for item in status["trend_volatility_volume"]]
     trend_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["trend_volatility_volume"]]
     draw_table(trend_ax, "Trend • Volatilite • Hacim", ["Gösterge", "Değerler", "Durum"], trend_rows, trend_colors, font_size=7, col_widths=[0.14, 0.31, 0.55])
 
-    location_ax = figure.add_subplot(grid[6, 1])
+    location_ax = figure.add_subplot(grid[2, 1])
     location_rows = [[item[0], item[1], item[2]] for item in status["location"]]
     location_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["location"]]
     draw_table(location_ax, "Konum • AVWAP • POC/VA • Yapı Seviyeleri", ["Alan", "Değerler", "Durum"], location_rows, location_colors, font_size=7, col_widths=[0.14, 0.52, 0.34])
 
-    participation_ax = figure.add_subplot(grid[7, 0])
+    participation_ax = figure.add_subplot(grid[3, 0])
     participation_rows = [[item[0], item[1], item[2]] for item in status["participation"]]
     participation_colors = [[HEADER, PANEL, tone_color(item[3])] for item in status["participation"]]
     draw_table(participation_ax, "Katılım • RVOL • Delta/CVD Tahmini", ["Alan", "Değerler", "Durum"], participation_rows, participation_colors, font_size=7, col_widths=[0.14, 0.34, 0.52])
 
-    events_ax = figure.add_subplot(grid[7, 1])
+    events_ax = figure.add_subplot(grid[3, 1])
     event_rows = [[item[0], item[1], item[2]] for item in status["events"]]
     event_colors = [[tone_color(item[3]), PANEL, HEADER] for item in status["events"]]
     draw_table(events_ax, "Son 12 Teyitli Olay", ["Olay", "Zaman", "Tür"], event_rows, event_colors, font_size=7, col_widths=[0.50, 0.24, 0.26])
 
+
     figure.savefig(output, facecolor=figure.get_facecolor(), bbox_inches="tight")
     plt.close(figure)
+    return output
+
+
+def render_report_pages(data: pd.DataFrame, status: dict[str, Any], directory: Path, stem: str = "technical_report") -> list[Path]:
+    """Teknik raporu iki okunabilir sayfaya böler."""
+    return [
+        render_report_page_one(data, status, directory / f"{stem}_1.png"),
+        render_report_page_two(data, status, directory / f"{stem}_2.png"),
+    ]
+
+
+def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> None:
+    """Geriye dönük uyumluluk: tek dosya istendiğinde 1. sayfayı üretir."""
+    render_report_page_one(data, status, output)
 
 
 def parse_args() -> argparse.Namespace:
@@ -865,18 +926,18 @@ def main() -> None:
     status = build_status(calculated, resolved_config, symbol, benchmark_data, benchmark_symbol, free_float_pct)
     image_path = Path(args.output)
     json_path = Path(args.json_output)
-    render_report(calculated, status, image_path)
+    report_pages = render_report_pages(calculated, status, image_path.parent, image_path.stem)
+    status["report_images"] = [str(path) for path in report_pages]
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"Rapor oluşturuldu: {image_path}")
+    print(f"{len(report_pages)} rapor sayfası oluşturuldu.")
     print(f"JSON oluşturuldu: {json_path}")
     card_paths = render_analyst_cards(status, Path(args.card_output).parent)
     print(f"{len(card_paths)} analist kartı oluşturuldu.")
     if args.send_telegram:
-        send_analyst_cards(card_paths, status)
-        send_photo(image_path, status)
+        sent = send_report_pages(report_pages, status) + send_analyst_cards(card_paths, status)
         detail_sent = send_report_detail(status)
-        print(f"{len(card_paths)} kart ve teknik rapor gönderildi." + (" Ayrıntılı metin de iletildi." if detail_sent else ""))
+        print(f"{sent} görsel gönderildi." + (" Ayrıntılı metin de iletildi." if detail_sent else ""))
 
 
 if __name__ == "__main__":

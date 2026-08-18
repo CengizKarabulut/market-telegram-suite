@@ -8,8 +8,8 @@ from src.analyst_card import render_analyst_cards
 from src.telegram_client import (
     build_caption,
     send_analyst_cards,
-    send_photo,
     send_report_detail,
+    send_report_pages,
 )
 
 
@@ -18,13 +18,14 @@ def caption(status: dict) -> str:
 
 
 def send(image_path: Path, json_path: Path, card_directory: Path | None = None) -> None:
-    """Önce okunabilir kart sayfalarını, ardından ayrıntılı teknik raporu gönderir."""
+    """Önce iki teknik rapor sayfası, ardından iki analist kartı gönderir."""
     status = json.loads(json_path.read_text(encoding="utf-8"))
-    cards = render_analyst_cards(status, card_directory or image_path.parent)
-    sent = send_analyst_cards(cards, status)
-    send_photo(image_path, status)
+    directory = card_directory or image_path.parent
+    cards = render_analyst_cards(status, directory)
+    pages = [Path(item) for item in status.get("report_images", [])] or [image_path]
+    sent = send_report_pages(pages, status) + send_analyst_cards(cards, status)
     detail_sent = send_report_detail(status)
-    print(f"{sent} analist kartı ve teknik rapor gönderildi." + (" Ayrıntılı metin de iletildi." if detail_sent else ""))
+    print(f"{sent} görsel gönderildi." + (" Ayrıntılı metin de iletildi." if detail_sent else ""))
 
 
 def main() -> None:

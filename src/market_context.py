@@ -588,7 +588,7 @@ def build_market_context(
     momentum_state = momentum_feature["state"]
     momentum_tone = momentum_feature["tone"]
     active_divergences = [
-        f"{item['indicator']} {item['state']} / kalite {item['quality']} ({item['event_age']} bar)"
+        f"{item['indicator']} {item['state']} / kalite {item['quality']} (teyit {item['event_age']} bar önce, pivot 5 bar öncesi)"
         for item in momentum_feature["active_divergences"]
     ]
     divergence_state = " | ".join(active_divergences) if active_divergences else "Son 5 barda aktif uyumsuzluk yok"

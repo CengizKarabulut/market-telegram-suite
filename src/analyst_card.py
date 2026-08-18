@@ -169,10 +169,38 @@ def _level_blocks(commentary: dict[str, Any]) -> list[_Block]:
     return blocks
 
 
+def _overview_blocks(commentary: dict[str, Any]) -> list[_Block]:
+    """1. kart: sade özet, kurulum, okuma netliği ve kanıt dengesi."""
+    blocks = _summary_blocks(commentary)
+    supporting = commentary.get("supporting_evidence", [])
+    counter = commentary.get("counter_evidence", [])
+    if supporting or counter:
+        blocks.append(_Block("gap", "", 12, WHITE))
+        blocks.append(_Block("section", "KANIT DENGESİ", 19, ACCENT))
+        for item in supporting:
+            blocks.append(_Block("body", f"▲  {item['family']}: {item['state']}", 15, LIGHT_GREEN))
+        for item in counter:
+            blocks.append(_Block("body", f"▼  {item['family']}: {item['state']}", 15, LIGHT_RED))
+    return blocks
+
+
+def _detail_blocks(commentary: dict[str, Any]) -> list[_Block]:
+    """2. kart: analist notu, gerekçe, seviyeler ve senaryolar."""
+    trimmed = [
+        block
+        for block in _note_blocks(commentary)
+        if block.text != "KANIT DENGESİ" and not block.text.startswith(("▲  ", "▼  "))
+    ]
+    while trimmed and trimmed[-1].kind == "gap":
+        trimmed.pop()
+    trimmed.append(_Block("gap", "", 12, WHITE))
+    trimmed.extend(_level_blocks(commentary))
+    return trimmed
+
+
 CARD_PAGES = (
-    ("Özet", _summary_blocks),
-    ("Analist Notu", _note_blocks),
-    ("Seviyeler ve Senaryolar", _level_blocks),
+    ("Özet", _overview_blocks),
+    ("Analiz ve Seviyeler", _detail_blocks),
 )
 
 

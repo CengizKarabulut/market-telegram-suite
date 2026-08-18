@@ -88,10 +88,10 @@ class CardWrappingTests(unittest.TestCase):
 
 
 class CardPagingTests(unittest.TestCase):
-    def test_three_separate_cards_are_produced(self) -> None:
+    def test_two_separate_cards_are_produced(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             paths = render_analyst_cards(STATUS, Path(directory))
-            self.assertEqual(len(paths), 3)
+            self.assertEqual(len(paths), 2)
             for path in paths:
                 self.assertTrue(path.exists())
                 self.assertGreater(path.stat().st_size, 5_000)
@@ -108,3 +108,21 @@ class CardPagingTests(unittest.TestCase):
 
         self.assertIn("Gün kapandı", bar_state_plain({"label": "TEYİTLİ", "is_live": False}))
         self.assertIn("Gün sürüyor", bar_state_plain({"label": "CANLI", "is_live": True}))
+
+
+class CardBalanceTests(unittest.TestCase):
+    def test_evidence_appears_only_on_the_first_card(self) -> None:
+        from src.analyst_card import CARD_PAGES
+
+        commentary = STATUS["technical_commentary"]
+        overview = " ".join(block.text for block in CARD_PAGES[0][1](commentary))
+        detail = " ".join(block.text for block in CARD_PAGES[1][1](commentary))
+        self.assertIn("KANIT DENGESİ", overview)
+        self.assertNotIn("KANIT DENGESİ", detail)
+
+    def test_levels_and_scenarios_appear_on_the_second_card(self) -> None:
+        from src.analyst_card import CARD_PAGES
+
+        detail = " ".join(block.text for block in CARD_PAGES[1][1](STATUS["technical_commentary"]))
+        self.assertIn("TEKNİK YOĞUNLAŞMA BÖLGELERİ", detail)
+        self.assertIn("yukarı çözülme", detail)
