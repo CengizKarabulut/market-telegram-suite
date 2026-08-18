@@ -591,6 +591,11 @@ def build_market_context(
         for item in momentum_feature["active_divergences"]
     ]
     divergence_state = " | ".join(active_divergences) if active_divergences else "Son 5 barda aktif uyumsuzluk yok"
+    momentum_rsi = momentum_feature["rsi"]
+    momentum_headline = (
+        f"RSI {momentum_rsi['value']:.1f} ({momentum_rsi['zone']}, eğim5 {momentum_rsi['slope_5']:+.2f}) | "
+        f"MACD {momentum_feature['macd']['histogram_character']} | {divergence_state}"
+    )
     participation_feature = semantic["participation"]
     volume_state = participation_feature["state"]
     volume_tone = participation_feature["tone"]
@@ -619,7 +624,7 @@ def build_market_context(
         ["YAPI", structure["state"], structure["event"], structure["tone"]],
         ["KONUM", location_state, profile["developing_acceptance"], profile["tone"]],
         ["TREND", ma_state, f"EMA spread %{ma_spread_pct:.2f} | perc %{ma_spread_rank:.0f}", "positive" if ma_above >= 10 else "negative" if ma_above <= 5 else "warning"],
-        ["MOMENTUM", momentum_state, f"{momentum_feature['summary']} | {divergence_state}", momentum_tone],
+        ["MOMENTUM", momentum_state, momentum_headline, momentum_tone],
         ["KATILIM", volume_state, f"RVOL 1b {participation_feature['rvol_1']:.2f}x | 3b {participation_feature['rvol_3_average']:.2f}x | Delta tah. %{flow['delta_pct']:.1f}", volume_tone],
         ["VOLATİLİTE", volatility_state, f"BB perc %{bb_rank:.0f}", volatility_tone],
     ]

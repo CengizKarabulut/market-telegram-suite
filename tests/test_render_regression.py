@@ -90,3 +90,32 @@ class TestRenderRegression(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTableWrapping(unittest.TestCase):
+    def test_wrap_cell_respects_width_and_keeps_content(self) -> None:
+        from src.stock_dashboard import wrap_cell
+
+        text = "RSI 38.89 negatif bölge eğim5 -1.58 MACD negatif histogram genişliyor uyumsuzluk yok"
+        wrapped = wrap_cell(text, 30)
+        self.assertGreater(wrapped.count("\n"), 1)
+        self.assertTrue(all(len(line) <= 30 for line in wrapped.split("\n")))
+        self.assertEqual(wrapped.replace("\n", " ").split(), text.split())
+
+    def test_wrap_cell_handles_short_text_without_breaking(self) -> None:
+        from src.stock_dashboard import wrap_cell
+
+        self.assertEqual(wrap_cell("Value Area içinde", 40), "Value Area içinde")
+
+    def test_column_capacity_scales_with_column_width(self) -> None:
+        import matplotlib.pyplot as plt
+
+        from src.stock_dashboard import column_char_capacity
+
+        figure = plt.figure(figsize=(18, 4))
+        axes = figure.add_subplot(111)
+        capacities = column_char_capacity(axes, [0.16, 0.38, 0.46], 3, 11)
+        plt.close(figure)
+        self.assertLess(capacities[0], capacities[1])
+        self.assertLess(capacities[1], capacities[2])
+        self.assertTrue(all(capacity >= 8 for capacity in capacities))

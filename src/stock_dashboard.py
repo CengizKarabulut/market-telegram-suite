@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import textwrap
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from datetime import datetime, timezone
@@ -673,21 +674,48 @@ def build_status(
     }
 
 
+def wrap_cell(text: Any, width_chars: int) -> str:
+    """Hücre metnini sütun genişliğine göre sarar; taşma ve üst üste binmeyi önler."""
+    lines: list[str] = []
+    for paragraph in str(text).split("\n"):
+        wrapped = textwrap.wrap(paragraph, max(width_chars, 8), break_long_words=True, break_on_hyphens=False)
+        lines.extend(wrapped or [""])
+    return "\n".join(lines)
+
+
+def column_char_capacity(ax: plt.Axes, col_widths: list[float] | None, column_count: int, font_size: int) -> list[int]:
+    """Her sütuna kaç karakter sığdığını punto ve eksen genişliğinden tahmin eder."""
+    figure = ax.get_figure()
+    axes_width_pt = ax.get_position().width * figure.get_size_inches()[0] * 72.0
+    widths = col_widths or [1.0 / column_count] * column_count
+    average_char_pt = font_size * 0.58
+    return [max(int((axes_width_pt * width) / average_char_pt) - 2, 8) for width in widths]
+
+
 def draw_table(ax: plt.Axes, title: str, columns: list[str], rows: list[list[str]], colors: list[list[str]] | None = None, font_size: int = 10, col_widths: list[float] | None = None) -> None:
     ax.set_facecolor(PANEL)
     ax.axis("off")
     ax.set_title(title, color=WHITE, fontsize=15, fontweight="bold", loc="left", pad=10)
-    table = ax.table(cellText=rows, colLabels=columns, colWidths=col_widths, loc="center", cellLoc="left", colLoc="center", bbox=[0, 0, 1, 0.94])
+    capacities = column_char_capacity(ax, col_widths, len(columns), font_size)
+    wrapped_rows = [
+        [wrap_cell(value, capacities[index]) if index < len(capacities) else str(value) for index, value in enumerate(row)]
+        for row in rows
+    ]
+    row_line_counts = [max(cell.count("\n") + 1 for cell in row) for row in wrapped_rows] if wrapped_rows else []
+    table = ax.table(cellText=wrapped_rows, colLabels=columns, colWidths=col_widths, loc="center", cellLoc="left", colLoc="center", bbox=[0, 0, 1, 0.94])
     table.auto_set_font_size(False)
     table.set_fontsize(font_size)
     for (row_index, column_index), cell in table.get_celld().items():
         cell.set_edgecolor("#334155")
         cell.get_text().set_color(WHITE)
-        cell.get_text().set_wrap(True)
+        cell.get_text().set_verticalalignment("center")
+        cell.set_text_props(linespacing=1.25)
         if row_index == 0:
+            cell.set_height(1.4)
             cell.set_facecolor(HEADER)
             cell.get_text().set_fontweight("bold")
         else:
+            cell.set_height(row_line_counts[row_index - 1] + 0.6)
             cell.set_facecolor(PANEL)
             if colors and row_index - 1 < len(colors) and column_index < len(colors[row_index - 1]):
                 chosen = colors[row_index - 1][column_index]
