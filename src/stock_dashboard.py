@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from src.analyst_card import render_analyst_card
+from src.analyst_card import render_analyst_cards
 from src.bar_state import build_bar_state
 from src.decision_context import build_decision_context
 from src.market_context import (
@@ -28,10 +28,13 @@ from src.market_context import (
     normalized_gap_state,
     rolling_volume_profile_levels,
 )
+from src.plain_language import bar_state_plain
 from src.technical_commentary import build_technical_commentary
-from src.telegram_client import send_analyst_card, send_photo, send_report_detail
+from src.telegram_client import send_analyst_cards, send_photo, send_report_detail
 
 MA_PERIODS = [5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
+# Grafikte ve trend analizinde öne çıkarılan Fibonacci üçlüsü.
+KEY_EMA_PERIODS = (21, 55, 233)
 BG = "#0f172a"
 PANEL = "#111827"
 HEADER = "#223044"
@@ -742,7 +745,7 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     header.text(0.0, 0.25, f"Fiyat: {fmt(status['price'])}", color=WHITE, fontsize=20, fontweight="bold")
     header.text(0.20, 0.25, f"Değişim: {status['change_pct']:+.2f}%", color=change_color, fontsize=18, fontweight="bold")
     bar_color = YELLOW if status["bar_state"]["is_live"] else LIGHT_GREEN
-    header.text(0.46, 0.30, f"Bar: {status['timestamp']} | {status['interval']} | {status['bar_state']['label']}", color=bar_color, fontsize=11, fontweight="bold")
+    header.text(0.46, 0.30, f"Bar: {status['timestamp']} | {status['interval']} | {status['bar_state']['label']} ({bar_state_plain(status['bar_state']).casefold()})", color=bar_color, fontsize=11, fontweight="bold")
     header.text(0.46, 0.08, f"Kaynak: {status['data_provider']} | Warm-up: {status['download_period']}", color=MUTED, fontsize=10)
     header.text(0.0, -0.02, "Durum raporudur; otomatik AL/SAT puanı değildir. Yatırım tavsiyesi değildir.", color="#94a3b8", fontsize=10)
 
@@ -765,9 +768,8 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     chart.set_facecolor(PANEL)
     recent = data.tail(120)
     chart.plot(recent.index, recent["Close"], color=WHITE, linewidth=2.0, label="Kapanış")
-    chart.plot(recent.index, recent["EMA_21"], color="#38bdf8", linewidth=1.3, label="EMA21")
-    chart.plot(recent.index, recent["EMA_50"], color="#f59e0b", linewidth=1.3, label="EMA50")
-    chart.plot(recent.index, recent["EMA_200"], color="#f43f5e", linewidth=1.3, label="EMA200")
+    for period, colour in zip(KEY_EMA_PERIODS, ("#38bdf8", "#f59e0b", "#f43f5e"), strict=True):
+        chart.plot(recent.index, recent[f"EMA_{period}"], color=colour, linewidth=1.3, label=f"EMA{period}")
     chart.fill_between(recent.index, recent["BB_LOWER"], recent["BB_UPPER"], color="#3b82f6", alpha=0.10, label="Bollinger")
     profile_source = data.tail(219)
     rolling_profile = rolling_volume_profile_levels(profile_source, lookback=100).tail(120)
@@ -868,13 +870,13 @@ def main() -> None:
     json_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Rapor oluşturuldu: {image_path}")
     print(f"JSON oluşturuldu: {json_path}")
-    card_path = render_analyst_card(status, Path(args.card_output))
-    print(f"Analist kartı oluşturuldu: {card_path}")
+    card_paths = render_analyst_cards(status, Path(args.card_output).parent)
+    print(f"{len(card_paths)} analist kartı oluşturuldu.")
     if args.send_telegram:
+        send_analyst_cards(card_paths, status)
         send_photo(image_path, status)
-        send_analyst_card(card_path, status)
         detail_sent = send_report_detail(status)
-        print("Telegram raporu ve analist kartı gönderildi." + (" Ayrıntılı metin de iletildi." if detail_sent else ""))
+        print(f"{len(card_paths)} kart ve teknik rapor gönderildi." + (" Ayrıntılı metin de iletildi." if detail_sent else ""))
 
 
 if __name__ == "__main__":

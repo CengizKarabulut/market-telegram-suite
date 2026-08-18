@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.analyst_card import _blocks, render_analyst_card
+from src.analyst_card import _blocks, render_analyst_card, render_analyst_cards
 
 STATUS = {
     "symbol": "THYAO",
@@ -85,3 +85,26 @@ class CardWrappingTests(unittest.TestCase):
         texts = [block.text for block in blocks]
         self.assertNotIn("Birinci paragraf.", texts)
         self.assertIn("İkinci paragraf.", texts)
+
+
+class CardPagingTests(unittest.TestCase):
+    def test_three_separate_cards_are_produced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = render_analyst_cards(STATUS, Path(directory))
+            self.assertEqual(len(paths), 3)
+            for path in paths:
+                self.assertTrue(path.exists())
+                self.assertGreater(path.stat().st_size, 5_000)
+
+    def test_each_card_is_shorter_than_the_combined_card(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            combined = render_analyst_card(STATUS, Path(directory) / "combined.png")
+            paths = render_analyst_cards(STATUS, Path(directory))
+            for path in paths:
+                self.assertLess(path.stat().st_size, combined.stat().st_size)
+
+    def test_bar_state_is_expressed_in_plain_words(self) -> None:
+        from src.plain_language import bar_state_plain
+
+        self.assertIn("Gün kapandı", bar_state_plain({"label": "TEYİTLİ", "is_live": False}))
+        self.assertIn("Gün sürüyor", bar_state_plain({"label": "CANLI", "is_live": True}))

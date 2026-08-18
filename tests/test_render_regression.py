@@ -34,7 +34,7 @@ class TestRenderRegression(unittest.TestCase):
             "BB_LOWER": np.random.uniform(90, 100, 300),
             "SUPERTREND": np.random.uniform(90, 100, 300),
         }, index=dates)
-        for p in [21, 50, 200]:
+        for p in [21, 50, 55, 200, 233]:
             data[f"EMA_{p}"] = data["Close"].ewm(span=p).mean()
 
         ctx = {

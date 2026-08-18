@@ -17,6 +17,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch
 
+from src.plain_language import bar_state_plain
+
 BG = "#0f172a"
 PANEL = "#111827"
 CARD = "#16202e"
@@ -74,29 +76,35 @@ class _Block:
         return len(self.lines) * LINE_HEIGHT * (self.font_size / 12.0)
 
 
-def _blocks(status: dict[str, Any]) -> list[_Block]:
-    commentary = status.get("technical_commentary", {})
+def _summary_blocks(commentary: dict[str, Any]) -> list[_Block]:
+    """1. kart: sade özet, kurulum ve okuma netliği."""
     setup = commentary.get("setup", {})
-    scenario = commentary.get("scenario_map", {})
-    labels = scenario.get("labels", {})
-    clarity = commentary.get("clarity", {})
-    levels = commentary.get("levels", {})
     plain = commentary.get("plain_summary", {})
-    blocks: list[_Block] = []
-
-    blocks.append(_Block("section", "SADE ÖZET", 19, ACCENT))
-    blocks.append(_Block("body", plain.get("text", "—"), 17, WHITE))
-    blocks.append(_Block("gap", "", 12, WHITE))
-
-    blocks.append(_Block("section", "KURULUM", 19, ACCENT))
-    blocks.append(
-        _Block("body", f"{setup.get('name', '—')}  •  eğilim: {setup.get('bias', '—')}", 18, tone_colour(setup.get("tone", "neutral")), "bold")
-    )
+    clarity = commentary.get("clarity", {})
+    duration = commentary.get("duration", {}).get("summary", "")
+    blocks = [
+        _Block("section", "SADE ÖZET", 19, ACCENT),
+        _Block("body", plain.get("text", "—"), 17, WHITE),
+        _Block("gap", "", 12, WHITE),
+        _Block("section", "KURULUM", 19, ACCENT),
+        _Block("body", f"{setup.get('name', '—')}  •  eğilim: {setup.get('bias', '—')}", 18, tone_colour(setup.get("tone", "neutral")), "bold"),
+    ]
     if setup.get("description"):
         blocks.append(_Block("body", setup["description"], 15, MUTED))
+    if duration and duration != "Belirgin bir süre birikimi yok":
+        blocks.append(_Block("gap", "", 12, WHITE))
+        blocks.append(_Block("body", f"Süre bağlamı: {duration}.", 15, MUTED))
     blocks.append(_Block("gap", "", 12, WHITE))
+    blocks.append(
+        _Block("body", f"Okuma netliği: {clarity.get('state', '—')} — {clarity.get('reason', '')}", 15, tone_colour(clarity.get("tone", "neutral")))
+    )
+    return blocks
 
-    # İlk paragraf açılış + kurulum tanımıdır; KURULUM bölümüyle birebir çakıştığı için atlanır.
+
+def _note_blocks(commentary: dict[str, Any]) -> list[_Block]:
+    """2. kart: analist notu, gerekçe ve kanıt dengesi."""
+    setup = commentary.get("setup", {})
+    blocks: list[_Block] = []
     paragraphs = [item.strip() for item in str(commentary.get("analyst_note", "")).split("\n\n") if item.strip()]
     if setup.get("name") and len(paragraphs) > 1:
         paragraphs = paragraphs[1:]
@@ -105,22 +113,27 @@ def _blocks(status: dict[str, Any]) -> list[_Block]:
         for paragraph in paragraphs:
             blocks.append(_Block("body", paragraph, 15, WHITE))
             blocks.append(_Block("gap", "", 11, WHITE))
-
     blocks.append(_Block("section", "NEDEN BU OKUMA?", 19, ACCENT))
     blocks.append(_Block("body", commentary.get("reconciliation", "—"), 15, MUTED))
-    blocks.append(_Block("gap", "", 12, WHITE))
-
     supporting = commentary.get("supporting_evidence", [])
     counter = commentary.get("counter_evidence", [])
     if supporting or counter:
+        blocks.append(_Block("gap", "", 12, WHITE))
         blocks.append(_Block("section", "KANIT DENGESİ", 19, ACCENT))
         for item in supporting:
             blocks.append(_Block("body", f"▲  {item['family']}: {item['state']}", 15, LIGHT_GREEN))
         for item in counter:
             blocks.append(_Block("body", f"▼  {item['family']}: {item['state']}", 15, LIGHT_RED))
-        blocks.append(_Block("gap", "", 12, WHITE))
+    return blocks
 
-    clusters = levels.get("clusters", [])
+
+def _level_blocks(commentary: dict[str, Any]) -> list[_Block]:
+    """3. kart: seviyeler, senaryo eşikleri ve son değişimler."""
+    setup = commentary.get("setup", {})
+    scenario = commentary.get("scenario_map", {})
+    labels = scenario.get("labels", {})
+    clusters = commentary.get("levels", {}).get("clusters", [])
+    blocks: list[_Block] = []
     if clusters:
         blocks.append(_Block("section", "TEKNİK YOĞUNLAŞMA BÖLGELERİ", 19, ACCENT))
         for cluster in clusters[:4]:
@@ -134,7 +147,6 @@ def _blocks(status: dict[str, Any]) -> list[_Block]:
                 )
             )
         blocks.append(_Block("gap", "", 12, WHITE))
-
     two_sided = str(setup.get("bias", "")) == "iki yönlü"
     for key, colour in (("strengthen", LIGHT_GREEN), ("weaken", LIGHT_RED), ("neutral", MUTED)):
         items = scenario.get(key, [])
@@ -149,29 +161,36 @@ def _blocks(status: dict[str, Any]) -> list[_Block]:
                 line_colour = colour
             blocks.append(_Block("body", f"•  {item}", 15, line_colour))
         blocks.append(_Block("gap", "", 12, WHITE))
-
     changes = commentary.get("changes", [])
     if changes:
         blocks.append(_Block("section", "DÜNDEN BUGÜNE", 18, ACCENT))
-        for item in changes[:3]:
+        for item in changes[:4]:
             blocks.append(_Block("body", f"•  {item}", 15, MUTED))
-        blocks.append(_Block("gap", "", 12, WHITE))
-
-    blocks.append(
-        _Block("body", f"Okuma netliği: {clarity.get('state', '—')} — {clarity.get('reason', '')}", 15, tone_colour(clarity.get("tone", "neutral")))
-    )
-    blocks.append(
-        _Block("body", "Teknik durum yorumudur; yatırım tavsiyesi veya otomatik AL/SAT sinyali değildir.", 13, GRAY)
-    )
     return blocks
 
 
-def render_analyst_card(status: dict[str, Any], output: Path) -> Path:
-    """Yorum çıktısını okunabilir bir PNG kartına dönüştürür."""
+CARD_PAGES = (
+    ("Özet", _summary_blocks),
+    ("Analist Notu", _note_blocks),
+    ("Seviyeler ve Senaryolar", _level_blocks),
+)
+
+
+def _blocks(status: dict[str, Any]) -> list[_Block]:
+    """Geriye dönük uyumluluk: üç sayfanın bloklarını tek listede verir."""
+    commentary = status.get("technical_commentary", {})
+    combined: list[_Block] = []
+    for _, builder in CARD_PAGES:
+        combined.extend(builder(commentary))
+    return combined
+
+
+def render_analyst_card(status: dict[str, Any], output: Path, blocks: list[_Block] | None = None, page_label: str = "") -> Path:
+    """Verilen blokları okunabilir bir PNG kartına dönüştürür."""
     output.parent.mkdir(parents=True, exist_ok=True)
     plt.rcParams["font.family"] = "DejaVu Sans"
     text_width = CARD_WIDTH_INCHES - 2 * MARGIN
-    blocks = _blocks(status)
+    blocks = _blocks(status) if blocks is None else blocks
     heights = [block.measure(text_width) for block in blocks]
     header_height = 1.55
     total = header_height + sum(heights) + 2 * MARGIN
@@ -198,17 +217,26 @@ def render_analyst_card(status: dict[str, Any], output: Path) -> Path:
     price = status.get("price", float("nan"))
     change = status.get("change_pct", 0.0)
     bar_state = status.get("bar_state", {})
-    axes.text(MARGIN, cursor - 0.28, f"{symbol} — Analist Kartı", color=WHITE, fontsize=30, fontweight="bold", va="top")
+    heading = f"{symbol} — {page_label}" if page_label else f"{symbol} — Analist Kartı"
+    axes.text(MARGIN, cursor - 0.28, heading, color=WHITE, fontsize=30, fontweight="bold", va="top")
     cursor -= 0.78
     change_colour = LIGHT_GREEN if change >= 0 else LIGHT_RED
     axes.text(MARGIN, cursor - 0.18, f"{price:,.2f}", color=WHITE, fontsize=24, fontweight="bold", va="top")
     axes.text(MARGIN + 1.70, cursor - 0.22, f"{change:+.2f}%", color=change_colour, fontsize=20, fontweight="bold", va="top")
     axes.text(
         MARGIN + 3.35,
-        cursor - 0.20,
-        f"{bar_state.get('label', '—')}  |  {status.get('timestamp', '—')}  |  {status.get('data_provider', '—')}",
+        cursor - 0.16,
+        bar_state_plain(bar_state),
         color=MUTED,
         fontsize=12,
+        va="top",
+    )
+    axes.text(
+        MARGIN + 3.35,
+        cursor - 0.42,
+        f"{status.get('timestamp', '—')}  |  {status.get('data_provider', '—')}",
+        color=GRAY,
+        fontsize=10,
         va="top",
     )
     cursor -= 0.62
@@ -231,3 +259,17 @@ def render_analyst_card(status: dict[str, Any], output: Path) -> Path:
     figure.savefig(output, facecolor=BG, dpi=DPI)
     plt.close(figure)
     return output
+
+
+def render_analyst_cards(status: dict[str, Any], directory: Path, stem: str = "analyst_card") -> list[Path]:
+    """Yorumu üç ayrı okunabilir karta böler ve sırayla döndürür."""
+    commentary = status.get("technical_commentary", {})
+    paths: list[Path] = []
+    total = len(CARD_PAGES)
+    for index, (label, builder) in enumerate(CARD_PAGES, start=1):
+        blocks = builder(commentary)
+        if not blocks:
+            continue
+        page_label = f"{label} ({index}/{total})"
+        paths.append(render_analyst_card(status, directory / f"{stem}_{index}.png", blocks, page_label))
+    return paths

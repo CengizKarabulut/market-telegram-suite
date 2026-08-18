@@ -58,6 +58,19 @@ def _participation_plain(rvol: float, in_squeeze: bool) -> str:
     return "İşlem hacmi normal seviyelerde."
 
 
+def bar_state_plain(bar_state: dict[str, Any] | None) -> str:
+    """CANLI/TEYİTLİ etiketinin gündelik karşılığını verir."""
+    state = bar_state or {}
+    if state.get("is_live"):
+        return "Gün sürüyor — rakamlar kapanışa kadar değişebilir"
+    label = str(state.get("label", ""))
+    if label == "TEYİTLİ":
+        return "Gün kapandı — rakamlar kesinleşti"
+    if state.get("market_state") == "CLOSED":
+        return "Piyasa kapalı — son tamamlanan günün rakamları"
+    return "Bar durumu bilinmiyor"
+
+
 def build_plain_summary(
     symbol: str,
     price: float,

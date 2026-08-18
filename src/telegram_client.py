@@ -159,6 +159,13 @@ def card_caption(status: dict[str, Any]) -> str:
     return clip("\n".join(lines), CAPTION_LIMIT)
 
 
+def send_analyst_cards(image_paths: list[Path], status: dict[str, Any]) -> int:
+    """Kart sayfalarını sırayla gönderir ve gönderilen sayıyı döndürür."""
+    for path in image_paths:
+        send_analyst_card(path, status)
+    return len(image_paths)
+
+
 def send_analyst_card(image_path: Path, status: dict[str, Any]) -> None:
     """Analist kartını ikinci fotoğraf olarak gönderir."""
     token, chat_id, thread_id = _destination()

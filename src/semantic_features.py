@@ -7,6 +7,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+# Trend kalitesinde öne çıkarılan Fibonacci üçlüsü; grafikle aynı olmalıdır.
+KEY_EMA_PERIODS = (21, 55, 233)
+
 
 def _number(value: Any, default: float = math.nan) -> float:
     try:
@@ -148,7 +151,7 @@ def trend_quality_context(data: pd.DataFrame, ma_periods: list[int]) -> dict[str
         alignment, tone = "Bearish dizilim büyük ölçüde oluşmuş", "negative"
     else:
         alignment, tone = "EMA dizilimi parçalı", "warning"
-    slopes = {str(period): _ema_slope_atr(data, period) for period in (21, 50, 200) if f"EMA_{period}" in data}
+    slopes = {str(period): _ema_slope_atr(data, period) for period in KEY_EMA_PERIODS if f"EMA_{period}" in data}
     slope_parts = []
     for period, value in slopes.items():
         direction = "yukarı" if value > 0.05 else "aşağı" if value < -0.05 else "yatay"
@@ -161,7 +164,7 @@ def trend_quality_context(data: pd.DataFrame, ma_periods: list[int]) -> dict[str
     price = _number(row["Close"])
     distances = {
         str(period): (price - _number(row[f"EMA_{period}"])) / atr
-        for period in (21, 50, 200)
+        for period in KEY_EMA_PERIODS
         if f"EMA_{period}" in data and atr > 0
     }
     return {
@@ -356,7 +359,7 @@ def level_confluence_context(
         if math.isfinite(number):
             candidates.append({"name": name, "value": number, "family": family})
 
-    for period in (20, 21, 34, 50, 100, 200):
+    for period in (20, 21, 34, 50, 55, 100, 200, 233):
         add(f"EMA{period}", row.get(f"EMA_{period}"), "EMA")
     for name in ("poc", "vah", "val"):
         add(name.upper(), profile.get(name), "Profil")
