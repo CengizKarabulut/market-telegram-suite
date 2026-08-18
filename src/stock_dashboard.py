@@ -527,6 +527,52 @@ def diagnostic_text(series: pd.Series) -> str:
     return f"Δ1 {fmt(values['delta_1'])} | Δ3 {fmt(values['delta_3'])} | Eğim5 {fmt(values['slope_5'])}"
 
 
+def previous_state_snapshot(
+    data: pd.DataFrame,
+    config: ScanConfig,
+    benchmark_data: pd.DataFrame | None,
+    benchmark_symbol: str,
+    market: str,
+    free_float_pct: float | None,
+) -> dict[str, Any] | None:
+    """Son bar çıkarılarak dünkü teknik durumu yeniden hesaplar.
+
+    Geçmiş rapor dosyası saklamak yerine aynı hesabı bir bar eksikle tekrarlar;
+    böylece karşılaştırma her zaman güncel kodla ve tutarlı biçimde yapılır.
+    """
+    if len(data) < 60:
+        return None
+    trimmed = data.iloc[:-1]
+    try:
+        context = build_market_context(trimmed, MA_PERIODS, config.anchor_date)
+        benchmark = benchmark_data.loc[benchmark_data.index <= trimmed.index[-1]] if benchmark_data is not None else None
+        decision = build_decision_context(
+            trimmed,
+            benchmark,
+            benchmark_symbol,
+            market,
+            free_float_pct,
+            config.account_size,
+            config.risk_pct,
+            config.atr_multiple,
+            None,
+        )
+    except (KeyError, ValueError, IndexError):
+        return None
+    context["relative_strength"] = decision.get("relative_strength", {})
+    context["clarity_state"] = _previous_clarity(trimmed, context, decision)
+    return context
+
+
+def _previous_clarity(data: pd.DataFrame, context: dict[str, Any], decision: dict[str, Any]) -> str:
+    """Dünkü okuma netliğini, aynı yorum motorunu çalıştırarak bulur."""
+    try:
+        context["last_price"] = float(data["Close"].iloc[-1])
+        return str(build_technical_commentary(data, context, decision, None).get("clarity", {}).get("state", "—"))
+    except (KeyError, ValueError, IndexError):
+        return "—"
+
+
 def build_status(
     data: pd.DataFrame,
     config: ScanConfig,
@@ -639,6 +685,7 @@ def build_status(
     context["symbol"] = symbol
     context["last_price"] = price
     context["change_pct"] = (price / float(previous["Close"]) - 1) * 100
+    context["previous_state"] = previous_state_snapshot(data, config, benchmark_data, benchmark_symbol, resolved_market, free_float_pct)
     commentary = build_technical_commentary(data, context, decision, bar_state)
     executive = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["families"]]
     location = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["location_rows"]]

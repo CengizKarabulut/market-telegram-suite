@@ -8,6 +8,7 @@ import pandas as pd
 
 from src.plain_language import build_plain_summary
 from src.setup_recognition import evidence_weight, reconcile
+from src.state_change import compare_states
 
 
 def _number(value: Any, default: float = math.nan) -> float:
@@ -127,6 +128,15 @@ def _technical_levels(context: dict[str, Any], direction_tone: str) -> dict[str,
 
 
 def _changes(data: pd.DataFrame, context: dict[str, Any]) -> list[str]:
+    """Okumanın kendisi düne göre nasıl değişti?
+
+    Önceki bar için yeniden hesaplanmış durum varsa alan alan karşılaştırma
+    yapılır. Yoksa yalnızca temel gösterge geçişlerine düşülür.
+    """
+    comparison = compare_states(context.get("previous_state"), context)
+    if comparison["available"]:
+        context["state_comparison"] = comparison
+        return comparison["bullets"]
     row = data.iloc[-1]
     previous = data.iloc[-2]
     changes: list[str] = []
@@ -447,6 +457,7 @@ def build_technical_commentary(
         "direction": direction,
         "regime": regime,
         "changes": changes,
+        "state_comparison": context.get("state_comparison", {}),
         "supporting_evidence": supporting,
         "counter_evidence": counter,
         "evidence": [f"{item['family']}: {item['state']}" for item in supporting],
