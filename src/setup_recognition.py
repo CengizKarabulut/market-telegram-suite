@@ -294,6 +294,7 @@ def participation_reading(
         return {
             "state": "Sıkışmayla uyumlu düşük katılım",
             "tone": "neutral",
+            "rvol_1": rvol,
             "meaning": (
                 f"RVOL {rvol:.2f}x sıkışma rejiminde beklenen davranıştır{suffix}; trend içindeki düşük katılım gibi zayıflık kanıtı sayılmaz. "
                 "Asıl bilgi, kırılım denemesine hacim eşlik edip etmediğinde ortaya çıkar."
@@ -303,9 +304,10 @@ def participation_reading(
         return {
             "state": base,
             "tone": "warning",
+            "rvol_1": rvol,
             "meaning": f"RVOL {rvol:.2f}x trend rejiminde katılım zayıflığına işaret eder; devam hareketleri için teyit eksiktir.",
         }
-    return {"state": base, "tone": str(participation.get("tone", "neutral")), "meaning": str(participation.get("summary", "—"))}
+    return {"state": base, "tone": str(participation.get("tone", "neutral")), "rvol_1": rvol, "meaning": str(participation.get("summary", "—"))}
 
 
 def reconcile(

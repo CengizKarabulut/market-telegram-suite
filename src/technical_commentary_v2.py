@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 
+from src.plain_language import build_plain_summary
 from src.setup_recognition import evidence_weight, reconcile
 
 
@@ -44,13 +45,13 @@ def _regime_opening(regime: str, direction: str, adx: float, adx_delta: float) -
         return (
             "Denge / teyit bekliyor",
             "warning",
-            f"Piyasa {regime.casefold()} rejiminde; {direction.casefold()} bulunsa da daralan hareket alanında kesişimlerin bilgi değeri düşebilir. Yeni yön için bant genişlemesi, kapanışla seviye kabulü ve hacim teyidi gerekir.",
+            f"Piyasa {regime.casefold()} rejiminde. Daralan hareket alanında gösterge kesişimlerinin bilgi değeri düşer; yeni yön için bant genişlemesi, kapanışla seviye kabulü ve hacim teyidi gerekir.",
         )
     if "yönsüz" in regime.casefold():
         return (
             "Yönsüz volatilite / seçicilik gerekli",
             "warning",
-            f"Volatilite genişliyor fakat yönlülük zayıf; ADX {_fmt(adx)}. {direction} tek başına kalıcı kırılım teyidi değildir.",
+            f"Volatilite genişliyor fakat yönlülük zayıf; ADX {_fmt(adx)}. Mevcut sınıflama tek başına kalıcı kırılım teyidi değildir.",
         )
     if regime.startswith(("Trend", "Yönlü")):
         strength = "güç kazanıyor" if adx_delta > 0 else "güç kaybediyor" if adx_delta < 0 else "yatay"
@@ -58,12 +59,12 @@ def _regime_opening(regime: str, direction: str, adx: float, adx_delta: float) -
         return (
             f"{direction} / {regime}",
             tone,
-            f"{regime}; ADX {_fmt(adx)} ve bir barlık değişimi {adx_delta:+.2f}, yani yönlülük {strength}. {direction}.",
+            f"{regime}; ADX {_fmt(adx)} ve bir barlık değişimi {adx_delta:+.2f}, yani yönlülük {strength}.",
         )
     return (
         "Geçiş / çelişkili bağlam",
         "warning",
-        f"{regime}; {direction.casefold()}. Yapı, momentum ve katılım aynı yönde teyit vermeden tek bir göstergeye dayalı okuma zayıf kalır.",
+        f"{regime}. Yapı, momentum ve katılım aynı yönde teyit vermeden tek bir göstergeye dayalı okuma zayıf kalır.",
     )
 
 
@@ -220,6 +221,26 @@ def _evidence_and_clarity(
         ("Göreceli güç", decision.get("relative_strength", {}).get("state", "—"), decision.get("relative_strength", {}).get("tone", "neutral")),
         ("Fiyat davranışı", semantic.get("price_action", {}).get("state", "—"), semantic.get("price_action", {}).get("tone", "neutral")),
     ]
+    setup = context.get("setup_context", {}).get("setup", {})
+    if setup.get("name"):
+        setup_evidence_tone = {"yukarı": "positive", "aşağı": "negative"}.get(str(setup.get("bias")), "")
+        if not setup_evidence_tone and "aşağı kırılım" in str(setup["name"]).casefold():
+            setup_evidence_tone = "positive"
+        elif not setup_evidence_tone and "yukarı kırılım" in str(setup["name"]).casefold():
+            setup_evidence_tone = "negative"
+        if setup_evidence_tone:
+            families.append(("Kurulum", setup["name"], setup_evidence_tone))
+    for divergence in semantic.get("momentum_character", {}).get("active_divergences", []):
+        if divergence.get("quality") not in {"Güçlü", "Orta"}:
+            continue
+        label = str(divergence.get("state", ""))
+        divergence_tone = "positive" if "pozitif" in label.casefold() else "negative" if "negatif" in label.casefold() else ""
+        if divergence_tone:
+            families.append((
+                f"Uyumsuzluk ({divergence.get('indicator', '—')})",
+                f"{label} — {divergence.get('quality', '—')} kalite",
+                divergence_tone,
+            ))
     supporting: list[dict[str, str]] = []
     counter: list[dict[str, str]] = []
     two_sided = str(context.get("setup_context", {}).get("setup", {}).get("bias", "")) == "iki yönlü"
@@ -243,13 +264,30 @@ def _evidence_and_clarity(
     counter_weight = sum(evidence_weight(regime, item["family"]) for item in counter)
     supporting.sort(key=lambda item: evidence_weight(regime, item["family"]), reverse=True)
     counter.sort(key=lambda item: evidence_weight(regime, item["family"]), reverse=True)
-    weight_note = f"Rejime göre ağırlıklı kanıt {supporting_weight:.1f}, karşı kanıt {counter_weight:.1f}."
-    if counter_weight <= 1.0 and supporting_weight >= 4.0:
-        clarity = {"state": "Yüksek", "tone": "positive", "reason": f"Rejimde ağırlığı yüksek aileler aynı yönde. {weight_note}"}
-    elif counter_weight >= supporting_weight * 0.8:
-        clarity = {"state": "Düşük", "tone": "warning", "reason": f"Rejimde ağırlığı yüksek aileler belirgin biçimde ayrışıyor. {weight_note}"}
+    if two_sided:
+        upward_weight, downward_weight = supporting_weight, counter_weight
+        total = upward_weight + downward_weight
+        weight_note = f"Rejime göre ağırlıklı yukarı kanıt {upward_weight:.1f}, aşağı kanıt {downward_weight:.1f}."
+        dominant = max(upward_weight, downward_weight)
+        if total == 0:
+            clarity = {"state": "Düşük", "tone": "warning", "reason": f"Hiçbir katman belirgin yön üretmiyor. {weight_note}"}
+        elif dominant / total >= 0.75:
+            side = "yukarı" if upward_weight > downward_weight else "aşağı"
+            clarity = {
+                "state": "Orta",
+                "tone": "neutral",
+                "reason": f"Kanıtlar {side} tarafta yoğunlaşıyor fakat kurulum kapanışla teyit beklediği için okuma koşullu kalıyor. {weight_note}",
+            }
+        else:
+            clarity = {"state": "Düşük", "tone": "warning", "reason": f"Kanıtlar iki yöne dağılmış durumda. {weight_note}"}
     else:
-        clarity = {"state": "Orta", "tone": "neutral", "reason": f"Ana okuma mevcut ancak bazı katmanlar teyidi sınırlıyor. {weight_note}"}
+        weight_note = f"Rejime göre ağırlıklı kanıt {supporting_weight:.1f}, karşı kanıt {counter_weight:.1f}."
+        if counter_weight <= 1.0 and supporting_weight >= 4.0:
+            clarity = {"state": "Yüksek", "tone": "positive", "reason": f"Rejimde ağırlığı yüksek aileler aynı yönde. {weight_note}"}
+        elif counter_weight >= supporting_weight * 0.8:
+            clarity = {"state": "Düşük", "tone": "warning", "reason": f"Rejimde ağırlığı yüksek aileler belirgin biçimde ayrışıyor. {weight_note}"}
+        else:
+            clarity = {"state": "Orta", "tone": "neutral", "reason": f"Ana okuma mevcut ancak bazı katmanlar teyidi sınırlıyor. {weight_note}"}
     clarity["supporting_weight"] = round(supporting_weight, 2)
     clarity["counter_weight"] = round(counter_weight, 2)
     return supporting[:4], counter[:4], clarity
@@ -279,7 +317,10 @@ def _analyst_note(
         divergence_text = f" Aktif uyumsuzluklar: {details}; bunlar erken kanıttır ve yapı/seviye teyidi gerektirir."
     strengthen_first = scenario["strengthen"][0].rstrip(". ")
     weaken_first = scenario["weaken"][0].rstrip(". ")
-    closing = f"Mevcut okumayı teyit edecek ilk koşul: {strengthen_first}. Okumayı geçersizleştirecek ilk koşul: {weaken_first}."
+    if str(context.get("setup_context", {}).get("setup", {}).get("bias", "")) == "iki yönlü":
+        closing = f"Yönü netleştirecek ilk eşik: {strengthen_first}. Kurulumu geçersiz kılacak gelişme: {weaken_first}."
+    else:
+        closing = f"Mevcut okumayı teyit edecek ilk koşul: {strengthen_first}. Okumayı geçersizleştirecek ilk koşul: {weaken_first}."
     setup_context = context.get("setup_context", {})
     setup = setup_context.get("setup", {})
     duration = setup_context.get("duration", {})
@@ -301,7 +342,7 @@ def _analyst_note(
         f"{trend} {momentum}{divergence_text}".strip(),
         f"{price_action} {participation} {duration_paragraph}".strip(),
         f"{location} {rs}".strip(),
-        f"{reconciliation} {closing}".strip() if reconciliation else closing,
+        closing,
     ]
     return "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
 
@@ -330,16 +371,28 @@ def build_technical_commentary(
     state_map = [
         ["Kurulum", setup.get("name", "—"), f"Eğilim: {setup.get('bias', '—')}", f"{setup.get('description', '—')} {setup_context.get('duration', {}).get('summary', '')}".strip(), setup.get("tone", "warning")],
         ["Rejim", regime, f"ADX Δ {adx_delta:+.2f}", opening, context.get("regime", {}).get("tone", "warning")],
-        ["Yapı / trend", direction, semantic.get("trend_quality", {}).get("spread_state", "—"), semantic.get("trend_quality", {}).get("summary", "—"), direction_tone],
+        ["Yapı / trend", f"{context.get('structure', {}).get('state', '—')} | {semantic.get('trend_quality', {}).get('state', '—')}", semantic.get("trend_quality", {}).get("spread_state", "—"), semantic.get("trend_quality", {}).get("summary", "—"), context.get("structure", {}).get("tone", "neutral")],
         ["Momentum", semantic.get("momentum_character", {}).get("state", "—"), semantic.get("momentum_character", {}).get("macd", {}).get("histogram_character", "—"), semantic.get("momentum_character", {}).get("summary", "—"), semantic.get("momentum_character", {}).get("tone", "warning")],
-        ["Katılım", semantic.get("participation", {}).get("state", "—"), f"RVOL {semantic.get('participation', {}).get('rvol_1', math.nan):.2f}x", semantic.get("participation", {}).get("summary", "—"), semantic.get("participation", {}).get("tone", "warning")],
+        ["Katılım", setup_context.get("participation_reading", {}).get("state", semantic.get("participation", {}).get("state", "—")), f"RVOL {semantic.get('participation', {}).get('rvol_1', math.nan):.2f}x", setup_context.get("participation_reading", {}).get("meaning", semantic.get("participation", {}).get("summary", "—")), setup_context.get("participation_reading", {}).get("tone", "warning")],
         ["Konum", context.get("profile", {}).get("position", "—"), context.get("profile", {}).get("poc_migration", "—"), _location_text(context), context.get("profile", {}).get("tone", "neutral")],
         ["Göreceli güç", rs_state, f"Eğim5 %{_number(decision.get('relative_strength', {}).get('ratio_slope_5_pct')):+.2f}", rs_meaning, rs_tone],
         ["Fiyat davranışı", semantic.get("price_action", {}).get("state", "—"), ", ".join(semantic.get("price_action", {}).get("patterns", [])) or "Yeni formasyon yok", semantic.get("price_action", {}).get("summary", "—"), semantic.get("price_action", {}).get("tone", "neutral")],
     ]
+    plain = build_plain_summary(
+        str(context.get("symbol", "—")),
+        _number(data["Close"].iloc[-1]),
+        _number(context.get("change_pct"), 0.0),
+        setup_context,
+        scenario,
+        clarity,
+        bar_state,
+    )
     headline = f"{stance}. {opening} Teknik okuma netliği: {clarity['state'].casefold()}."
     telegram_detail = "\n".join(
         [
+            "🗣️ Sade Özet",
+            plain["text"],
+            "",
             "🧭 Analist Notu",
             analyst_note,
             "",
@@ -367,6 +420,7 @@ def build_technical_commentary(
         "setup": setup,
         "duration": setup_context.get("duration", {}),
         "reconciliation": reconciliation,
+        "plain_summary": plain,
         "stance": stance,
         "tone": tone,
         "headline": headline,

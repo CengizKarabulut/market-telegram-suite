@@ -613,6 +613,8 @@ def build_status(
         config.atr_multiple,
         bar_state,
     )
+    context["symbol"] = symbol
+    context["change_pct"] = (price / float(previous["Close"]) - 1) * 100
     commentary = build_technical_commentary(data, context, decision, bar_state)
     executive = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["families"]]
     location = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["location_rows"]]
