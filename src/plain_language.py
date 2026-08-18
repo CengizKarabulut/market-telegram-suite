@@ -58,16 +58,31 @@ def _participation_plain(rvol: float, in_squeeze: bool) -> str:
     return "İşlem hacmi normal seviyelerde."
 
 
+INTERVAL_WORDS = {
+    "5m": ("5 dakikalık mum", "mum"),
+    "15m": ("15 dakikalık mum", "mum"),
+    "30m": ("30 dakikalık mum", "mum"),
+    "1h": ("saatlik mum", "mum"),
+    "2h": ("2 saatlik mum", "mum"),
+    "4h": ("4 saatlik mum", "mum"),
+    "1d": ("gün", "gün"),
+    "1wk": ("hafta", "hafta"),
+    "1mo": ("ay", "ay"),
+}
+
+
 def bar_state_plain(bar_state: dict[str, Any] | None) -> str:
-    """CANLI/TEYİTLİ etiketinin gündelik karşılığını verir."""
+    """CANLI/TEYİTLİ etiketinin, mum aralığına uygun gündelik karşılığı."""
     state = bar_state or {}
+    unit, _ = INTERVAL_WORDS.get(str(state.get("interval", "1d")), ("gün", "gün"))
+    opened = "Gün sürüyor" if unit == "gün" else f"Bu {unit} henüz kapanmadı"
+    closed = "Gün kapandı" if unit == "gün" else f"{unit.capitalize()} kapandı"
     if state.get("is_live"):
-        return "Gün sürüyor — rakamlar kapanışa kadar değişebilir"
-    label = str(state.get("label", ""))
-    if label == "TEYİTLİ":
-        return "Gün kapandı — rakamlar kesinleşti"
+        return f"{opened} — rakamlar kapanışa kadar değişebilir"
+    if str(state.get("label", "")) == "TEYİTLİ":
+        return f"{closed} — rakamlar kesinleşti"
     if state.get("market_state") == "CLOSED":
-        return "Piyasa kapalı — son tamamlanan günün rakamları"
+        return f"Piyasa kapalı — son tamamlanan {unit} rakamları"
     return "Bar durumu bilinmiyor"
 
 
@@ -126,7 +141,7 @@ def build_plain_summary(
         sentences.append("Göstergelerin büyük kısmı aynı şeyi söylüyor.")
 
     if bar_state and bar_state.get("is_live"):
-        sentences.append("Not: gün henüz kapanmadı, bu rakamlar kapanışa kadar değişebilir.")
+        sentences.append("Not: mevcut mum henüz kapanmadı, bu rakamlar kapanışa kadar değişebilir.")
 
     sentences.append("Bu bir alım veya satım tavsiyesi değildir; yalnızca fiyatın mevcut durumunun özetidir.")
     return {

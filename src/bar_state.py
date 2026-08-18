@@ -42,9 +42,16 @@ def build_bar_state(
     if interval == "1d":
         is_live = bool(market_open and same_session_date)
     else:
-        durations = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60}
+        durations = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "2h": 120, "4h": 240}
         minutes = durations.get(interval)
-        is_live = bool(minutes and same_session_date and market_open and current < timestamp.to_pydatetime() + pd.Timedelta(minutes=minutes))
+        if minutes:
+            is_live = bool(same_session_date and market_open and current < timestamp.to_pydatetime() + pd.Timedelta(minutes=minutes))
+        elif interval == "1wk":
+            is_live = bool(market_open and timestamp.isocalendar()[:2] == pd.Timestamp(current).isocalendar()[:2])
+        elif interval == "1mo":
+            is_live = bool(market_open and (timestamp.year, timestamp.month) == (current.year, current.month))
+        else:
+            is_live = False
 
     return {
         "is_live": is_live,
@@ -55,5 +62,6 @@ def build_bar_state(
         "market_state": "OPEN" if market_open else "CLOSED",
         "session_timezone": timezone_name,
         "session": f"{session_open.strftime('%H:%M')}–{session_close.strftime('%H:%M')}",
+        "interval": interval,
         "method": "Hafta içi düzenli seans saatleri; resmi tatil/tatil yarım gün takvimi içermez.",
     }

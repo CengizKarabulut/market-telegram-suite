@@ -151,7 +151,8 @@ def trend_quality_context(data: pd.DataFrame, ma_periods: list[int]) -> dict[str
         alignment, tone = "Bearish dizilim büyük ölçüde oluşmuş", "negative"
     else:
         alignment, tone = "EMA dizilimi parçalı", "warning"
-    slopes = {str(period): _ema_slope_atr(data, period) for period in KEY_EMA_PERIODS if f"EMA_{period}" in data}
+    highlighted = [period for period in KEY_EMA_PERIODS if f"EMA_{period}" in data] or ma_periods[-3:]
+    slopes = {str(period): _ema_slope_atr(data, period) for period in highlighted if f"EMA_{period}" in data}
     slope_parts = []
     for period, value in slopes.items():
         direction = "yukarı" if value > 0.05 else "aşağı" if value < -0.05 else "yatay"
@@ -164,7 +165,7 @@ def trend_quality_context(data: pd.DataFrame, ma_periods: list[int]) -> dict[str
     price = _number(row["Close"])
     distances = {
         str(period): (price - _number(row[f"EMA_{period}"])) / atr
-        for period in KEY_EMA_PERIODS
+        for period in highlighted
         if f"EMA_{period}" in data and atr > 0
     }
     return {

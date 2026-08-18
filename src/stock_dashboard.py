@@ -22,6 +22,14 @@ import yfinance as yf
 from src.analyst_card import render_analyst_cards
 from src.bar_state import build_bar_state
 from src.decision_context import build_decision_context
+from src.intervals import (
+    INTERVALS,
+    key_ema_periods,
+    minimum_bars,
+    resample,
+    resolve,
+    usable_ma_periods,
+)
 from src.market_context import (
     build_market_context,
     diagnostics,
@@ -91,7 +99,7 @@ def normalize_symbol(ticker: str, market: str) -> str:
     return symbol
 
 
-def validate_price_data(data: pd.DataFrame, symbol: str, provider: str) -> pd.DataFrame:
+def validate_price_data(data: pd.DataFrame, symbol: str, provider: str, spec: Any = None) -> pd.DataFrame:
     if data.empty:
         raise RuntimeError(f"{symbol} için {provider} fiyat verisi bulunamadı.")
     if isinstance(data.columns, pd.MultiIndex):
@@ -102,9 +110,10 @@ def validate_price_data(data: pd.DataFrame, symbol: str, provider: str) -> pd.Da
         raise RuntimeError(f"{provider} verisinde eksik fiyat sütunları: {', '.join(missing)}")
     data = data[required].dropna(subset=["Open", "High", "Low", "Close"]).copy()
     data["Volume"] = data["Volume"].fillna(0.0)
-    if len(data) < max(MA_PERIODS) + 5:
+    required = minimum_bars(spec, MA_PERIODS) if spec is not None else max(MA_PERIODS) + 5
+    if len(data) < required:
         raise RuntimeError(
-            f"{symbol} için en az {max(MA_PERIODS) + 5} bar gerekli; yalnızca {len(data)} bar geldi. "
+            f"{symbol} için en az {required} bar gerekli; yalnızca {len(data)} bar geldi. "
             "Daha uzun bir period seçin."
         )
     data.attrs["provider"] = provider
@@ -114,15 +123,16 @@ def validate_price_data(data: pd.DataFrame, symbol: str, provider: str) -> pd.Da
 def download_yfinance(config: ScanConfig) -> tuple[str, pd.DataFrame]:
     symbol = normalize_symbol(config.ticker, config.market)
     download_period = effective_download_period(config.period, config.warmup_period)
+    spec = resolve(config.interval)
     data = yf.download(
         symbol,
         period=download_period,
-        interval=config.interval,
+        interval="60m" if spec.source_interval == "1h" else spec.source_interval,
         auto_adjust=False,
         progress=False,
         threads=False,
     )
-    validated = validate_price_data(data, symbol, "yfinance")
+    validated = resample(validate_price_data(data, symbol, "yfinance", spec), spec)
     validated.attrs.update(
         market=config.market.upper(),
         download_period=download_period,
@@ -142,8 +152,9 @@ def download_borsapy(config: ScanConfig) -> tuple[str, pd.DataFrame]:
     if not symbol:
         raise ValueError("Hisse sembolü boş olamaz.")
     download_period = effective_download_period(config.period, config.warmup_period)
-    data = bp.Ticker(symbol).history(period=download_period, interval=config.interval)
-    validated = validate_price_data(data, symbol, "borsapy/TradingView")
+    spec = resolve(config.interval)
+    data = bp.Ticker(symbol).history(period=download_period, interval=spec.source_interval)
+    validated = resample(validate_price_data(data, symbol, "borsapy/TradingView", spec), spec)
     validated.attrs.update(
         market="BIST",
         download_period=download_period,
@@ -367,10 +378,12 @@ def percentile_rank(series: pd.Series, length: int) -> pd.Series:
 def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     out = data.copy()
     close = out["Close"]
-    for length in MA_PERIODS:
+    periods = usable_ma_periods(len(out), MA_PERIODS)
+    out.attrs["ma_periods"] = periods
+    for length in periods:
         out[f"SMA_{length}"] = close.rolling(length).mean()
         out[f"EMA_{length}"] = ema(close, length)
-    ema_columns = [f"EMA_{length}" for length in MA_PERIODS]
+    ema_columns = [f"EMA_{length}" for length in periods]
     out["MA_SPREAD_PCT"] = 100 * (out[ema_columns].max(axis=1) - out[ema_columns].min(axis=1)) / close
     out["MA_SPREAD_RANK"] = percentile_rank(out["MA_SPREAD_PCT"], 252)
 
@@ -544,7 +557,7 @@ def previous_state_snapshot(
         return None
     trimmed = data.iloc[:-1]
     try:
-        context = build_market_context(trimmed, MA_PERIODS, config.anchor_date)
+        context = build_market_context(trimmed, trimmed.attrs.get("ma_periods", MA_PERIODS), config.anchor_date)
         benchmark = benchmark_data.loc[benchmark_data.index <= trimmed.index[-1]] if benchmark_data is not None else None
         decision = build_decision_context(
             trimmed,
@@ -585,7 +598,8 @@ def build_status(
     previous = data.iloc[-2]
     price = float(row["Close"])
     ma_rows = []
-    for length in MA_PERIODS:
+    periods = data.attrs.get("ma_periods", MA_PERIODS)
+    for length in periods:
         sma_value = float(row[f"SMA_{length}"])
         ema_value = float(row[f"EMA_{length}"])
         current_atr = float(row["ATR"]) if "ATR" in row and math.isfinite(float(row["ATR"])) else math.nan
@@ -656,7 +670,7 @@ def build_status(
 
     resolved_market = str(data.attrs.get("market", config.market if config.market != "AUTO" else "BIST"))
     bar_state = build_bar_state(data, resolved_market, config.interval)
-    context = build_market_context(data, MA_PERIODS, config.anchor_date, bar_state=bar_state)
+    context = build_market_context(data, periods, config.anchor_date, bar_state=bar_state)
     for momentum_row in momentum:
         divergence = context["divergences"]["indicators"].get(momentum_row[0])
         if not divergence:
@@ -879,8 +893,10 @@ def render_report_page_one(data: pd.DataFrame, status: dict[str, Any], output: P
     chart.set_facecolor(PANEL)
     recent = data.tail(120)
     chart.plot(recent.index, recent["Close"], color=WHITE, linewidth=2.0, label="Kapanış")
-    for period, colour in zip(KEY_EMA_PERIODS, ("#38bdf8", "#f59e0b", "#f43f5e"), strict=True):
-        chart.plot(recent.index, recent[f"EMA_{period}"], color=colour, linewidth=1.3, label=f"EMA{period}")
+    chart_emas = key_ema_periods(list(data.attrs.get("ma_periods", MA_PERIODS)), KEY_EMA_PERIODS)
+    for period, colour in zip(chart_emas, ("#38bdf8", "#f59e0b", "#f43f5e"), strict=False):
+        if f"EMA_{period}" in recent:
+            chart.plot(recent.index, recent[f"EMA_{period}"], color=colour, linewidth=1.3, label=f"EMA{period}")
     chart.fill_between(recent.index, recent["BB_LOWER"], recent["BB_UPPER"], color="#3b82f6", alpha=0.10, label="Bollinger")
     profile_source = data.tail(219)
     rolling_profile = rolling_volume_profile_levels(profile_source, lookback=100).tail(120)
@@ -982,9 +998,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--market", default="BIST", choices=["BIST", "US", "AUTO"])
     parser.add_argument("--provider", default="AUTO", choices=["AUTO", "BORSAPY", "YFINANCE"])
     parser.add_argument("--anchor-date", default="", help="Manuel AVWAP başlangıcı, ör. 2026-01-02")
-    parser.add_argument("--period", default="2y", help="İstenen analiz/gösterim dönemi")
-    parser.add_argument("--warmup-period", default="2y", help="377 bar göstergeler için minimum veri dönemi")
-    parser.add_argument("--interval", default="1d")
+    parser.add_argument("--period", default="", help="Boşsa mum aralığının varsayılan dönemi kullanılır")
+    parser.add_argument("--warmup-period", default="", help="Boşsa mum aralığının varsayılan ısınma dönemi kullanılır")
+    parser.add_argument("--interval", default="1d", choices=list(INTERVALS))
     parser.add_argument("--benchmark", default="", help="Boşsa BIST için XU100, US için SPY")
     parser.add_argument("--account-size", type=float, default=0.0, help="Opsiyonel örnek risk bütçesi hesabı")
     parser.add_argument("--risk-pct", type=float, default=1.0)
@@ -998,14 +1014,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    spec = resolve(args.interval)
+    # Boş bırakılan dönemler mum aralığının varsayılanından alınır; 5 dakikalıkta
+    # 2 yıllık istek sağlayıcı sınırına takılır, aylıkta 2 yıl yetersiz kalır.
+    period = args.period or spec.default_period
+    warmup = args.warmup_period or spec.warmup_period
     config = ScanConfig(
         ticker=args.ticker,
         market=args.market,
-        period=args.period,
+        period=period,
         interval=args.interval,
         provider=args.provider,
         anchor_date=args.anchor_date,
-        warmup_period=args.warmup_period,
+        warmup_period=warmup,
         benchmark=args.benchmark,
         account_size=args.account_size,
         risk_pct=args.risk_pct,

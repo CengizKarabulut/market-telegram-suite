@@ -609,7 +609,10 @@ def build_market_context(
         "Uzun": [200, 233, 377],
     }
     ma_groups = {}
-    for group_name, periods in ma_groups_definition.items():
+    for group_name, group_periods in ma_groups_definition.items():
+        periods = [length for length in group_periods if f"EMA_{length}" in data]
+        if not periods:
+            continue
         group_values = [float(row[f"EMA_{length}"]) for length in periods]
         ma_groups[group_name] = {
             "above": sum(price > value for value in group_values if math.isfinite(value)),

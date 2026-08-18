@@ -70,7 +70,7 @@ class PlainLanguageTests(unittest.TestCase):
 
     def test_live_bar_warning_is_added(self) -> None:
         text = summary(bar_state={"is_live": True})["text"]
-        self.assertIn("gün henüz kapanmadı", text)
+        self.assertIn("henüz kapanmadı", text)
 
     def test_disclaimer_always_present(self) -> None:
         self.assertIn("tavsiyesi değildir", summary()["text"])
