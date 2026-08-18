@@ -37,6 +37,12 @@ on:
         default: "1d"
         type: choice
         options: ["5m", "15m", "30m", "1h", "2h", "4h", "1d", "1wk", "1mo"]
+      report_detail:
+        description: "Ayrıntı seviyesi (kompakt: 4 görsel, dengeli: 6, tam: 7)"
+        required: true
+        default: "kompakt"
+        type: choice
+        options: [kompakt, dengeli, tam]
       benchmark:
         description: "Göreceli güç benchmarkı (BIST varsayılanı XU100)"
         required: false
@@ -98,6 +104,7 @@ jobs:
           INPUT_ANCHOR_DATE: ${{ inputs.anchor_date }}
           INPUT_PERIOD: ${{ inputs.period }}
           INPUT_INTERVAL: ${{ inputs.interval }}
+          INPUT_REPORT_DETAIL: ${{ inputs.report_detail }}
           INPUT_BENCHMARK: ${{ inputs.benchmark }}
           INPUT_ACCOUNT_SIZE: ${{ inputs.account_size }}
           INPUT_RISK_PCT: ${{ inputs.risk_pct }}
@@ -111,6 +118,7 @@ jobs:
             --period "$INPUT_PERIOD" \
             --warmup-period "" \
             --interval "$INPUT_INTERVAL" \
+            --report-detail "$INPUT_REPORT_DETAIL" \
             --benchmark "$INPUT_BENCHMARK" \
             --account-size "$INPUT_ACCOUNT_SIZE" \
             --risk-pct "$INPUT_RISK_PCT" \

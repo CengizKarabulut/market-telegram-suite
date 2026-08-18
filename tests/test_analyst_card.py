@@ -88,20 +88,19 @@ class CardWrappingTests(unittest.TestCase):
 
 
 class CardPagingTests(unittest.TestCase):
-    def test_two_separate_cards_are_produced(self) -> None:
+    def test_cards_are_produced_as_a_balanced_flow(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             paths = render_analyst_cards(STATUS, Path(directory))
-            self.assertEqual(len(paths), 2)
+            self.assertGreaterEqual(len(paths), 1)
             for path in paths:
                 self.assertTrue(path.exists())
                 self.assertGreater(path.stat().st_size, 5_000)
 
-    def test_each_card_is_shorter_than_the_combined_card(self) -> None:
+    def test_combined_card_is_not_smaller_than_a_single_page(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             combined = render_analyst_card(STATUS, Path(directory) / "combined.png")
             paths = render_analyst_cards(STATUS, Path(directory))
-            for path in paths:
-                self.assertLess(path.stat().st_size, combined.stat().st_size)
+            self.assertGreaterEqual(combined.stat().st_size, min(path.stat().st_size for path in paths))
 
     def test_bar_state_is_expressed_in_plain_words(self) -> None:
         from src.plain_language import bar_state_plain
@@ -126,3 +125,48 @@ class CardBalanceTests(unittest.TestCase):
         detail = " ".join(block.text for block in CARD_PAGES[1][1](STATUS["technical_commentary"]))
         self.assertIn("TEKNİK YOĞUNLAŞMA BÖLGELERİ", detail)
         self.assertIn("yukarı çözülme", detail)
+
+
+class StandardizeTests(unittest.TestCase):
+    def test_all_pages_end_up_with_identical_dimensions(self) -> None:
+        from PIL import Image
+
+        from src.analyst_card import standardize_pages
+
+        with tempfile.TemporaryDirectory() as directory:
+            paths = []
+            for index, height in enumerate((900, 1500, 1200), start=1):
+                path = Path(directory) / f"page_{index}.png"
+                Image.new("RGB", (1200, height), "#0f172a").save(path)
+                paths.append(path)
+            standardize_pages(paths)
+            sizes = {Image.open(path).size for path in paths}
+            self.assertEqual(sizes, {(1200, 1500)})
+
+    def test_content_is_preserved_at_the_top_after_padding(self) -> None:
+        from PIL import Image
+
+        from src.analyst_card import standardize_pages
+
+        with tempfile.TemporaryDirectory() as directory:
+            short = Path(directory) / "short.png"
+            tall = Path(directory) / "tall.png"
+            image = Image.new("RGB", (1200, 600), "#ffffff")
+            image.save(short)
+            Image.new("RGB", (1200, 1400), "#0f172a").save(tall)
+            standardize_pages([short, tall])
+            padded = Image.open(short)
+            self.assertEqual(padded.size, (1200, 1400))
+            self.assertEqual(padded.getpixel((10, 10)), (255, 255, 255))
+
+    def test_empty_input_is_handled(self) -> None:
+        from src.analyst_card import standardize_pages
+
+        self.assertEqual(standardize_pages([]), [])
+
+    def test_cards_are_balanced_into_one_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = render_analyst_cards(STATUS, Path(directory))
+            self.assertGreaterEqual(len(paths), 1)
+            heights = [Path(path).stat().st_size for path in paths]
+            self.assertTrue(all(size > 5_000 for size in heights))

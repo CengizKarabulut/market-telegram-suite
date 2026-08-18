@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from src.analyst_card import render_analyst_cards
+from src.analyst_card import render_analyst_cards, standardize_pages
 from src.bar_state import build_bar_state
 from src.decision_context import build_decision_context
 from src.intervals import (
@@ -81,6 +81,7 @@ class ScanConfig:
     account_size: float = 0.0
     risk_pct: float = 1.0
     atr_multiple: float = 1.5
+    report_detail: str = "kompakt"
 
 
 PERIOD_ORDER = {"1d": 1, "5d": 5, "1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730, "5y": 1825, "10y": 3650, "max": 99999}
@@ -768,6 +769,7 @@ def build_status(
     return {
         "data_provider": data.attrs.get("provider", config.provider),
         "symbol": symbol,
+        "report_detail": config.report_detail,
         "short_history": bool(data.attrs.get("short_history", False)),
         "bar_count": len(data),
         "missing_periods": missing_ma_periods(len(data), MA_PERIODS),
@@ -929,10 +931,27 @@ def ma_cell(value: Any, relation: str) -> str:
     return f"{fmt(value)}  {marker} {distance}".rstrip()
 
 
-REPORT_MAX_ASPECT_RATIO = 1.8
+REPORT_MAX_ASPECT_RATIO = 2.2
 
 
-def _report_panels(data: pd.DataFrame, status: dict[str, Any], text_width: float) -> list[dict[str, Any]]:
+# Rapor ayrıntı seviyeleri. "Katmanlı Teknik Yorum" tablosu analist kartlarında
+# birebir anlatıldığı için ilk çıkarılan panel odur; bilgi kaybı olmaz.
+REPORT_DETAIL_LEVELS = {
+    # excluded: rapordan çıkarılan paneller, ratio: izin verilen en yüksek sayfa oranı
+    "kompakt": {
+        "excluded": {"Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", "Son 12 Teyitli Olay"},
+        "ratio": 2.7,
+    },
+    "dengeli": {"excluded": {"Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit"}, "ratio": 2.2},
+    "tam": {"excluded": set(), "ratio": 2.0},
+}
+
+
+def detail_profile(detail: str) -> dict[str, Any]:
+    return REPORT_DETAIL_LEVELS.get(detail, REPORT_DETAIL_LEVELS["dengeli"])
+
+
+def _report_panels(data: pd.DataFrame, status: dict[str, Any], text_width: float, detail: str = "dengeli") -> list[dict[str, Any]]:
     """Rapor panellerini çizim işlevi ve tahmini yüksekliğiyle birlikte tanımlar."""
 
     def table_panel(title: str, rows: list[list[str]], colors: list[list[str]], columns: list[str], font_size: int, widths: list[float], footnote: str = "") -> dict[str, Any]:
@@ -941,7 +960,7 @@ def _report_panels(data: pd.DataFrame, status: dict[str, Any], text_width: float
             if footnote:
                 axes.text(0, -0.035, footnote, transform=axes.transAxes, color=MUTED, fontsize=8)
 
-        return {"height": estimate_table_height(rows, widths, font_size, text_width), "draw": draw}
+        return {"name": title, "height": estimate_table_height(rows, widths, font_size, text_width), "draw": draw}
 
     def chart_panel() -> dict[str, Any]:
         def draw(chart: plt.Axes) -> None:
@@ -964,7 +983,7 @@ def _report_panels(data: pd.DataFrame, status: dict[str, Any], text_width: float
             chart.legend(facecolor=HEADER, labelcolor=WHITE, loc="upper left", ncol=8)
             chart.set_title("Fiyat • Ortalamalar • Bollinger • Yaklaşık Hacim Profili — Son 120 Bar", color=WHITE, fontsize=15, fontweight="bold", loc="left")
 
-        return {"height": 6.5, "draw": draw}
+        return {"name": "Fiyat Grafiği", "height": 6.5, "draw": draw}
 
     def rows_of(key: str) -> list[list[str]]:
         return [[item[0], item[1], item[2]] for item in status[key]]
@@ -974,7 +993,8 @@ def _report_panels(data: pd.DataFrame, status: dict[str, Any], text_width: float
         for item in status["ma"]
     ]
     ma_colors = [[HEADER, item["sma_color"], item["ema_color"]] for item in status["ma"]]
-    return [
+    excluded = detail_profile(detail)["excluded"]
+    panels = [
         table_panel("Piyasa Durum Haritası", rows_of("executive"), [[HEADER, tone_color(item[3]), PANEL] for item in status["executive"]], ["Aile", "Durum", "Bağlam"], 13, [0.16, 0.38, 0.46]),
         table_panel("Karar Bağlamı • RS • MTF • Likidite • Risk", rows_of("decision_rows"), [[HEADER, PANEL, tone_color(item[3])] for item in status["decision_rows"]], ["Alan", "Değerler", "Durum"], 12, [0.16, 0.46, 0.38]),
         table_panel("Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", [[item[0], item[1], item[2]] for item in status["technical_commentary"]["visual_rows"]], [[HEADER, tone_color(item[3]), PANEL] for item in status["technical_commentary"]["visual_rows"]], ["Katman", "Durum", "Yorum"], 12, [0.15, 0.22, 0.63]),
@@ -986,6 +1006,7 @@ def _report_panels(data: pd.DataFrame, status: dict[str, Any], text_width: float
         table_panel("Katılım • RVOL • Delta/CVD Tahmini", rows_of("participation"), [[HEADER, PANEL, tone_color(item[3])] for item in status["participation"]], ["Alan", "Değerler", "Durum"], 11, [0.14, 0.34, 0.52]),
         table_panel("Son 12 Teyitli Olay", rows_of("events"), [[tone_color(item[3]), PANEL, HEADER] for item in status["events"]], ["Olay", "Zaman", "Tür"], 11, [0.50, 0.24, 0.26]),
     ]
+    return [panel for panel in panels if panel["name"] not in excluded]
 
 
 def render_report_pages(data: pd.DataFrame, status: dict[str, Any], directory: Path, stem: str = "technical_report") -> list[Path]:
@@ -998,8 +1019,8 @@ def render_report_pages(data: pd.DataFrame, status: dict[str, Any], directory: P
     directory.mkdir(parents=True, exist_ok=True)
     plt.rcParams["font.family"] = "DejaVu Sans"
     text_width = PAGE_WIDTH_INCHES - 1.0
-    panels = _report_panels(data, status, text_width)
-    budget = PAGE_WIDTH_INCHES * REPORT_MAX_ASPECT_RATIO - 2.7
+    panels = _report_panels(data, status, text_width, str(status.get("report_detail", "dengeli")))
+    budget = PAGE_WIDTH_INCHES * detail_profile(str(status.get("report_detail", "dengeli")))["ratio"] - 2.7
     total_height = sum(panel["height"] for panel in panels)
     # Önce kaç sayfa gerektiğini bul, sonra yükü eşit dağıt; aksi halde son sayfa
     # tek panelle yarı boş kalır.
@@ -1052,6 +1073,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--period", default="", help="Boşsa mum aralığının varsayılan dönemi kullanılır")
     parser.add_argument("--warmup-period", default="", help="Boşsa mum aralığının varsayılan ısınma dönemi kullanılır")
     parser.add_argument("--interval", default="1d", choices=list(INTERVALS))
+    parser.add_argument("--report-detail", default="kompakt", choices=list(REPORT_DETAIL_LEVELS), help="Görsel sayısı/ayrıntı dengesi")
     parser.add_argument("--benchmark", default="", help="Boşsa BIST için XU100, US için SPY")
     parser.add_argument("--account-size", type=float, default=0.0, help="Opsiyonel örnek risk bütçesi hesabı")
     parser.add_argument("--risk-pct", type=float, default=1.0)
@@ -1082,6 +1104,7 @@ def main() -> None:
         account_size=args.account_size,
         risk_pct=args.risk_pct,
         atr_multiple=args.atr_multiple,
+        report_detail=args.report_detail,
     )
     symbol, prices = download_prices(config)
     resolved_config = dataclass_replace(config, market=str(prices.attrs.get("market", config.market)))
@@ -1102,6 +1125,9 @@ def main() -> None:
     print(f"{len(report_pages)} rapor sayfası oluşturuldu.")
     print(f"JSON oluşturuldu: {json_path}")
     card_paths = render_analyst_cards(status, Path(args.card_output).parent)
+    # Tüm görseller aynı boyuta getirilir; Telegram farklı oranları farklı
+    # genişliklerde gösterdiği için akış aksi halde dağınık görünür.
+    standardize_pages(report_pages + card_paths)
     print(f"{len(card_paths)} analist kartı oluşturuldu.")
     if args.send_telegram:
         sent = send_report_pages(report_pages, status) + send_analyst_cards(card_paths, status)

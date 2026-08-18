@@ -128,7 +128,7 @@ def _note_blocks(commentary: dict[str, Any]) -> list[_Block]:
     return blocks
 
 
-def _level_blocks(commentary: dict[str, Any]) -> list[_Block]:
+def _level_blocks(commentary: dict[str, Any], limit: int = 4) -> list[_Block]:
     """3. kart: seviyeler, senaryo eşikleri ve son değişimler."""
     setup = commentary.get("setup", {})
     scenario = commentary.get("scenario_map", {})
@@ -137,7 +137,7 @@ def _level_blocks(commentary: dict[str, Any]) -> list[_Block]:
     blocks: list[_Block] = []
     if clusters:
         blocks.append(_Block("section", "TEKNİK YOĞUNLAŞMA BÖLGELERİ", 23, ACCENT))
-        for cluster in clusters[:4]:
+        for cluster in clusters[:limit]:
             members = ", ".join(cluster.get("members", [])[:5])
             low, high = float(cluster["low"]), float(cluster["high"])
             span = f"{low:,.2f}" if abs(high - low) < 0.005 else f"{low:,.2f} – {high:,.2f}"
@@ -167,12 +167,12 @@ def _level_blocks(commentary: dict[str, Any]) -> list[_Block]:
     changes = commentary.get("changes", [])
     if changes:
         blocks.append(_Block("section", "DÜNDEN BUGÜNE", 22, ACCENT))
-        for item in changes[:4]:
+        for item in changes[:limit]:
             blocks.append(_Block("body", f"•  {item}", 18, MUTED))
     return blocks
 
 
-def _overview_blocks(commentary: dict[str, Any]) -> list[_Block]:
+def _overview_blocks(commentary: dict[str, Any], limit: int = 4) -> list[_Block]:
     """1. kart: sade özet, kurulum, okuma netliği ve kanıt dengesi."""
     blocks = _summary_blocks(commentary)
     supporting = commentary.get("supporting_evidence", [])
@@ -187,7 +187,7 @@ def _overview_blocks(commentary: dict[str, Any]) -> list[_Block]:
     return blocks
 
 
-def _detail_blocks(commentary: dict[str, Any]) -> list[_Block]:
+def _detail_blocks(commentary: dict[str, Any], limit: int = 4) -> list[_Block]:
     """2. kart: analist notu, gerekçe, seviyeler ve senaryolar."""
     trimmed = [
         block
@@ -197,7 +197,7 @@ def _detail_blocks(commentary: dict[str, Any]) -> list[_Block]:
     while trimmed and trimmed[-1].kind == "gap":
         trimmed.pop()
     trimmed.append(_Block("gap", "", 12, WHITE))
-    trimmed.extend(_level_blocks(commentary))
+    trimmed.extend(_level_blocks(commentary, limit))
     return trimmed
 
 
@@ -292,7 +292,7 @@ def render_analyst_card(status: dict[str, Any], output: Path, blocks: list[_Bloc
     return output
 
 
-MAX_ASPECT_RATIO = 1.8
+MAX_ASPECT_RATIO = 2.2
 
 
 def _paginate(blocks: list[_Block], text_width: float, budget: float) -> list[list[_Block]]:
@@ -324,22 +324,55 @@ def _paginate(blocks: list[_Block], text_width: float, budget: float) -> list[li
     return pages or [[]]
 
 
+DETAIL_SETTINGS = {
+    "kompakt": {"ratio": 2.7, "limit": 3},
+    "dengeli": {"ratio": 2.2, "limit": 4},
+    "tam": {"ratio": 2.0, "limit": 4},
+}
+
+
 def render_analyst_cards(status: dict[str, Any], directory: Path, stem: str = "analyst_card") -> list[Path]:
-    """Yorumu okunabilir kartlara böler; gerekirse bir bölümü ikiye ayırır."""
+    """Yorumu okunabilir kartlara böler; ayrıntı seviyesi sayfa sayısını belirler."""
     commentary = status.get("technical_commentary", {})
+    settings = DETAIL_SETTINGS.get(str(status.get("report_detail", "dengeli")), DETAIL_SETTINGS["dengeli"])
     text_width = CARD_WIDTH_INCHES - 2 * MARGIN
-    budget = CARD_WIDTH_INCHES * MAX_ASPECT_RATIO - 2.6
-    pages: list[tuple[str, list[_Block]]] = []
-    for label, builder in CARD_PAGES:
-        blocks = builder(commentary)
-        if not blocks:
-            continue
-        chunks = _paginate(blocks, text_width, budget)
-        for order, chunk in enumerate(chunks, start=1):
-            suffix = f" — devam {order}" if len(chunks) > 1 and order > 1 else ""
-            pages.append((f"{label}{suffix}", chunk))
+    budget = CARD_WIDTH_INCHES * settings["ratio"] - 2.6
+    # Bölümler ayrı ayrı sayfalanırsa kısa bölüm yarı boş bir sayfa üretir; tüm
+    # bloklar tek akışta toplanıp eşit dağıtılır. Bölüm başlıkları blokların
+    # içinde zaten yer aldığı için bilgi kaybı olmaz.
+    blocks: list[_Block] = []
+    for _, builder in CARD_PAGES:
+        blocks.extend(builder(commentary, settings["limit"]))
+    chunks = _paginate(blocks, text_width, budget)
     paths: list[Path] = []
-    total = len(pages)
-    for index, (label, blocks) in enumerate(pages, start=1):
-        paths.append(render_analyst_card(status, directory / f"{stem}_{index}.png", blocks, f"{label} ({index}/{total})"))
+    total = len(chunks)
+    for index, chunk in enumerate(chunks, start=1):
+        label = "Analist Kartı" if total == 1 else f"Analist Kartı {index}/{total}"
+        paths.append(render_analyst_card(status, directory / f"{stem}_{index}.png", chunk, label))
+    return paths
+
+def standardize_pages(paths: list[Path], background: str = BG) -> list[Path]:
+    """Tüm sayfaları aynı piksel boyutuna getirir.
+
+    Telegram, farklı en/boy oranındaki görselleri farklı genişliklerde gösterir;
+    aynı akışta yan yana duran sayfalar bu yüzden birbirinden kopuk görünür.
+    Sayfalar en uzun olanın boyuna tamamlanarak görsel bütünlük sağlanır.
+    """
+    if not paths:
+        return paths
+    from PIL import Image
+
+    sizes = []
+    for path in paths:
+        with Image.open(path) as image:
+            sizes.append(image.size)
+    target_width = max(width for width, _ in sizes)
+    target_height = max(height for _, height in sizes)
+    for path, (width, height) in zip(paths, sizes, strict=True):
+        if (width, height) == (target_width, target_height):
+            continue
+        with Image.open(path) as image:
+            canvas = Image.new("RGB", (target_width, target_height), background)
+            canvas.paste(image.convert("RGB"), ((target_width - width) // 2, 0))
+            canvas.save(path)
     return paths

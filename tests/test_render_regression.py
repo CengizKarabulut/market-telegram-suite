@@ -158,7 +158,7 @@ class PageConsistencyTests(unittest.TestCase):
             self.assertGreaterEqual(len(paths), 4)
             self.assertEqual(len(widths), 1, f"Görsel genişlikleri aynı olmalı, bulunan: {widths}")
             for width, height in sizes:
-                self.assertLessEqual(height / width, 1.85, "Hiçbir sayfa oran sınırını aşmamalı")
+                self.assertLessEqual(height / width, 2.75, "Hiçbir sayfa oran sınırını aşmamalı")
 
     def test_estimated_table_height_grows_with_wrapped_text(self) -> None:
         from src.stock_dashboard import estimate_table_height
@@ -176,3 +176,63 @@ class PageConsistencyTests(unittest.TestCase):
         single = estimate_table_height([["A", "satır", "satır"]], [0.2, 0.3, 0.5], 11, 11.0)
         multi = estimate_table_height([["A", "satır", "satır\nsatır\nsatır"]], [0.2, 0.3, 0.5], 11, 11.0)
         self.assertGreater(multi, single)
+
+
+class DetailLevelTests(unittest.TestCase):
+    def _render(self, detail: str):
+        import numpy as np
+        import pandas as pd
+
+        from src.analyst_card import render_analyst_cards
+        from src.stock_dashboard import (
+            ScanConfig,
+            build_status,
+            calculate_indicators,
+            render_report_pages,
+        )
+
+        rng = np.random.default_rng(21)
+        bars = 400
+        index = pd.bdate_range("2024-06-01", periods=bars)
+        close = 300 * np.exp(np.cumsum(rng.normal(-0.0006, 0.016, bars)))
+        frame = pd.DataFrame(
+            {"Open": close, "High": close * 1.01, "Low": close * 0.99, "Close": close, "Volume": rng.lognormal(16.5, 0.3, bars)},
+            index=index,
+        )
+        data = calculate_indicators(frame, "1d")
+        status = build_status(data, ScanConfig(ticker="T", report_detail=detail), "T")
+        directory = Path(tempfile.mkdtemp())
+        return render_report_pages(data, status, directory) + render_analyst_cards(status, directory)
+
+    def test_compact_level_produces_four_images(self) -> None:
+        self.assertEqual(len(self._render("kompakt")), 4)
+
+    def test_full_level_produces_more_images_than_compact(self) -> None:
+        self.assertGreater(len(self._render("tam")), len(self._render("kompakt")))
+
+    def test_layered_commentary_panel_only_appears_in_full_level(self) -> None:
+        import numpy as np
+        import pandas as pd
+
+        from src.stock_dashboard import (
+            PAGE_WIDTH_INCHES,
+            ScanConfig,
+            _report_panels,
+            build_status,
+            calculate_indicators,
+        )
+
+        rng = np.random.default_rng(3)
+        bars = 300
+        index = pd.bdate_range("2024-01-01", periods=bars)
+        close = 100 * np.exp(np.cumsum(rng.normal(0, 0.015, bars)))
+        frame = pd.DataFrame(
+            {"Open": close, "High": close * 1.01, "Low": close * 0.99, "Close": close, "Volume": rng.lognormal(16, 0.3, bars)},
+            index=index,
+        )
+        data = calculate_indicators(frame, "1d")
+        status = build_status(data, ScanConfig(ticker="T"), "T")
+        names = lambda detail: {panel["name"] for panel in _report_panels(data, status, PAGE_WIDTH_INCHES - 1.0, detail)}
+        self.assertIn("Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", names("tam"))
+        self.assertNotIn("Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", names("kompakt"))
+        self.assertIn("Son 12 Teyitli Olay", names("dengeli"))
