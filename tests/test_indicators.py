@@ -85,7 +85,7 @@ class IndicatorTests(unittest.TestCase):
     def test_price_validation_preserves_provider(self) -> None:
         data = validate_price_data(synthetic_prices(), "TEST", "borsapy/TradingView")
         self.assertEqual(data.attrs["provider"], "borsapy/TradingView")
-        with self.assertRaisesRegex(RuntimeError, "en az 382 bar"):
+        with self.assertRaisesRegex(RuntimeError, "en az 120 bar"):
             validate_price_data(synthetic_prices(100), "TEST", "test")
 
     def test_all_ma_periods_are_calculated(self) -> None:
@@ -158,3 +158,68 @@ class TradingViewParityTests(unittest.TestCase):
         result = calculate_indicators(frame)
         expected = result["CCI"].rolling(14).mean()
         self.assertAlmostEqual(float(result["CCI_MA"].iloc[-1]), float(expected.iloc[-1]), places=9)
+
+
+class ShortHistoryTests(unittest.TestCase):
+    def test_recently_listed_symbol_produces_a_report(self) -> None:
+        import numpy as np
+
+        from src.intervals import resolve
+        from src.stock_dashboard import (
+            ScanConfig,
+            build_status,
+            calculate_indicators,
+            validate_price_data,
+        )
+
+        rng = np.random.default_rng(6)
+        bars = 145
+        index = pd.bdate_range("2026-01-05", periods=bars)
+        close = 50 * np.exp(np.cumsum(rng.normal(0, 0.02, bars)))
+        frame = pd.DataFrame(
+            {"Open": close, "High": close * 1.02, "Low": close * 0.98, "Close": close, "Volume": rng.lognormal(15, 0.4, bars)},
+            index=index,
+        )
+        validated = validate_price_data(frame, "ZGYO", "test", resolve("1d"))
+        self.assertTrue(validated.attrs["short_history"])
+        status = build_status(calculate_indicators(validated, "1d"), ScanConfig(ticker="ZGYO"), "ZGYO")
+        self.assertTrue(status["short_history"])
+        self.assertEqual(status["bar_count"], bars)
+        self.assertEqual(len(status["ma"]), 15, "tüm periyotlar tabloda kalmalı")
+        unavailable = [item for item in status["ma"] if not item.get("available")]
+        self.assertEqual([item["period"] for item in unavailable], [144, 200, 233, 377])
+        self.assertIn("Yetersiz veri", unavailable[0]["sma_relation"])
+        self.assertIn("238 bar gerekir", next(item["sma_relation"] for item in unavailable if item["period"] == 233))
+
+    def test_short_history_is_disclosed_in_plain_summary_and_limitations(self) -> None:
+        import numpy as np
+
+        from src.intervals import resolve
+        from src.stock_dashboard import (
+            ScanConfig,
+            build_status,
+            calculate_indicators,
+            validate_price_data,
+        )
+
+        rng = np.random.default_rng(9)
+        bars = 140
+        index = pd.bdate_range("2026-01-05", periods=bars)
+        close = 20 * np.exp(np.cumsum(rng.normal(0, 0.02, bars)))
+        frame = pd.DataFrame(
+            {"Open": close, "High": close * 1.02, "Low": close * 0.98, "Close": close, "Volume": rng.lognormal(15, 0.4, bars)},
+            index=index,
+        )
+        validated = validate_price_data(frame, "YENI", "test", resolve("1d"))
+        commentary = build_status(calculate_indicators(validated, "1d"), ScanConfig(ticker="YENI"), "YENI")["technical_commentary"]
+        self.assertIn("işlem geçmişi kısa", commentary["plain_summary"]["text"])
+        note = next(item for item in commentary["limitations"] if "geçmişi kısa" in item)
+        self.assertIn("ikame edilmedi", note)
+        self.assertIn("233", note)
+
+    def test_long_history_carries_no_short_history_flag(self) -> None:
+        from src.intervals import resolve
+        from src.stock_dashboard import validate_price_data
+
+        validated = validate_price_data(synthetic_prices(), "UZUN", "test", resolve("1d"))
+        self.assertFalse(validated.attrs["short_history"])

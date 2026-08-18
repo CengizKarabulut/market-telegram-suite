@@ -94,6 +94,7 @@ def build_plain_summary(
     scenario: dict[str, Any],
     clarity: dict[str, Any],
     bar_state: dict[str, Any] | None = None,
+    short_history: bool = False,
 ) -> dict[str, Any]:
     """Raporun ana bulgusunu teknik terim kullanmadan anlatır."""
     setup = setup_context.get("setup", {})
@@ -143,6 +144,8 @@ def build_plain_summary(
     if bar_state and bar_state.get("is_live"):
         sentences.append("Not: mevcut mum henüz kapanmadı, bu rakamlar kapanışa kadar değişebilir.")
 
+    if short_history:
+        sentences.append("Not: bu hissenin işlem geçmişi kısa, bu yüzden uzun vadeli ortalamalar hesaplanamadı; okuma daha az veriye dayanıyor.")
     sentences.append("Bu bir alım veya satım tavsiyesi değildir; yalnızca fiyatın mevcut durumunun özetidir.")
     return {
         "text": " ".join(sentences),

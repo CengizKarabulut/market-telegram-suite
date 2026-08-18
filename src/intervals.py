@@ -119,19 +119,35 @@ def usable_ma_periods(bar_count: int, periods: list[int], minimum: int = 6) -> l
     return usable if len(usable) >= minimum else periods[:minimum]
 
 
+
 def key_ema_periods(available: list[int], preferred: tuple[int, ...] = (21, 55, 233)) -> tuple[int, ...]:
-    """Grafik ve trend analizinde öne çıkarılacak üçlüyü mevcut periyotlara göre seçer."""
-    if all(period in available for period in preferred):
-        return preferred
-    if len(available) < 3:
-        return tuple(available)
-    ordered = sorted(available)
-    return (ordered[len(ordered) // 4], ordered[len(ordered) // 2], ordered[-1])
+    """Öne çıkarılan Fibonacci üçlüsünden hesaplanabilenleri döndürür.
+
+    Eksik periyot başka bir periyotla ikame edilmez; hesaplanamayan ortalama
+    raporda açıkça eksik gösterilir. Sessiz ikame, okuyanın EMA233 sandığı
+    çizginin aslında EMA100 olmasına yol açardı.
+    """
+    return tuple(period for period in preferred if period in available)
+
+
+def missing_ma_periods(bar_count: int, periods: list[int]) -> list[int]:
+    """Veri yetersizliği nedeniyle hesaplanamayan periyotları listeler."""
+    return [period for period in periods if period + 5 > bar_count]
+
+
+# Hacim profili (100 bar), uyumsuzluk taraması (60 bar) ve yapı pivotları için
+# gereken mutlak alt sınır. Yeni halka arzlarda uzun ortalamalar hesaplanamaz
+# ama rapor yine de üretilebilir.
+ABSOLUTE_MINIMUM_BARS = 120
 
 
 def minimum_bars(spec: IntervalSpec, periods: list[int]) -> int:
-    """Bu aralık için kabul edilebilir en düşük bar sayısı."""
-    return min(max(periods) + 5, 120) if spec.key in {"1wk", "1mo"} else max(periods) + 5
+    """Bu aralık için kabul edilebilir en düşük bar sayısı.
+
+    Uzun ortalamalar mevcut bar sayısına göre uyarlandığı için 377 periyot
+    zorunlu değildir; kısa geçmişli hisseler raporsuz kalmamalıdır.
+    """
+    return min(max(periods) + 5, ABSOLUTE_MINIMUM_BARS)
 
 
 def bar_word(spec: IntervalSpec) -> str:

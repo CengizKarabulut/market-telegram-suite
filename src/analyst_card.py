@@ -7,6 +7,7 @@ Yükseklik içeriğe göre hesaplanır, böylece metin hiçbir zaman kırpılmaz
 
 from __future__ import annotations
 
+import math
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -291,15 +292,54 @@ def render_analyst_card(status: dict[str, Any], output: Path, blocks: list[_Bloc
     return output
 
 
+MAX_ASPECT_RATIO = 1.8
+
+
+def _paginate(blocks: list[_Block], text_width: float, budget: float) -> list[list[_Block]]:
+    """Blokları, hiçbir sayfa yükseklik bütçesini aşmayacak biçimde böler.
+
+    Telegram çok uzun görselleri yükseklik sınırına sığdırmak için daraltır ve
+    yazı okunmaz hale gelir; bu yüzden sayfa oranı sınırlanır.
+    """
+    heights = [block.measure(text_width) for block in blocks]
+    total = sum(heights)
+    page_count = max(1, math.ceil(total / budget))
+    target = total / page_count
+    pages: list[list[_Block]] = []
+    current: list[_Block] = []
+    used = 0.0
+    for index, (block, height) in enumerate(zip(blocks, heights, strict=True)):
+        remaining = page_count - len(pages)
+        exceeds_budget = current and used + height > budget
+        balanced_break = current and remaining > 1 and used + height / 2 > target and len(blocks) - index >= remaining - 1
+        if exceeds_budget or balanced_break:
+            pages.append(current)
+            current, used = [], 0.0
+        if not current and block.kind == "gap":
+            continue
+        current.append(block)
+        used += height
+    if current:
+        pages.append(current)
+    return pages or [[]]
+
+
 def render_analyst_cards(status: dict[str, Any], directory: Path, stem: str = "analyst_card") -> list[Path]:
-    """Yorumu üç ayrı okunabilir karta böler ve sırayla döndürür."""
+    """Yorumu okunabilir kartlara böler; gerekirse bir bölümü ikiye ayırır."""
     commentary = status.get("technical_commentary", {})
-    paths: list[Path] = []
-    total = len(CARD_PAGES)
-    for index, (label, builder) in enumerate(CARD_PAGES, start=1):
+    text_width = CARD_WIDTH_INCHES - 2 * MARGIN
+    budget = CARD_WIDTH_INCHES * MAX_ASPECT_RATIO - 2.6
+    pages: list[tuple[str, list[_Block]]] = []
+    for label, builder in CARD_PAGES:
         blocks = builder(commentary)
         if not blocks:
             continue
-        page_label = f"{label} ({index}/{total})"
-        paths.append(render_analyst_card(status, directory / f"{stem}_{index}.png", blocks, page_label))
+        chunks = _paginate(blocks, text_width, budget)
+        for order, chunk in enumerate(chunks, start=1):
+            suffix = f" — devam {order}" if len(chunks) > 1 and order > 1 else ""
+            pages.append((f"{label}{suffix}", chunk))
+    paths: list[Path] = []
+    total = len(pages)
+    for index, (label, blocks) in enumerate(pages, start=1):
+        paths.append(render_analyst_card(status, directory / f"{stem}_{index}.png", blocks, f"{label} ({index}/{total})"))
     return paths

@@ -122,7 +122,7 @@ class TestTableWrapping(unittest.TestCase):
 
 
 class PageConsistencyTests(unittest.TestCase):
-    def test_all_four_images_share_the_same_width(self) -> None:
+    def test_all_images_share_width_and_respect_aspect_limit(self) -> None:
         import numpy as np
         import pandas as pd
         from PIL import Image
@@ -153,9 +153,12 @@ class PageConsistencyTests(unittest.TestCase):
         status = build_status(data, ScanConfig(ticker="TEST"), "TEST")
         with tempfile.TemporaryDirectory() as directory:
             paths = render_report_pages(data, status, Path(directory)) + render_analyst_cards(status, Path(directory))
-            widths = {Image.open(path).size[0] for path in paths}
-            self.assertEqual(len(paths), 4)
+            sizes = [Image.open(path).size for path in paths]
+            widths = {size[0] for size in sizes}
+            self.assertGreaterEqual(len(paths), 4)
             self.assertEqual(len(widths), 1, f"Görsel genişlikleri aynı olmalı, bulunan: {widths}")
+            for width, height in sizes:
+                self.assertLessEqual(height / width, 1.85, "Hiçbir sayfa oran sınırını aşmamalı")
 
     def test_estimated_table_height_grows_with_wrapped_text(self) -> None:
         from src.stock_dashboard import estimate_table_height

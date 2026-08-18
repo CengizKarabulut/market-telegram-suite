@@ -376,6 +376,15 @@ def _analyst_note(
     return "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
 
 
+def _short_history_note(context: dict[str, Any]) -> str:
+    """Hesaplanamayan periyotları adıyla bildirir; ikame yapılmadığını belirtir."""
+    missing = ", ".join(str(period) for period in context.get("missing_periods", [])) or "bazı"
+    return (
+        f"Sembolün geçmişi kısa ({context.get('bar_count', '—')} bar); {missing} periyotluk "
+        "ortalamalar hesaplanamadı ve başka periyotlarla ikame edilmedi."
+    )
+
+
 def build_technical_commentary(
     data: pd.DataFrame,
     context: dict[str, Any],
@@ -415,6 +424,7 @@ def build_technical_commentary(
         scenario,
         clarity,
         bar_state,
+        bool(context.get("short_history")),
     )
     headline = f"{stance}. {opening} Teknik okuma netliği: {clarity['state'].casefold()}."
     telegram_detail = "\n".join(
@@ -473,6 +483,11 @@ def build_technical_commentary(
         "framework": ["Regime", "Direction", "Location", "Setup", "Trigger", "Confirmation", "Risk", "Exit"],
         "method": "Deterministik, rejim-duyarlı teknik yorum; bağımsız kanıt aileleri kullanır ve birleşik AL/SAT puanı üretmez.",
         "limitations": [
+            *(
+                [_short_history_note(context)]
+                if context.get("short_history")
+                else []
+            ),
             "Yorum yalnız OHLCV ve türetilmiş teknik bağlama dayanır; haber/KAP/temel veri içermez.",
             "Volume Profile ve delta alanları yaklaşık OHLCV proxy'dir; gerçek footprint değildir.",
             "Göreceli güç fon akışı değildir; RVOL kurumsal katılımı kanıtlamaz.",

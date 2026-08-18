@@ -124,14 +124,28 @@ class AdaptivePeriodTests(unittest.TestCase):
     def test_minimum_set_is_returned_for_very_short_history(self) -> None:
         self.assertEqual(len(usable_ma_periods(10, MA_PERIODS)), 6)
 
-    def test_key_emas_fall_back_when_preferred_missing(self) -> None:
+    def test_key_emas_are_never_substituted(self) -> None:
+        """Eksik periyot başka bir periyotla değiştirilmemeli; sadece düşmeli."""
         self.assertEqual(key_ema_periods(MA_PERIODS), (21, 55, 233))
-        fallback = key_ema_periods([5, 8, 10, 13, 20, 21, 34])
-        self.assertEqual(len(fallback), 3)
-        self.assertNotIn(233, fallback)
+        partial = key_ema_periods([5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100])
+        self.assertEqual(partial, (21, 55))
+        self.assertNotIn(100, partial)
 
-    def test_weekly_and_monthly_have_relaxed_bar_requirement(self) -> None:
-        self.assertLess(minimum_bars(resolve("1mo"), MA_PERIODS), minimum_bars(resolve("1d"), MA_PERIODS))
+    def test_missing_periods_are_listed(self) -> None:
+        from src.intervals import missing_ma_periods
+
+        self.assertEqual(missing_ma_periods(145, MA_PERIODS), [144, 200, 233, 377])
+        self.assertEqual(missing_ma_periods(1000, MA_PERIODS), [])
+
+    def test_minimum_bars_allows_recently_listed_symbols(self) -> None:
+        """377 periyot zorunlu olmamalı; yeni hisseler raporsuz kalmamalı."""
+        for key in ("1d", "1wk", "1mo", "4h"):
+            self.assertEqual(minimum_bars(resolve(key), MA_PERIODS), 120)
+
+    def test_short_history_still_yields_a_usable_period_set(self) -> None:
+        periods = usable_ma_periods(145, MA_PERIODS)
+        self.assertGreaterEqual(len(periods), 10)
+        self.assertLessEqual(max(periods) + 5, 145)
 
 
 if __name__ == "__main__":
