@@ -103,7 +103,7 @@ class MarketContextTests(unittest.TestCase):
         family_names = [row[0] for row in context["families"]]
         self.assertEqual(
             family_names,
-            ["REJİM", "YAPI", "KONUM", "TREND", "MOMENTUM", "KATILIM", "VOLATİLİTE"],
+            ["KURULUM", "REJİM", "YAPI", "KONUM", "TREND", "MOMENTUM", "KATILIM", "VOLATİLİTE"],
         )
         self.assertGreaterEqual(len(context["events"]), 1)
         self.assertIn("gerçek footprint delta değildir", context["order_flow_proxy"]["method"])

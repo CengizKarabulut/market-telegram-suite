@@ -35,3 +35,46 @@ class BarStateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AggregatedBarCompletionTests(unittest.TestCase):
+    def test_weekly_bar_inside_current_week_is_live_even_when_market_closed(self) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        import pandas as pd
+
+        from src.bar_state import build_bar_state
+
+        index = pd.DatetimeIndex([pd.Timestamp("2026-08-17")])  # Pazartesi
+        frame = pd.DataFrame({"Close": [1.0]}, index=index)
+        now = datetime(2026, 8, 19, 20, 0, tzinfo=ZoneInfo("Europe/Istanbul"))  # Çarşamba, seans kapalı
+        state = build_bar_state(frame, "BIST", "1wk", now)
+        self.assertTrue(state["is_live"])
+        self.assertEqual(state["label"], "CANLI")
+
+    def test_completed_week_is_confirmed(self) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        import pandas as pd
+
+        from src.bar_state import build_bar_state
+
+        index = pd.DatetimeIndex([pd.Timestamp("2026-08-10")])
+        frame = pd.DataFrame({"Close": [1.0]}, index=index)
+        now = datetime(2026, 8, 19, 20, 0, tzinfo=ZoneInfo("Europe/Istanbul"))
+        self.assertFalse(build_bar_state(frame, "BIST", "1wk", now)["is_live"])
+
+    def test_current_month_bar_is_live(self) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        import pandas as pd
+
+        from src.bar_state import build_bar_state
+
+        index = pd.DatetimeIndex([pd.Timestamp("2026-08-01")])
+        frame = pd.DataFrame({"Close": [1.0]}, index=index)
+        now = datetime(2026, 8, 19, 20, 0, tzinfo=ZoneInfo("Europe/Istanbul"))
+        self.assertTrue(build_bar_state(frame, "BIST", "1mo", now)["is_live"])

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import textwrap
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from datetime import datetime, timezone
@@ -18,18 +19,39 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from src.analyst_card import render_analyst_cards, standardize_pages
 from src.bar_state import build_bar_state
 from src.decision_context import build_decision_context
+from src.intervals import (
+    ABSOLUTE_MINIMUM_BARS,
+    INTERVALS,
+    key_ema_periods,
+    minimum_bars,
+    missing_ma_periods,
+    rank_window,
+    resample,
+    resolve,
+    usable_ma_periods,
+)
 from src.market_context import (
     build_market_context,
     diagnostics,
     normalized_gap_state,
     rolling_volume_profile_levels,
 )
+from src.plain_language import bar_state_plain
 from src.technical_commentary import build_technical_commentary
-from src.telegram_client import send_photo
+from src.telegram_client import (
+    send_analyst_cards,
+    send_report_detail,
+    send_report_pages,
+)
 
+PAGE_WIDTH_INCHES = 12.0
+PAGE_DPI = 100
 MA_PERIODS = [5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
+# Grafikte ve trend analizinde öne çıkarılan Fibonacci üçlüsü.
+KEY_EMA_PERIODS = (21, 55, 233)
 BG = "#0f172a"
 PANEL = "#111827"
 HEADER = "#223044"
@@ -59,6 +81,7 @@ class ScanConfig:
     account_size: float = 0.0
     risk_pct: float = 1.0
     atr_multiple: float = 1.5
+    report_detail: str = "kompakt"
 
 
 PERIOD_ORDER = {"1d": 1, "5d": 5, "1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730, "5y": 1825, "10y": 3650, "max": 99999}
@@ -80,7 +103,7 @@ def normalize_symbol(ticker: str, market: str) -> str:
     return symbol
 
 
-def validate_price_data(data: pd.DataFrame, symbol: str, provider: str) -> pd.DataFrame:
+def validate_price_data(data: pd.DataFrame, symbol: str, provider: str, spec: Any = None) -> pd.DataFrame:
     if data.empty:
         raise RuntimeError(f"{symbol} için {provider} fiyat verisi bulunamadı.")
     if isinstance(data.columns, pd.MultiIndex):
@@ -91,11 +114,14 @@ def validate_price_data(data: pd.DataFrame, symbol: str, provider: str) -> pd.Da
         raise RuntimeError(f"{provider} verisinde eksik fiyat sütunları: {', '.join(missing)}")
     data = data[required].dropna(subset=["Open", "High", "Low", "Close"]).copy()
     data["Volume"] = data["Volume"].fillna(0.0)
-    if len(data) < max(MA_PERIODS) + 5:
+    required = minimum_bars(spec, MA_PERIODS) if spec is not None else ABSOLUTE_MINIMUM_BARS
+    if len(data) < required:
         raise RuntimeError(
-            f"{symbol} için en az {max(MA_PERIODS) + 5} bar gerekli; yalnızca {len(data)} bar geldi. "
-            "Daha uzun bir period seçin."
+            f"{symbol} için en az {required} bar gerekli; yalnızca {len(data)} bar geldi. "
+            "Daha uzun bir period seçin; sembol yeni işlem görmeye başladıysa "
+            "yeterli geçmiş oluşana kadar teknik rapor üretilemez."
         )
+    data.attrs["short_history"] = len(data) < max(MA_PERIODS) + 5
     data.attrs["provider"] = provider
     return data
 
@@ -103,15 +129,16 @@ def validate_price_data(data: pd.DataFrame, symbol: str, provider: str) -> pd.Da
 def download_yfinance(config: ScanConfig) -> tuple[str, pd.DataFrame]:
     symbol = normalize_symbol(config.ticker, config.market)
     download_period = effective_download_period(config.period, config.warmup_period)
+    spec = resolve(config.interval)
     data = yf.download(
         symbol,
         period=download_period,
-        interval=config.interval,
+        interval="60m" if spec.source_interval == "1h" else spec.source_interval,
         auto_adjust=False,
         progress=False,
         threads=False,
     )
-    validated = validate_price_data(data, symbol, "yfinance")
+    validated = resample(validate_price_data(data, symbol, "yfinance", spec), spec)
     validated.attrs.update(
         market=config.market.upper(),
         download_period=download_period,
@@ -131,8 +158,9 @@ def download_borsapy(config: ScanConfig) -> tuple[str, pd.DataFrame]:
     if not symbol:
         raise ValueError("Hisse sembolü boş olamaz.")
     download_period = effective_download_period(config.period, config.warmup_period)
-    data = bp.Ticker(symbol).history(period=download_period, interval=config.interval)
-    validated = validate_price_data(data, symbol, "borsapy/TradingView")
+    spec = resolve(config.interval)
+    data = bp.Ticker(symbol).history(period=download_period, interval=spec.source_interval)
+    validated = resample(validate_price_data(data, symbol, "borsapy/TradingView", spec), spec)
     validated.attrs.update(
         market="BIST",
         download_period=download_period,
@@ -203,18 +231,23 @@ def download_benchmark(config: ScanConfig) -> tuple[str, pd.DataFrame]:
     market = config.market.upper()
     benchmark = config.benchmark.strip().upper() or ("XU100" if market == "BIST" else "SPY")
     period = effective_download_period(config.period, config.warmup_period)
+    # Benchmark hissenin mum aralığıyla aynı olmalı; aksi halde göreceli güç
+    # karşılaştırması farklı zaman ölçeklerini kıyaslar.
+    spec = resolve(config.interval)
     if market == "BIST" and config.provider.upper() != "YFINANCE":
         try:
             import borsapy as bp
 
-            data = bp.Index(benchmark.removesuffix(".IS")).history(period=period, interval=config.interval)
-            return benchmark.removesuffix(".IS"), _validate_context_prices(data, benchmark, "borsapy/TradingView")
+            data = bp.Index(benchmark.removesuffix(".IS")).history(period=period, interval=spec.source_interval)
+            validated = _validate_context_prices(data, benchmark, "borsapy/TradingView")
+            return benchmark.removesuffix(".IS"), resample(validated, spec)
         except Exception:
             if config.provider.upper() == "BORSAPY":
                 raise
     yahoo_symbol = f"{benchmark}.IS" if market == "BIST" and not benchmark.endswith(".IS") else benchmark
-    data = yf.download(yahoo_symbol, period=period, interval=config.interval, auto_adjust=False, progress=False, threads=False)
-    return yahoo_symbol, _validate_context_prices(data, yahoo_symbol, "yfinance")
+    source = "60m" if spec.source_interval == "1h" else spec.source_interval
+    data = yf.download(yahoo_symbol, period=period, interval=source, auto_adjust=False, progress=False, threads=False)
+    return yahoo_symbol, resample(_validate_context_prices(data, yahoo_symbol, "yfinance"), spec)
 
 
 def download_free_float(config: ScanConfig) -> float | None:
@@ -353,15 +386,19 @@ def percentile_rank(series: pd.Series, length: int) -> pd.Series:
     return series.rolling(length, min_periods=max(10, length // 3)).apply(rank, raw=True)
 
 
-def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
+def calculate_indicators(data: pd.DataFrame, interval: str = "1d") -> pd.DataFrame:
     out = data.copy()
+    window = rank_window(interval)
+    out.attrs["rank_window"] = window
     close = out["Close"]
-    for length in MA_PERIODS:
+    periods = usable_ma_periods(len(out), MA_PERIODS)
+    out.attrs["ma_periods"] = periods
+    for length in periods:
         out[f"SMA_{length}"] = close.rolling(length).mean()
         out[f"EMA_{length}"] = ema(close, length)
-    ema_columns = [f"EMA_{length}" for length in MA_PERIODS]
+    ema_columns = [f"EMA_{length}" for length in periods]
     out["MA_SPREAD_PCT"] = 100 * (out[ema_columns].max(axis=1) - out[ema_columns].min(axis=1)) / close
-    out["MA_SPREAD_RANK"] = percentile_rank(out["MA_SPREAD_PCT"], 252)
+    out["MA_SPREAD_RANK"] = percentile_rank(out["MA_SPREAD_PCT"], window)
 
     out["RSI"] = rsi(close, 14)
     out["RSI_MA"] = out["RSI"].rolling(14).mean()
@@ -369,7 +406,7 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     out["MACD"] = ema(close, 12) - ema(close, 26)
     out["MACD_SIGNAL"] = ema(out["MACD"], 9)
     out["MACD_HIST"] = out["MACD"] - out["MACD_SIGNAL"]
-    out["MACD_HIST_RANK"] = percentile_rank(out["MACD_HIST"].abs(), 252)
+    out["MACD_HIST_RANK"] = percentile_rank(out["MACD_HIST"].abs(), window)
 
     stoch_rsi = rsi(close, 14)
     stoch_low = stoch_rsi.rolling(14).min()
@@ -396,9 +433,9 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
 
     out["ATR"] = rma(true_range(out), 14)
     out["ATR_PCT"] = 100 * out["ATR"] / close
-    out["ATR_RANK"] = percentile_rank(out["ATR_PCT"], 252)
+    out["ATR_RANK"] = percentile_rank(out["ATR_PCT"], window)
     out["PLUS_DI"], out["MINUS_DI"], out["ADX"] = adx_dmi(out, 14)
-    out["ADX_RANK"] = percentile_rank(out["ADX"], 252)
+    out["ADX_RANK"] = percentile_rank(out["ADX"], window)
     out["SUPERTREND"], out["SUPERTREND_DIR"] = supertrend(out, 10, 3.0)
 
     typical = (out["High"] + out["Low"] + close) / 3
@@ -418,20 +455,23 @@ def calculate_indicators(data: pd.DataFrame) -> pd.DataFrame:
     mean_typical = typical.rolling(20).mean()
     mean_deviation = typical.rolling(20).apply(lambda values: np.mean(np.abs(values - values.mean())), raw=True)
     out["CCI"] = (typical - mean_typical) / (0.015 * mean_deviation.replace(0, np.nan))
-    out["CCI_MA"] = out["CCI"].rolling(20).mean()
+    # TradingView "Commodity Channel Index" varsayılan yumuşatması 14 periyot SMA'dır.
+    out["CCI_MA"] = out["CCI"].rolling(14).mean()
 
     cumulative_volume = out["Volume"].cumsum().replace(0, np.nan)
     out["VWAP"] = (typical * out["Volume"]).cumsum() / cumulative_volume
-    out["VOLUME_MA"] = out["Volume"].rolling(20).mean()
+    out["VOLUME_MA"] = out["Volume"].shift(1).rolling(20, min_periods=5).mean()
     out["VOLUME_RATIO"] = out["Volume"] / out["VOLUME_MA"].replace(0, np.nan)
-    out["VOLUME_RANK"] = percentile_rank(out["Volume"], 252)
+    out["VOLUME_RANK"] = percentile_rank(out["Volume"], window)
 
     out["TENKAN"] = (out["High"].rolling(9).max() + out["Low"].rolling(9).min()) / 2
     out["KIJUN"] = (out["High"].rolling(26).max() + out["Low"].rolling(26).min()) / 2
     span_a = (out["TENKAN"] + out["KIJUN"]) / 2
     span_b = (out["High"].rolling(52).max() + out["Low"].rolling(52).min()) / 2
-    out["VISIBLE_SPAN_A"] = span_a.shift(26)
-    out["VISIBLE_SPAN_B"] = span_b.shift(26)
+    # TradingView Ichimoku: plot(..., offset = displacement - 1) → 25 bar kaydırma.
+    out["VISIBLE_SPAN_A"] = span_a.shift(25)
+    out["VISIBLE_SPAN_B"] = span_b.shift(25)
+    out["LAGGING_SPAN"] = close.shift(-25)
     out["FUTURE_SPAN_A"] = span_a
     out["FUTURE_SPAN_B"] = span_b
     out["PSAR"] = parabolic_sar(out)
@@ -450,15 +490,26 @@ def crossed_down(main: pd.Series, signal: pd.Series | float) -> bool:
     return bool(main.iloc[-1] < signal.iloc[-1] and main.iloc[-2] >= signal.iloc[-2])
 
 
-def relation_color(price: float, average: float, tolerance_pct: float) -> tuple[str, str]:
+GREEN_SHADES = ("#14532d", "#166534", "#15803d")
+RED_SHADES = ("#7f1d1d", "#991b1b", "#b91c1c")
+
+
+def relation_color(price: float, average: float, tolerance_pct: float, atr: float = math.nan) -> tuple[str, str]:
+    """Fiyat-ortalama ilişkisini ve mesafeye göre tonlanmış rengi verir."""
     if not math.isfinite(average):
         return "—", GRAY
     distance_pct = abs(price - average) / abs(average) * 100 if average else math.inf
     if distance_pct <= tolerance_pct:
         return "Eşit/Yakın", YELLOW
+    distance_atr = abs(price - average) / atr if math.isfinite(atr) and atr > 0 else math.nan
+    if math.isfinite(distance_atr):
+        shade = 0 if distance_atr < 0.5 else 1 if distance_atr < 1.5 else 2
+        suffix = f" ({distance_atr:.1f} ATR)"
+    else:
+        shade, suffix = 1, ""
     if price > average:
-        return "Fiyat üstünde", GREEN
-    return "Fiyat altında", RED
+        return f"▲ Fiyat üstünde{suffix}", GREEN_SHADES[shade]
+    return f"▼ Fiyat altında{suffix}", RED_SHADES[shade]
 
 
 def gap_state(main: pd.Series, signal: pd.Series) -> str:
@@ -504,6 +555,52 @@ def diagnostic_text(series: pd.Series) -> str:
     return f"Δ1 {fmt(values['delta_1'])} | Δ3 {fmt(values['delta_3'])} | Eğim5 {fmt(values['slope_5'])}"
 
 
+def previous_state_snapshot(
+    data: pd.DataFrame,
+    config: ScanConfig,
+    benchmark_data: pd.DataFrame | None,
+    benchmark_symbol: str,
+    market: str,
+    free_float_pct: float | None,
+) -> dict[str, Any] | None:
+    """Son bar çıkarılarak dünkü teknik durumu yeniden hesaplar.
+
+    Geçmiş rapor dosyası saklamak yerine aynı hesabı bir bar eksikle tekrarlar;
+    böylece karşılaştırma her zaman güncel kodla ve tutarlı biçimde yapılır.
+    """
+    if len(data) < 60:
+        return None
+    trimmed = data.iloc[:-1]
+    try:
+        context = build_market_context(trimmed, trimmed.attrs.get("ma_periods", MA_PERIODS), config.anchor_date)
+        benchmark = benchmark_data.loc[benchmark_data.index <= trimmed.index[-1]] if benchmark_data is not None else None
+        decision = build_decision_context(
+            trimmed,
+            benchmark,
+            benchmark_symbol,
+            market,
+            free_float_pct,
+            config.account_size,
+            config.risk_pct,
+            config.atr_multiple,
+            None,
+        )
+    except (KeyError, ValueError, IndexError):
+        return None
+    context["relative_strength"] = decision.get("relative_strength", {})
+    context["clarity_state"] = _previous_clarity(trimmed, context, decision)
+    return context
+
+
+def _previous_clarity(data: pd.DataFrame, context: dict[str, Any], decision: dict[str, Any]) -> str:
+    """Dünkü okuma netliğini, aynı yorum motorunu çalıştırarak bulur."""
+    try:
+        context["last_price"] = float(data["Close"].iloc[-1])
+        return str(build_technical_commentary(data, context, decision, None).get("clarity", {}).get("state", "—"))
+    except (KeyError, ValueError, IndexError):
+        return "—"
+
+
 def build_status(
     data: pd.DataFrame,
     config: ScanConfig,
@@ -516,14 +613,33 @@ def build_status(
     previous = data.iloc[-2]
     price = float(row["Close"])
     ma_rows = []
+    periods = data.attrs.get("ma_periods", MA_PERIODS)
+    current_atr = float(row["ATR"]) if "ATR" in row and math.isfinite(float(row["ATR"])) else math.nan
     for length in MA_PERIODS:
+        # Hesaplanamayan periyot gizlenmez; periyot listesi bozulmadan eksik olduğu yazılır.
+        if length not in periods:
+            note = f"Yetersiz veri ({length + 5} bar gerekir)"
+            ma_rows.append(
+                {
+                    "period": length,
+                    "available": False,
+                    "sma": math.nan,
+                    "sma_relation": note,
+                    "sma_color": GRAY,
+                    "ema": math.nan,
+                    "ema_relation": note,
+                    "ema_color": GRAY,
+                }
+            )
+            continue
         sma_value = float(row[f"SMA_{length}"])
         ema_value = float(row[f"EMA_{length}"])
-        sma_relation, sma_color = relation_color(price, sma_value, config.equality_tolerance_pct)
-        ema_relation, ema_color = relation_color(price, ema_value, config.equality_tolerance_pct)
+        sma_relation, sma_color = relation_color(price, sma_value, config.equality_tolerance_pct, current_atr)
+        ema_relation, ema_color = relation_color(price, ema_value, config.equality_tolerance_pct, current_atr)
         ma_rows.append(
             {
                 "period": length,
+                "available": True,
                 "sma": sma_value,
                 "sma_relation": sma_relation,
                 "sma_color": sma_color,
@@ -562,7 +678,7 @@ def build_status(
         ["Stoch RSI", f"K {fmt(row['STOCH_K'])} | D {fmt(row['STOCH_D'])}\n{diagnostic_text(data['STOCH_K'])}", f"{cross_text(data['STOCH_K'], data['STOCH_D'], stoch_zone)}\n{normalized_gap_state(data['STOCH_K'], data['STOCH_D'])}", GREEN if row["STOCH_K"] > row["STOCH_D"] else RED],
         ["SMI", f"SMI {fmt(smi_value)} | EMA3 {fmt(row['SMI_EMA'])}\n{diagnostic_text(data['SMI'])}", f"{cross_text(data['SMI'], data['SMI_EMA'], smi_zone)}\n{normalized_gap_state(data['SMI'], data['SMI_EMA'])}", GREEN if smi_value > row["SMI_EMA"] else RED],
         ["MFI", f"MFI {fmt(mfi_value)} | MA14 {fmt(row['MFI_MA'])}\n{diagnostic_text(data['MFI'])}", f"{cross_text(data['MFI'], data['MFI_MA'], '20/50/80')}\n{normalized_gap_state(data['MFI'], data['MFI_MA'])}", GREEN if mfi_value > row["MFI_MA"] else RED],
-        ["CCI", f"CCI {fmt(cci_value)} | MA20 {fmt(row['CCI_MA'])}\n{diagnostic_text(data['CCI'])}", f"{cross_text(data['CCI'], data['CCI_MA'], '-100/0/+100')}\n{normalized_gap_state(data['CCI'], data['CCI_MA'])}", GREEN if cci_value > row["CCI_MA"] else RED],
+        ["CCI", f"CCI {fmt(cci_value)} | MA14 {fmt(row['CCI_MA'])}\n{diagnostic_text(data['CCI'])}", f"{cross_text(data['CCI'], data['CCI_MA'], '-100/0/+100')}\n{normalized_gap_state(data['CCI'], data['CCI_MA'])}", GREEN if cci_value > row["CCI_MA"] else RED],
     ]
 
     bb_rank = float(row["BB_WIDTH_RANK"])
@@ -586,7 +702,7 @@ def build_status(
 
     resolved_market = str(data.attrs.get("market", config.market if config.market != "AUTO" else "BIST"))
     bar_state = build_bar_state(data, resolved_market, config.interval)
-    context = build_market_context(data, MA_PERIODS, config.anchor_date, bar_state=bar_state)
+    context = build_market_context(data, periods, config.anchor_date, bar_state=bar_state)
     for momentum_row in momentum:
         divergence = context["divergences"]["indicators"].get(momentum_row[0])
         if not divergence:
@@ -612,6 +728,13 @@ def build_status(
         config.atr_multiple,
         bar_state,
     )
+    context["short_history"] = bool(data.attrs.get("short_history", False))
+    context["bar_count"] = len(data)
+    context["missing_periods"] = missing_ma_periods(len(data), MA_PERIODS)
+    context["symbol"] = symbol
+    context["last_price"] = price
+    context["change_pct"] = (price / float(previous["Close"]) - 1) * 100
+    context["previous_state"] = previous_state_snapshot(data, config, benchmark_data, benchmark_symbol, resolved_market, free_float_pct)
     commentary = build_technical_commentary(data, context, decision, bar_state)
     executive = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["families"]]
     location = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["location_rows"]]
@@ -625,7 +748,7 @@ def build_status(
     free_float_text = fmt(liquidity.get("free_float_pct")) + "%" if liquidity.get("free_float_pct") is not None else "—"
     risk = decision["risk_reference"]
     risk_values = (
-        f"Mesafe {fmt(risk.get('distance'))} | Long ref. {fmt(risk.get('long_reference_stop'))} / 2R {fmt(risk.get('long_reference_2r'))}"
+        f"Mesafe {fmt(risk.get('distance'))} | Yukarı ref. {fmt(risk.get('long_reference_stop'))}↓ / {fmt(risk.get('long_reference_2r'))}↑ | Aşağı ref. {fmt(risk.get('short_reference_stop'))}↑ / {fmt(risk.get('short_reference_2r'))}↓"
         if risk.get("available")
         else "ATR referansı hesaplanamadı"
     )
@@ -646,6 +769,11 @@ def build_status(
     return {
         "data_provider": data.attrs.get("provider", config.provider),
         "symbol": symbol,
+        "report_detail": config.report_detail,
+        "short_history": bool(data.attrs.get("short_history", False)),
+        "bar_count": len(data),
+        "missing_periods": missing_ma_periods(len(data), MA_PERIODS),
+        "missing_periods_text": ", ".join(f"EMA/SMA {period}" for period in missing_ma_periods(len(data), MA_PERIODS)) or "—",
         "requested_ticker": config.ticker,
         "timestamp": data.index[-1].isoformat(),
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -673,21 +801,48 @@ def build_status(
     }
 
 
+def wrap_cell(text: Any, width_chars: int) -> str:
+    """Hücre metnini sütun genişliğine göre sarar; taşma ve üst üste binmeyi önler."""
+    lines: list[str] = []
+    for paragraph in str(text).split("\n"):
+        wrapped = textwrap.wrap(paragraph, max(width_chars, 8), break_long_words=True, break_on_hyphens=False)
+        lines.extend(wrapped or [""])
+    return "\n".join(lines)
+
+
+def column_char_capacity(ax: plt.Axes, col_widths: list[float] | None, column_count: int, font_size: int) -> list[int]:
+    """Her sütuna kaç karakter sığdığını punto ve eksen genişliğinden tahmin eder."""
+    figure = ax.get_figure()
+    axes_width_pt = ax.get_position().width * figure.get_size_inches()[0] * 72.0
+    widths = col_widths or [1.0 / column_count] * column_count
+    average_char_pt = font_size * 0.58
+    return [max(int((axes_width_pt * width) / average_char_pt) - 2, 8) for width in widths]
+
+
 def draw_table(ax: plt.Axes, title: str, columns: list[str], rows: list[list[str]], colors: list[list[str]] | None = None, font_size: int = 10, col_widths: list[float] | None = None) -> None:
     ax.set_facecolor(PANEL)
     ax.axis("off")
     ax.set_title(title, color=WHITE, fontsize=15, fontweight="bold", loc="left", pad=10)
-    table = ax.table(cellText=rows, colLabels=columns, colWidths=col_widths, loc="center", cellLoc="left", colLoc="center", bbox=[0, 0, 1, 0.94])
+    capacities = column_char_capacity(ax, col_widths, len(columns), font_size)
+    wrapped_rows = [
+        [wrap_cell(value, capacities[index]) if index < len(capacities) else str(value) for index, value in enumerate(row)]
+        for row in rows
+    ]
+    row_line_counts = [max(cell.count("\n") + 1 for cell in row) for row in wrapped_rows] if wrapped_rows else []
+    table = ax.table(cellText=wrapped_rows, colLabels=columns, colWidths=col_widths, loc="center", cellLoc="left", colLoc="center", bbox=[0, 0, 1, 0.94])
     table.auto_set_font_size(False)
     table.set_fontsize(font_size)
     for (row_index, column_index), cell in table.get_celld().items():
         cell.set_edgecolor("#334155")
         cell.get_text().set_color(WHITE)
-        cell.get_text().set_wrap(True)
+        cell.get_text().set_verticalalignment("center")
+        cell.set_text_props(linespacing=1.25)
         if row_index == 0:
+            cell.set_height(1.4)
             cell.set_facecolor(HEADER)
             cell.get_text().set_fontweight("bold")
         else:
+            cell.set_height(row_line_counts[row_index - 1] + 0.6)
             cell.set_facecolor(PANEL)
             if colors and row_index - 1 < len(colors) and column_index < len(colors[row_index - 1]):
                 chosen = colors[row_index - 1][column_index]
@@ -697,12 +852,60 @@ def draw_table(ax: plt.Axes, title: str, columns: list[str], rows: list[list[str
         table.auto_set_column_width(col=list(range(len(columns))))
 
 
-def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    plt.rcParams["font.family"] = "DejaVu Sans"
-    figure = plt.figure(figsize=(18, 43), dpi=120, facecolor=BG)
-    grid = figure.add_gridspec(8, 2, height_ratios=[0.7, 2.2, 1.8, 2.8, 3.0, 4.4, 4.2, 5.0], hspace=0.28, wspace=0.14)
+def estimate_table_height(rows: list[list[str]], col_widths: list[float] | None, font_size: int, width_inches: float) -> float:
+    """Tablonun sarma sonrası kaç satır tutacağını tahmin ederek inç cinsinden yükseklik verir."""
+    columns = len(col_widths) if col_widths else (len(rows[0]) if rows else 1)
+    widths = col_widths or [1.0 / columns] * columns
+    average_char_pt = font_size * 0.58
+    capacities = [max(int((width_inches * 72 * width) / average_char_pt) - 2, 8) for width in widths]
+    total_lines = 2.0
+    for row in rows:
+        row_lines = 1
+        for index, value in enumerate(row):
+            capacity = capacities[index] if index < len(capacities) else capacities[-1]
+            cell_lines = sum(max(-(-len(paragraph) // capacity), 1) for paragraph in str(value).split("\n"))
+            row_lines = max(row_lines, cell_lines)
+        total_lines += row_lines + 0.6
+    return total_lines * font_size * 1.75 / 72 + 0.55
 
+
+def _draw_page_header(figure: plt.Figure, grid, status: dict[str, Any], subtitle: str) -> None:
+    """Dar sayfa düzenine uygun, satırları üst üste binmeyen başlık."""
+    header = figure.add_subplot(grid[0, :])
+    header.set_facecolor(BG)
+    header.axis("off")
+    change_color = LIGHT_GREEN if status["change_pct"] >= 0 else LIGHT_RED
+    header.text(0.0, 0.92, f"{status['symbol']} — Technical Market State", color=WHITE, fontsize=20, fontweight="bold", va="top")
+    header.text(1.0, 0.93, subtitle, color=MUTED, fontsize=11, fontweight="bold", ha="right", va="top")
+    header.text(0.0, 0.56, f"Fiyat: {fmt(status['price'])}", color=WHITE, fontsize=16, fontweight="bold", va="top")
+    header.text(0.22, 0.56, f"Değişim: {status['change_pct']:+.2f}%", color=change_color, fontsize=15, fontweight="bold", va="top")
+    bar_color = YELLOW if status["bar_state"]["is_live"] else LIGHT_GREEN
+    header.text(0.0, 0.28, f"Bar: {status['timestamp']} | {status['interval']} | {status['bar_state']['label']} ({bar_state_plain(status['bar_state']).casefold()})", color=bar_color, fontsize=11, fontweight="bold", va="top")
+    header.text(0.0, 0.10, f"Kaynak: {status['data_provider']} | Warm-up: {status['download_period']} | Durum raporudur; otomatik AL/SAT puanı değildir. Yatırım tavsiyesi değildir.", color=MUTED, fontsize=10, va="top")
+    if status.get("short_history"):
+        header.text(
+            1.0,
+            0.62,
+            f"⚠ Kısa geçmiş: {status.get('bar_count', '—')} bar",
+            color=YELLOW,
+            fontsize=12,
+            fontweight="bold",
+            ha="right",
+            va="top",
+        )
+        header.text(
+            1.0,
+            0.34,
+            f"{status.get('missing_periods_text', 'bazı ortalamalar')} hesaplanamadı (ikame edilmedi)",
+            color=YELLOW,
+            fontsize=10,
+            ha="right",
+            va="top",
+        )
+
+
+def _draw_header(figure: plt.Figure, grid, status: dict[str, Any], subtitle: str = "") -> None:
+    """Her rapor sayfasının üst bilgisini çizer."""
     header = figure.add_subplot(grid[0, :])
     header.set_facecolor(BG)
     header.axis("off")
@@ -711,78 +914,154 @@ def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> N
     header.text(0.0, 0.25, f"Fiyat: {fmt(status['price'])}", color=WHITE, fontsize=20, fontweight="bold")
     header.text(0.20, 0.25, f"Değişim: {status['change_pct']:+.2f}%", color=change_color, fontsize=18, fontweight="bold")
     bar_color = YELLOW if status["bar_state"]["is_live"] else LIGHT_GREEN
-    header.text(0.46, 0.30, f"Bar: {status['timestamp']} | {status['interval']} | {status['bar_state']['label']}", color=bar_color, fontsize=11, fontweight="bold")
+    header.text(0.46, 0.30, f"Bar: {status['timestamp']} | {status['interval']} | {status['bar_state']['label']} ({bar_state_plain(status['bar_state']).casefold()})", color=bar_color, fontsize=11, fontweight="bold")
     header.text(0.46, 0.08, f"Kaynak: {status['data_provider']} | Warm-up: {status['download_period']}", color=MUTED, fontsize=10)
     header.text(0.0, -0.02, "Durum raporudur; otomatik AL/SAT puanı değildir. Yatırım tavsiyesi değildir.", color="#94a3b8", fontsize=10)
+    if subtitle:
+        header.text(1.0, 0.72, subtitle, color=MUTED, fontsize=14, fontweight="bold", ha="right")
 
-    executive_ax = figure.add_subplot(grid[1, :])
-    executive_rows = [[item[0], item[1], item[2]] for item in status["executive"]]
-    executive_colors = [[HEADER, item[3], PANEL] for item in status["executive"]]
-    draw_table(executive_ax, "Piyasa Durum Haritası", ["Aile", "Durum", "Bağlam"], executive_rows, executive_colors, font_size=11, col_widths=[0.16, 0.38, 0.46])
 
-    decision_ax = figure.add_subplot(grid[2, :])
-    decision_rows = [[item[0], item[1], item[2]] for item in status["decision_rows"]]
-    decision_colors = [[HEADER, PANEL, item[3]] for item in status["decision_rows"]]
-    draw_table(decision_ax, "Karar Bağlamı • RS • MTF • Likidite • Risk", ["Alan", "Değerler", "Durum"], decision_rows, decision_colors, font_size=9, col_widths=[0.16, 0.46, 0.38])
 
-    commentary_ax = figure.add_subplot(grid[3, :])
-    commentary_rows = [[item[0], item[1], item[2]] for item in status["technical_commentary"]["visual_rows"]]
-    commentary_colors = [[HEADER, tone_color(item[3]), PANEL] for item in status["technical_commentary"]["visual_rows"]]
-    draw_table(commentary_ax, "Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", ["Katman", "Durum", "Yorum"], commentary_rows, commentary_colors, font_size=8, col_widths=[0.15, 0.22, 0.63])
+def ma_cell(value: Any, relation: str) -> str:
+    """Değerin yanına yön oku ve ATR mesafesini yazar; renk tek bilgi kanalı kalmasın."""
+    if relation.startswith("Yetersiz veri"):
+        return f"—  {relation}"
+    marker = relation.split(" ")[0] if relation[:1] in {"▲", "▼"} else "="
+    distance = relation.split("(")[-1].rstrip(")") if "(" in relation else ""
+    return f"{fmt(value)}  {marker} {distance}".rstrip()
 
-    chart = figure.add_subplot(grid[4, :])
-    chart.set_facecolor(PANEL)
-    recent = data.tail(120)
-    chart.plot(recent.index, recent["Close"], color=WHITE, linewidth=2.0, label="Kapanış")
-    chart.plot(recent.index, recent["EMA_21"], color="#38bdf8", linewidth=1.3, label="EMA21")
-    chart.plot(recent.index, recent["EMA_50"], color="#f59e0b", linewidth=1.3, label="EMA50")
-    chart.plot(recent.index, recent["EMA_200"], color="#f43f5e", linewidth=1.3, label="EMA200")
-    chart.fill_between(recent.index, recent["BB_LOWER"], recent["BB_UPPER"], color="#3b82f6", alpha=0.10, label="Bollinger")
-    profile_source = data.tail(219)
-    rolling_profile = rolling_volume_profile_levels(profile_source, lookback=100).tail(120)
-    chart.plot(rolling_profile.index, rolling_profile["vah"], color="#22c55e", linewidth=1.0, linestyle="--", alpha=0.8, label="Developing VAH")
-    chart.plot(rolling_profile.index, rolling_profile["poc"], color="#f59e0b", linewidth=1.2, linestyle="--", alpha=0.9, label="Developing POC")
-    chart.plot(rolling_profile.index, rolling_profile["val"], color="#ef4444", linewidth=1.0, linestyle="--", alpha=0.8, label="Developing VAL")
-    chart.grid(color="#334155", alpha=0.45)
-    chart.tick_params(colors=MUTED)
-    chart.spines[:].set_color("#334155")
-    chart.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m.%y"))
-    chart.legend(facecolor=HEADER, labelcolor=WHITE, loc="upper left", ncol=8)
-    chart.set_title("Fiyat • Ortalamalar • Bollinger • Yaklaşık Hacim Profili — Son 120 Bar", color=WHITE, fontsize=15, fontweight="bold", loc="left")
 
-    ma_ax = figure.add_subplot(grid[5, 0])
-    ma_rows = [[str(item["period"]), fmt(item["sma"]), fmt(item["ema"])] for item in status["ma"]]
+REPORT_MAX_ASPECT_RATIO = 2.2
+
+
+# Rapor ayrıntı seviyeleri. "Katmanlı Teknik Yorum" tablosu analist kartlarında
+# birebir anlatıldığı için ilk çıkarılan panel odur; bilgi kaybı olmaz.
+REPORT_DETAIL_LEVELS = {
+    # excluded: rapordan çıkarılan paneller, ratio: izin verilen en yüksek sayfa oranı
+    "kompakt": {
+        "excluded": {"Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", "Son 12 Teyitli Olay"},
+        "ratio": 2.7,
+    },
+    "dengeli": {"excluded": {"Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit"}, "ratio": 2.2},
+    "tam": {"excluded": set(), "ratio": 2.0},
+}
+
+
+def detail_profile(detail: str) -> dict[str, Any]:
+    return REPORT_DETAIL_LEVELS.get(detail, REPORT_DETAIL_LEVELS["dengeli"])
+
+
+def _report_panels(data: pd.DataFrame, status: dict[str, Any], text_width: float, detail: str = "dengeli") -> list[dict[str, Any]]:
+    """Rapor panellerini çizim işlevi ve tahmini yüksekliğiyle birlikte tanımlar."""
+
+    def table_panel(title: str, rows: list[list[str]], colors: list[list[str]], columns: list[str], font_size: int, widths: list[float], footnote: str = "") -> dict[str, Any]:
+        def draw(axes: plt.Axes) -> None:
+            draw_table(axes, title, columns, rows, colors, font_size=font_size, col_widths=widths)
+            if footnote:
+                axes.text(0, -0.035, footnote, transform=axes.transAxes, color=MUTED, fontsize=8)
+
+        return {"name": title, "height": estimate_table_height(rows, widths, font_size, text_width), "draw": draw}
+
+    def chart_panel() -> dict[str, Any]:
+        def draw(chart: plt.Axes) -> None:
+            chart.set_facecolor(PANEL)
+            recent = data.tail(120)
+            chart.plot(recent.index, recent["Close"], color=WHITE, linewidth=2.0, label="Kapanış")
+            chart_emas = key_ema_periods(list(data.attrs.get("ma_periods", MA_PERIODS)), KEY_EMA_PERIODS)
+            for period, colour in zip(chart_emas, ("#38bdf8", "#f59e0b", "#f43f5e"), strict=False):
+                if f"EMA_{period}" in recent:
+                    chart.plot(recent.index, recent[f"EMA_{period}"], color=colour, linewidth=1.3, label=f"EMA{period}")
+            chart.fill_between(recent.index, recent["BB_LOWER"], recent["BB_UPPER"], color="#3b82f6", alpha=0.10, label="Bollinger")
+            rolling_profile = rolling_volume_profile_levels(data.tail(219), lookback=100).tail(120)
+            chart.plot(rolling_profile.index, rolling_profile["vah"], color="#22c55e", linewidth=1.0, linestyle="--", alpha=0.8, label="Developing VAH")
+            chart.plot(rolling_profile.index, rolling_profile["poc"], color="#f59e0b", linewidth=1.2, linestyle="--", alpha=0.9, label="Developing POC")
+            chart.plot(rolling_profile.index, rolling_profile["val"], color="#ef4444", linewidth=1.0, linestyle="--", alpha=0.8, label="Developing VAL")
+            chart.grid(color="#334155", alpha=0.45)
+            chart.tick_params(colors=MUTED)
+            chart.spines[:].set_color("#334155")
+            chart.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m.%y"))
+            chart.legend(facecolor=HEADER, labelcolor=WHITE, loc="upper left", ncol=8)
+            chart.set_title("Fiyat • Ortalamalar • Bollinger • Yaklaşık Hacim Profili — Son 120 Bar", color=WHITE, fontsize=15, fontweight="bold", loc="left")
+
+        return {"name": "Fiyat Grafiği", "height": 6.5, "draw": draw}
+
+    def rows_of(key: str) -> list[list[str]]:
+        return [[item[0], item[1], item[2]] for item in status[key]]
+
+    ma_rows = [
+        [str(item["period"]), ma_cell(item["sma"], item.get("sma_relation", "")), ma_cell(item["ema"], item.get("ema_relation", ""))]
+        for item in status["ma"]
+    ]
     ma_colors = [[HEADER, item["sma_color"], item["ema_color"]] for item in status["ma"]]
-    draw_table(ma_ax, "SMA / EMA Değerleri", ["Periyot", "SMA", "EMA"], ma_rows, ma_colors, font_size=10, col_widths=[0.20, 0.40, 0.40])
-    ma_ax.text(0, -0.035, f"Yeşil: fiyat üstünde | Sarı: ±%{status['equality_tolerance_pct']:.2f} yakın | Kırmızı: fiyat altında", transform=ma_ax.transAxes, color=MUTED, fontsize=8)
+    excluded = detail_profile(detail)["excluded"]
+    panels = [
+        table_panel("Piyasa Durum Haritası", rows_of("executive"), [[HEADER, tone_color(item[3]), PANEL] for item in status["executive"]], ["Aile", "Durum", "Bağlam"], 13, [0.16, 0.38, 0.46]),
+        table_panel("Karar Bağlamı • RS • MTF • Likidite • Risk", rows_of("decision_rows"), [[HEADER, PANEL, tone_color(item[3])] for item in status["decision_rows"]], ["Alan", "Değerler", "Durum"], 12, [0.16, 0.46, 0.38]),
+        table_panel("Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", [[item[0], item[1], item[2]] for item in status["technical_commentary"]["visual_rows"]], [[HEADER, tone_color(item[3]), PANEL] for item in status["technical_commentary"]["visual_rows"]], ["Katman", "Durum", "Yorum"], 12, [0.15, 0.22, 0.63]),
+        chart_panel(),
+        table_panel("SMA / EMA Değerleri", ma_rows, ma_colors, ["Periyot", "SMA", "EMA"], 13, [0.20, 0.40, 0.40], f"▲ yeşil: fiyat ortalamanın üstünde | sarı: ±%{status['equality_tolerance_pct']:.2f} yakın | ▼ kırmızı: altında. Ton koyuluğu ATR cinsinden mesafeyle artar."),
+        table_panel("Momentum • Kesişim • Eğim", rows_of("momentum"), [[HEADER, PANEL, tone_color(item[3])] for item in status["momentum"]], ["Gösterge", "Değerler", "Durum"], 11, [0.12, 0.38, 0.50]),
+        table_panel("Trend • Volatilite • Hacim", rows_of("trend_volatility_volume"), [[HEADER, PANEL, tone_color(item[3])] for item in status["trend_volatility_volume"]], ["Gösterge", "Değerler", "Durum"], 11, [0.14, 0.31, 0.55]),
+        table_panel("Konum • AVWAP • POC/VA • Yapı Seviyeleri", rows_of("location"), [[HEADER, PANEL, tone_color(item[3])] for item in status["location"]], ["Alan", "Değerler", "Durum"], 11, [0.14, 0.52, 0.34]),
+        table_panel("Katılım • RVOL • Delta/CVD Tahmini", rows_of("participation"), [[HEADER, PANEL, tone_color(item[3])] for item in status["participation"]], ["Alan", "Değerler", "Durum"], 11, [0.14, 0.34, 0.52]),
+        table_panel("Son 12 Teyitli Olay", rows_of("events"), [[tone_color(item[3]), PANEL, HEADER] for item in status["events"]], ["Olay", "Zaman", "Tür"], 11, [0.50, 0.24, 0.26]),
+    ]
+    return [panel for panel in panels if panel["name"] not in excluded]
 
-    momentum_ax = figure.add_subplot(grid[5, 1])
-    momentum_rows = [[item[0], item[1], item[2]] for item in status["momentum"]]
-    momentum_colors = [[HEADER, PANEL, item[3]] for item in status["momentum"]]
-    draw_table(momentum_ax, "Momentum • Kesişim • Eğim", ["Gösterge", "Değerler", "Durum"], momentum_rows, momentum_colors, font_size=7, col_widths=[0.12, 0.38, 0.50])
 
-    trend_ax = figure.add_subplot(grid[6, 0])
-    trend_rows = [[item[0], item[1], item[2]] for item in status["trend_volatility_volume"]]
-    trend_colors = [[HEADER, PANEL, item[3]] for item in status["trend_volatility_volume"]]
-    draw_table(trend_ax, "Trend • Volatilite • Hacim", ["Gösterge", "Değerler", "Durum"], trend_rows, trend_colors, font_size=7, col_widths=[0.14, 0.31, 0.55])
+def render_report_pages(data: pd.DataFrame, status: dict[str, Any], directory: Path, stem: str = "technical_report") -> list[Path]:
+    """Raporu panel sınırlarından bölerek okunabilir sayfalar üretir.
 
-    location_ax = figure.add_subplot(grid[6, 1])
-    location_rows = [[item[0], item[1], item[2]] for item in status["location"]]
-    location_colors = [[HEADER, PANEL, item[3]] for item in status["location"]]
-    draw_table(location_ax, "Konum • AVWAP • POC/VA • Yapı Seviyeleri", ["Alan", "Değerler", "Durum"], location_rows, location_colors, font_size=7, col_widths=[0.14, 0.52, 0.34])
+    Sayfa oranı sınırlanır; Telegram uzun görselleri daraltarak gösterdiği için
+    aksi halde tablolar okunmaz hale gelir. Bölme daima panel sınırında yapılır,
+    böylece hiçbir tablo ortadan kesilmez.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    plt.rcParams["font.family"] = "DejaVu Sans"
+    text_width = PAGE_WIDTH_INCHES - 1.0
+    panels = _report_panels(data, status, text_width, str(status.get("report_detail", "dengeli")))
+    budget = PAGE_WIDTH_INCHES * detail_profile(str(status.get("report_detail", "dengeli")))["ratio"] - 2.7
+    total_height = sum(panel["height"] for panel in panels)
+    # Önce kaç sayfa gerektiğini bul, sonra yükü eşit dağıt; aksi halde son sayfa
+    # tek panelle yarı boş kalır.
+    page_count = max(1, math.ceil(total_height / budget))
+    target = total_height / page_count
+    pages: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    used = 0.0
+    for index, panel in enumerate(panels):
+        remaining_pages = page_count - len(pages)
+        exceeds_budget = current and used + panel["height"] > budget
+        balanced_break = current and remaining_pages > 1 and used + panel["height"] / 2 > target and len(panels) - index >= remaining_pages - 1
+        if exceeds_budget or balanced_break:
+            pages.append(current)
+            current, used = [], 0.0
+        current.append(panel)
+        used += panel["height"]
+    if current:
+        pages.append(current)
 
-    participation_ax = figure.add_subplot(grid[7, 0])
-    participation_rows = [[item[0], item[1], item[2]] for item in status["participation"]]
-    participation_colors = [[HEADER, PANEL, item[3]] for item in status["participation"]]
-    draw_table(participation_ax, "Katılım • RVOL • Delta/CVD Tahmini", ["Alan", "Değerler", "Durum"], participation_rows, participation_colors, font_size=7, col_widths=[0.14, 0.34, 0.52])
+    outputs: list[Path] = []
+    total = len(pages)
+    for index, page in enumerate(pages, start=1):
+        heights = [1.5, *[panel["height"] for panel in page]]
+        figure = plt.figure(figsize=(PAGE_WIDTH_INCHES, sum(heights) + 1.2), dpi=PAGE_DPI, facecolor=BG)
+        grid = figure.add_gridspec(len(heights), 1, height_ratios=heights, hspace=0.30, top=0.985, bottom=0.012, left=0.035, right=0.972)
+        _draw_page_header(figure, grid, status, f"Sayfa {index}/{total} — Teknik Rapor")
+        for position, panel in enumerate(page, start=1):
+            panel["draw"](figure.add_subplot(grid[position, :]))
+        output = directory / f"{stem}_{index}.png"
+        figure.savefig(output, facecolor=figure.get_facecolor())
+        plt.close(figure)
+        outputs.append(output)
+    return outputs
 
-    events_ax = figure.add_subplot(grid[7, 1])
-    event_rows = [[item[0], item[1], item[2]] for item in status["events"]]
-    event_colors = [[item[3], PANEL, HEADER] for item in status["events"]]
-    draw_table(events_ax, "Son 12 Teyitli Olay", ["Olay", "Zaman", "Tür"], event_rows, event_colors, font_size=7, col_widths=[0.50, 0.24, 0.26])
 
-    figure.savefig(output, facecolor=figure.get_facecolor(), bbox_inches="tight")
-    plt.close(figure)
+def render_report(data: pd.DataFrame, status: dict[str, Any], output: Path) -> None:
+    """Geriye dönük uyumluluk: tek dosya istendiğinde ilk sayfayı üretir."""
+    pages = render_report_pages(data, status, output.parent, output.stem)
+    if pages and pages[0] != output:
+        pages[0].replace(output)
 
 
 def parse_args() -> argparse.Namespace:
@@ -791,33 +1070,41 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--market", default="BIST", choices=["BIST", "US", "AUTO"])
     parser.add_argument("--provider", default="AUTO", choices=["AUTO", "BORSAPY", "YFINANCE"])
     parser.add_argument("--anchor-date", default="", help="Manuel AVWAP başlangıcı, ör. 2026-01-02")
-    parser.add_argument("--period", default="2y", help="İstenen analiz/gösterim dönemi")
-    parser.add_argument("--warmup-period", default="2y", help="377 bar göstergeler için minimum veri dönemi")
-    parser.add_argument("--interval", default="1d")
+    parser.add_argument("--period", default="", help="Boşsa mum aralığının varsayılan dönemi kullanılır")
+    parser.add_argument("--warmup-period", default="", help="Boşsa mum aralığının varsayılan ısınma dönemi kullanılır")
+    parser.add_argument("--interval", default="1d", choices=list(INTERVALS))
+    parser.add_argument("--report-detail", default="kompakt", choices=list(REPORT_DETAIL_LEVELS), help="Görsel sayısı/ayrıntı dengesi")
     parser.add_argument("--benchmark", default="", help="Boşsa BIST için XU100, US için SPY")
     parser.add_argument("--account-size", type=float, default=0.0, help="Opsiyonel örnek risk bütçesi hesabı")
     parser.add_argument("--risk-pct", type=float, default=1.0)
     parser.add_argument("--atr-multiple", type=float, default=1.5)
     parser.add_argument("--output", default="reports/technical_report.png")
     parser.add_argument("--json-output", default="reports/technical_report.json")
+    parser.add_argument("--card-output", default="reports/analyst_card.png")
     parser.add_argument("--send-telegram", action="store_true")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    spec = resolve(args.interval)
+    # Boş bırakılan dönemler mum aralığının varsayılanından alınır; 5 dakikalıkta
+    # 2 yıllık istek sağlayıcı sınırına takılır, aylıkta 2 yıl yetersiz kalır.
+    period = args.period or spec.default_period
+    warmup = args.warmup_period or spec.warmup_period
     config = ScanConfig(
         ticker=args.ticker,
         market=args.market,
-        period=args.period,
+        period=period,
         interval=args.interval,
         provider=args.provider,
         anchor_date=args.anchor_date,
-        warmup_period=args.warmup_period,
+        warmup_period=warmup,
         benchmark=args.benchmark,
         account_size=args.account_size,
         risk_pct=args.risk_pct,
         atr_multiple=args.atr_multiple,
+        report_detail=args.report_detail,
     )
     symbol, prices = download_prices(config)
     resolved_config = dataclass_replace(config, market=str(prices.attrs.get("market", config.market)))
@@ -827,18 +1114,25 @@ def main() -> None:
         print(f"Uyarı: benchmark verisi alınamadı ({exc}).")
         benchmark_symbol, benchmark_data = resolved_config.benchmark or ("XU100" if resolved_config.market == "BIST" else "SPY"), None
     free_float_pct = download_free_float(resolved_config)
-    calculated = calculate_indicators(prices)
+    calculated = calculate_indicators(prices, resolved_config.interval)
     status = build_status(calculated, resolved_config, symbol, benchmark_data, benchmark_symbol, free_float_pct)
     image_path = Path(args.output)
     json_path = Path(args.json_output)
-    render_report(calculated, status, image_path)
+    report_pages = render_report_pages(calculated, status, image_path.parent, image_path.stem)
+    status["report_images"] = [str(path) for path in report_pages]
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"Rapor oluşturuldu: {image_path}")
+    print(f"{len(report_pages)} rapor sayfası oluşturuldu.")
     print(f"JSON oluşturuldu: {json_path}")
+    card_paths = render_analyst_cards(status, Path(args.card_output).parent)
+    # Tüm görseller aynı boyuta getirilir; Telegram farklı oranları farklı
+    # genişliklerde gösterdiği için akış aksi halde dağınık görünür.
+    standardize_pages(report_pages + card_paths)
+    print(f"{len(card_paths)} analist kartı oluşturuldu.")
     if args.send_telegram:
-        send_photo(image_path, status)
-        print("Telegram raporu gönderildi.")
+        sent = send_report_pages(report_pages, status) + send_analyst_cards(card_paths, status)
+        detail_sent = send_report_detail(status)
+        print(f"{sent} görsel gönderildi." + (" Ayrıntılı metin de iletildi." if detail_sent else ""))
 
 
 if __name__ == "__main__":

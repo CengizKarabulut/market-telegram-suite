@@ -239,6 +239,7 @@ def risk_reference_context(
         "long_reference_2r": price + 2 * distance,
         "short_reference_stop": price + distance,
         "short_reference_1r": max(price - distance, 0.0),
+        "short_reference_2r": max(price - 2 * distance, 0.0),
         "account_size": account_size if account_size > 0 else None,
         "risk_pct": risk_pct if risk_amount > 0 else None,
         "risk_amount": risk_amount if risk_amount > 0 else None,

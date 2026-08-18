@@ -7,6 +7,34 @@ from typing import Any
 import requests
 
 DEFAULT_CHAT_ID = "-1003502567927"
+CAPTION_LIMIT = 1024
+MESSAGE_LIMIT = 4096
+
+
+def clip(text: str, limit: int) -> str:
+    """Telegram karakter sınırını aşan metni güvenli biçimde kısaltır."""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def split_message(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
+    """Uzun metni satır sınırlarını koruyarak Telegram mesaj sınırına böler."""
+    if len(text) <= limit:
+        return [text]
+    parts: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit:
+            if current:
+                parts.append(current)
+            current = clip(line, limit)
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+    return parts
 
 
 def build_caption(status: dict[str, Any]) -> str:
@@ -79,7 +107,9 @@ def _destination() -> tuple[str, str, str]:
 
 def send_photo(image_path: Path, status: dict[str, Any]) -> None:
     token, chat_id, thread_id = _destination()
-    payload = {"chat_id": chat_id, "caption": build_caption(status)}
+    payload: dict[str, Any] = {"chat_id": chat_id}
+    if caption_enabled():
+        payload["caption"] = clip(build_caption(status), CAPTION_LIMIT)
     if thread_id:
         payload["message_thread_id"] = thread_id
     with image_path.open("rb") as image:
@@ -93,7 +123,81 @@ def send_photo(image_path: Path, status: dict[str, Any]) -> None:
         raise RuntimeError(f"Telegram gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}")
 
 
+def caption_enabled() -> bool:
+    """Görsel altı açıklama varsayılan olarak kapalıdır; tüm bilgi görselin içindedir."""
+    return os.getenv("TELEGRAM_SEND_CAPTION", "0").strip().lower() in {"1", "true", "yes", "evet"}
+
+
+def text_detail_enabled() -> bool:
+    """Ayrıntılı metin mesajı varsayılan olarak kapalıdır; kart görseli onun yerini alır."""
+    return os.getenv("TELEGRAM_SEND_TEXT_DETAIL", "0").strip().lower() in {"1", "true", "yes", "evet"}
+
+
+def send_report_detail(status: dict[str, Any]) -> bool:
+    """Ayrıntılı analist notunu düz metin olarak gönderir (yalnızca açıkça istendiğinde)."""
+    commentary = status.get("technical_commentary", {})
+    detail = str(commentary.get("telegram_detail", "")).strip()
+    if not detail or not text_detail_enabled():
+        return False
+    header = f"📝 {status.get('symbol', '—')} — Ayrıntılı Teknik Okuma ({status.get('timestamp', '—')})"
+    send_text(f"{header}\n\n{detail}")
+    return True
+
+
+def card_caption(status: dict[str, Any]) -> str:
+    """Analist kartı için kısa açıklama; ayrıntı görselin içindedir."""
+    commentary = status.get("technical_commentary", {})
+    setup = commentary.get("setup", {})
+    clarity = commentary.get("clarity", {})
+    lines = [
+        f"🗣️ {status.get('symbol', '—')} — Analist Kartı",
+        f"Kurulum: {setup.get('name', '—')} ({setup.get('bias', '—')})",
+        f"Okuma netliği: {clarity.get('state', '—')}",
+        "",
+        "Ayrıntılı okuma görselin içindedir. Yatırım tavsiyesi değildir.",
+    ]
+    return clip("\n".join(lines), CAPTION_LIMIT)
+
+
+def send_report_pages(image_paths: list[Path], status: dict[str, Any]) -> int:
+    """Teknik rapor sayfalarını sırayla gönderir."""
+    for path in image_paths:
+        send_photo(path, status)
+    return len(image_paths)
+
+
+def send_analyst_cards(image_paths: list[Path], status: dict[str, Any]) -> int:
+    """Kart sayfalarını sırayla gönderir ve gönderilen sayıyı döndürür."""
+    for path in image_paths:
+        send_analyst_card(path, status)
+    return len(image_paths)
+
+
+def send_analyst_card(image_path: Path, status: dict[str, Any]) -> None:
+    """Analist kartını ikinci fotoğraf olarak gönderir."""
+    token, chat_id, thread_id = _destination()
+    payload: dict[str, Any] = {"chat_id": chat_id}
+    if caption_enabled():
+        payload["caption"] = card_caption(status)
+    if thread_id:
+        payload["message_thread_id"] = thread_id
+    with image_path.open("rb") as image:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/sendPhoto",
+            data=payload,
+            files={"photo": (image_path.name, image, "image/png")},
+            timeout=60,
+        )
+    if not response.ok:
+        raise RuntimeError(f"Telegram kart gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}")
+
+
 def send_text(text: str) -> None:
+    for part in split_message(text):
+        _send_single_text(part)
+
+
+def _send_single_text(text: str) -> None:
     token, chat_id, thread_id = _destination()
     payload = {"chat_id": chat_id, "text": text}
     if thread_id:

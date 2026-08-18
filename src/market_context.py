@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 
 from src.divergence import detect_divergences
+from src.semantic_features import build_semantic_features
+from src.setup_recognition import build_setup_context
 
 
 def _number(value: Any, default: float = math.nan) -> float:
@@ -520,6 +522,7 @@ def build_market_context(
     vwaps = anchored_vwaps(data, anchor_date)
     flow = order_flow_proxy(data)
     rvol = relative_volume(data)
+    semantic = build_semantic_features(data, ma_periods, levels, profile, vwaps, structure, divergences)
 
     ma_values = np.array([float(row[f"EMA_{length}"]) for length in ma_periods], dtype=float)
     valid_ma = ma_values[np.isfinite(ma_values)]
@@ -581,29 +584,22 @@ def build_market_context(
     else:
         regime_tone = "neutral"
 
-    momentum_directions = [
-        row["MACD"] > row["MACD_SIGNAL"],
-        row["RSI"] > row["RSI_MA"],
-        row["STOCH_K"] > row["STOCH_D"],
-        row["SMI"] > row["SMI_EMA"],
-    ]
-    positive_momentum = sum(bool(value) for value in momentum_directions)
-    momentum_state = {
-        4: "Tam yukarı uyum",
-        3: "Yukarı ağırlıklı",
-        2: "Karma",
-        1: "Aşağı ağırlıklı",
-        0: "Tam aşağı uyum",
-    }[positive_momentum]
-    momentum_tone = "positive" if positive_momentum >= 3 else "negative" if positive_momentum <= 1 else "warning"
+    momentum_feature = semantic["momentum_character"]
+    momentum_state = momentum_feature["state"]
+    momentum_tone = momentum_feature["tone"]
     active_divergences = [
-        f"{name} {item['state']} ({item['event_age']} bar)"
-        for name, item in divergences["indicators"].items()
-        if item["detected"]
+        f"{item['indicator']} {item['state']} / kalite {item['quality']} (teyit {item['event_age']} bar önce, pivot 5 bar öncesi)"
+        for item in momentum_feature["active_divergences"]
     ]
     divergence_state = " | ".join(active_divergences) if active_divergences else "Son 5 barda aktif uyumsuzluk yok"
-    volume_state = "Belirgin katılım" if rvol >= 1.5 else "Ortalama üstü katılım" if rvol >= 1.1 else "Düşük katılım" if rvol < 0.8 else "Normal katılım"
-    volume_tone = "purple" if rvol >= 1.1 else "neutral"
+    momentum_rsi = momentum_feature["rsi"]
+    momentum_headline = (
+        f"RSI {momentum_rsi['value']:.1f} ({momentum_rsi['zone']}, eğim5 {momentum_rsi['slope_5']:+.2f}) | "
+        f"MACD {momentum_feature['macd']['histogram_character']} | {divergence_state}"
+    )
+    participation_feature = semantic["participation"]
+    volume_state = participation_feature["state"]
+    volume_tone = participation_feature["tone"]
     volatility_state = ("Genişliyor" if bb_widening else "Daralıyor") + f" | ATR perc %{atr_rank:.0f}"
     volatility_tone = "purple" if atr_rank >= 70 else "blue" if atr_rank <= 30 else "neutral"
     ma_groups_definition = {
@@ -613,7 +609,10 @@ def build_market_context(
         "Uzun": [200, 233, 377],
     }
     ma_groups = {}
-    for group_name, periods in ma_groups_definition.items():
+    for group_name, group_periods in ma_groups_definition.items():
+        periods = [length for length in group_periods if f"EMA_{length}" in data]
+        if not periods:
+            continue
         group_values = [float(row[f"EMA_{length}"]) for length in periods]
         ma_groups[group_name] = {
             "above": sum(price > value for value in group_values if math.isfinite(value)),
@@ -624,13 +623,22 @@ def build_market_context(
     ma_state = " | ".join(f"{name} {item['above']}/{item['total']}" for name, item in ma_groups.items())
     location_state = profile["position"]
 
+    setup_context = build_setup_context(
+        data,
+        {"regime": {"state": regime, "adx": adx}, "structure": structure, "profile": profile},
+        semantic,
+    )
+    setup = setup_context["setup"]
+    participation_reading = setup_context["participation_reading"]
+
     families = [
+        ["KURULUM", setup["name"], f"Eğilim: {setup['bias']} | {setup_context['duration']['summary']}", setup["tone"]],
         ["REJİM", regime, f"Aday {current_candidate} | ADX Δ {adx_delta:+.2f} | Spread Δ {spread_delta:+.3f}", regime_tone],
         ["YAPI", structure["state"], structure["event"], structure["tone"]],
         ["KONUM", location_state, profile["developing_acceptance"], profile["tone"]],
         ["TREND", ma_state, f"EMA spread %{ma_spread_pct:.2f} | perc %{ma_spread_rank:.0f}", "positive" if ma_above >= 10 else "negative" if ma_above <= 5 else "warning"],
-        ["MOMENTUM", momentum_state, f"{positive_momentum}/4 ana çizgi sinyal üstünde | {divergence_state}", momentum_tone],
-        ["KATILIM", volume_state, f"RVOL {rvol:.2f}x | Delta tah. %{flow['delta_pct']:.1f}", volume_tone],
+        ["MOMENTUM", momentum_state, momentum_headline, momentum_tone],
+        ["KATILIM", participation_reading["state"], f"RVOL 1b {participation_feature['rvol_1']:.2f}x | 3b {participation_feature['rvol_3_average']:.2f}x | Delta tah. %{flow['delta_pct']:.1f}", participation_reading["tone"]],
         ["VOLATİLİTE", volatility_state, f"BB perc %{bb_rank:.0f}", volatility_tone],
     ]
 
@@ -652,7 +660,7 @@ def build_market_context(
         )
 
     participation_rows = [
-        ["Hacim / RVOL", f"{row['Volume']:,.0f} | {rvol:.2f}x", volume_state, volume_tone],
+        ["Hacim / RVOL", f"{row['Volume']:,.0f} | 1b {participation_feature['rvol_1']:.2f}x | 3b {participation_feature['rvol_3_average']:.2f}x", volume_state, volume_tone],
         ["Buy/Sell tah.", f"Buy {flow['buy']:,.0f} | Sell {flow['sell']:,.0f}", f"Delta {flow['delta']:+,.0f} | %{flow['delta_pct']:+.1f}", "positive" if flow["delta"] > 0 else "negative"],
         ["CVD tah.", f"{flow['cvd']:+,.0f}", f"Slope5 {flow['cvd_slope_5']:+,.0f}", "positive" if flow["cvd_slope_5"] > 0 else "negative"],
         ["OBV", f"{row['OBV']:,.0f}", f"Slope5 {_slope(data['OBV'], 5):+,.0f}", "positive" if _slope(data["OBV"], 5) > 0 else "negative"],
@@ -669,6 +677,8 @@ def build_market_context(
         "anchored_vwaps": vwaps,
         "order_flow_proxy": flow,
         "relative_volume": rvol,
+        "semantic": semantic,
+        "setup_context": setup_context,
         "ma_structure": {"above": ma_above, "rising": ma_rising, "total": len(valid_ma), "spread_pct": ma_spread_pct, "spread_percentile": ma_spread_rank, "groups": ma_groups},
         "divergences": divergences,
         "location_rows": location_rows,

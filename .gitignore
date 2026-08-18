@@ -7,3 +7,6 @@ reports/*.png
 reports/*.json
 !reports/.gitkeep
 
+
+# Test/geçici kart çıktıları
+analyst_card.png
