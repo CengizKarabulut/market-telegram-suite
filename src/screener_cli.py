@@ -18,6 +18,7 @@ from typing import Any
 import pandas as pd
 
 from src.analyst_card import render_analyst_cards, standardize_pages
+from src.intervals import resolve
 from src.scan_card import render_scan_cards
 from src.scan_state import (
     MARKET_TIMEZONE,
@@ -181,7 +182,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--universe", default="auto", choices=["auto", "provider", "file"], help="Sembol kaynağı")
     parser.add_argument("--watchlist", default="watchlist.txt", help="Yerel sembol listesi (yedek kaynak)")
     parser.add_argument("--limit", type=int, default=0, help="En fazla kaç sembol taransın (0 = sınırsız)")
-    parser.add_argument("--period", default="2y")
+    parser.add_argument("--period", default="", help="Boşsa mum aralığının varsayılan dönemi kullanılır")
     parser.add_argument("--interval", default="1d")
     parser.add_argument("--batch-size", type=int, default=40)
     parser.add_argument("--screens", default="", help="Virgülle ayrılmış tarama adları; boşsa hepsi")
@@ -201,9 +202,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    # 1 saatlik veride 2 yıllık dönem gereksiz ağırdır; aralığın kendi varsayılanı kullanılır.
+    period = args.period or resolve(args.interval).default_period
     universe = load_universe(args.universe, Path(args.watchlist))
     symbols = universe.symbols[: args.limit] if args.limit > 0 else universe.symbols
-    print(f"Evren: {len(symbols)} sembol ({universe.source})")
+    print(f"Evren: {len(symbols)} sembol ({universe.source}) | dönem {period}, aralık {args.interval}")
 
     enabled = [name.strip() for name in args.screens.split(",") if name.strip()] or list(SCREENS)
     options = {
@@ -212,18 +215,19 @@ def main() -> None:
         "rvol_spike": args.rvol_spike,
         "min_turnover": args.min_turnover,
     }
-    benchmark = fetch_benchmark(args.benchmark, args.period, args.interval)
+    benchmark = fetch_benchmark(args.benchmark, period, args.interval)
     if benchmark is None:
         print(f"Uyarı: {args.benchmark} verisi alınamadı; göreceli güç hesaplanmayacak.")
     started = time.perf_counter()
     payload = run_screen(
         symbols,
-        build_fetcher(args.period, args.interval),
+        build_fetcher(period, args.interval),
         options=options,
         enabled=enabled,
         interval=args.interval,
         batch_size=args.batch_size,
         benchmark=benchmark,
+        keep_frames=args.report_top > 0,
     )
     elapsed = time.perf_counter() - started
     payload["universe_source"] = universe.source
@@ -249,14 +253,14 @@ def main() -> None:
     # olanlar için tam rapor üretilir, aksi halde kanal tekrarla dolar.
     state_path = Path(args.state)
     reported = load_state(state_path)
+    scan_frames = payload.pop("frames", {})
     fresh = select_new(payload["results"], reported, args.report_top)
     symbol_images: list[Path] = []
     produced: list[dict[str, Any]] = []
     for item in fresh:
         ticker = item["ticker"]
         try:
-            frames = build_fetcher(args.period, args.interval)([ticker])
-            prices = frames.get(ticker)
+            prices = scan_frames.get(ticker)
             if prices is None or prices.empty:
                 print(f"  {ticker}: rapor için veri alınamadı, atlanıyor.")
                 continue

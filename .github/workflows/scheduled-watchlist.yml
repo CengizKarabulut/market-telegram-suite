@@ -136,8 +136,13 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: bist-tarama
+          # Görseller de saklanır; Telegram gönderimi başarısız olursa kartlar
+          # yeniden üretmeye gerek kalmadan artifact'ten alınabilir.
           path: |
             reports/screener.json
             reports/bist_universe.json
+            reports/scan_state.json
+            reports/*.png
+            reports/**/*.png
           if-no-files-found: warn
           retention-days: 30

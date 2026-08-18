@@ -266,3 +266,28 @@ class PresentationTests(unittest.TestCase):
         strong = ScreenResult("A", 10, 1e8, 10, 0.6, 2, 50, screens=["basarisiz_kirilim"], score=3.0)
         noisy = ScreenResult("B", 10, 1e8, 90, 9.0, 2, 50, screens=["asiri_bolge"], score=1.0)
         self.assertLess(rank_key(strong), rank_key(noisy))
+
+
+class FrameReuseTests(unittest.TestCase):
+    def test_frames_are_kept_only_when_requested(self) -> None:
+        store = {"OK": frame(seed=2, spike=8.0)}
+        without = run_screen(["OK"], lambda batch: {t: store[t] for t in batch}, enabled=["hacim_patlamasi"])
+        self.assertEqual(without["frames"], {})
+        with_frames = run_screen(
+            ["OK"], lambda batch: {t: store[t] for t in batch}, enabled=["hacim_patlamasi"], keep_frames=True
+        )
+        self.assertIn("OK", with_frames["frames"])
+
+    def test_kept_frame_matches_the_scanned_data(self) -> None:
+        store = {"OK": frame(seed=2, spike=8.0)}
+        payload = run_screen(
+            ["OK"], lambda batch: {t: store[t] for t in batch}, enabled=["hacim_patlamasi"], keep_frames=True
+        )
+        self.assertEqual(len(payload["frames"]["OK"]), len(store["OK"]))
+
+    def test_non_matching_symbols_are_not_kept(self) -> None:
+        store = {"SESSIZ": frame(seed=5)}
+        payload = run_screen(
+            ["SESSIZ"], lambda batch: {t: store[t] for t in batch}, enabled=["hacim_patlamasi"], keep_frames=True
+        )
+        self.assertEqual(payload["frames"], {})

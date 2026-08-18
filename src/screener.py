@@ -313,6 +313,7 @@ def run_screen(
     interval: str = "1d",
     batch_size: int = BATCH_SIZE,
     benchmark: pd.Series | None = None,
+    keep_frames: bool = False,
 ) -> dict[str, Any]:
     """Sembol listesini tarar ve her durumda özet döndürür."""
     options = {**default_options(), **(options or {})}
@@ -322,6 +323,7 @@ def run_screen(
         raise ValueError(f"Bilinmeyen tarama: {', '.join(unknown)}")
 
     matches: list[ScreenResult] = []
+    kept_frames: dict[str, pd.DataFrame] = {}
     errors: dict[str, str] = {}
     skipped_liquidity = 0
     processed = 0
@@ -344,6 +346,10 @@ def run_screen(
                     skipped_liquidity += 1
                     continue
                 matches.append(result)
+                if keep_frames:
+                    # Eşleşen sembolün verisi rapor üretiminde yeniden kullanılır;
+                    # aksi halde her rapor için ikinci bir indirme isteği gider.
+                    kept_frames[ticker] = frame
             except Exception as error:  # noqa: BLE001 -- tek sembol tüm taramayı bozmasın
                 errors[ticker] = f"{type(error).__name__}: {error}"[:160]
     matches.sort(key=rank_key)
@@ -360,4 +366,5 @@ def run_screen(
         "options": options,
         "screens": enabled,
         "results": [item.as_dict() for item in matches],
+        "frames": kept_frames,
     }
