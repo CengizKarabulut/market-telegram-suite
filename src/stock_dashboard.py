@@ -27,7 +27,7 @@ from src.market_context import (
     rolling_volume_profile_levels,
 )
 from src.technical_commentary import build_technical_commentary
-from src.telegram_client import send_photo
+from src.telegram_client import send_photo, send_report_detail
 
 MA_PERIODS = [5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
 BG = "#0f172a"
@@ -838,7 +838,8 @@ def main() -> None:
     print(f"JSON oluşturuldu: {json_path}")
     if args.send_telegram:
         send_photo(image_path, status)
-        print("Telegram raporu gönderildi.")
+        detail_sent = send_report_detail(status)
+        print("Telegram raporu gönderildi." + (" Ayrıntılı analist notu da iletildi." if detail_sent else ""))
 
 
 if __name__ == "__main__":

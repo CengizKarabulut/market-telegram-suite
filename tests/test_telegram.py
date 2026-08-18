@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from src.send_telegram import send
+from src.telegram_client import CAPTION_LIMIT, MESSAGE_LIMIT, split_message
 
 STATUS = {
     "symbol": "THYAO",
@@ -70,6 +71,48 @@ class TelegramTests(unittest.TestCase):
         self.assertIn("Teknik yorum:", payload["caption"])
         self.assertIn("Denge rejiminde hacim ve kabul teyidi bekleniyor.", payload["caption"])
         self.assertLessEqual(len(payload["caption"]), 1024)
+
+    def test_long_caption_is_clipped_to_telegram_limit(self) -> None:
+        status = json.loads(json.dumps(STATUS))
+        status["technical_commentary"]["headline"] = "Uzun teknik yorum. " * 200
+        environment = {"TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_CHAT_ID": "-1003502567927"}
+        response = Mock(ok=True, status_code=200, text='{"ok":true}')
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(Path, "read_text", return_value=json.dumps(status)),
+            patch.object(Path, "open", return_value=io.BytesIO(b"png")),
+            patch("src.telegram_client.requests.post", return_value=response) as post,
+        ):
+            send(Path("report.png"), Path("report.json"))
+        caption = post.call_args.kwargs["data"]["caption"]
+        self.assertLessEqual(len(caption), CAPTION_LIMIT)
+        self.assertTrue(caption.endswith("…"))
+
+    def test_detail_message_is_sent_after_photo(self) -> None:
+        status = json.loads(json.dumps(STATUS))
+        status["technical_commentary"]["telegram_detail"] = "🧭 Analist Notu\nAyrıntılı okuma metni."
+        environment = {"TELEGRAM_BOT_TOKEN": "test-token", "TELEGRAM_CHAT_ID": "-1003502567927"}
+        response = Mock(ok=True, status_code=200, text='{"ok":true}')
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(Path, "read_text", return_value=json.dumps(status)),
+            patch.object(Path, "open", return_value=io.BytesIO(b"png")),
+            patch("src.telegram_client.requests.post", return_value=response) as post,
+        ):
+            send(Path("report.png"), Path("report.json"))
+        self.assertEqual(post.call_count, 2)
+        self.assertIn("sendPhoto", post.call_args_list[0].args[0])
+        self.assertIn("sendMessage", post.call_args_list[1].args[0])
+        text = post.call_args_list[1].kwargs["data"]["text"]
+        self.assertIn("Ayrıntılı Teknik Okuma", text)
+        self.assertIn("Ayrıntılı okuma metni.", text)
+
+    def test_split_message_respects_limit_and_keeps_content(self) -> None:
+        text = "\n".join(f"satır {index} " + "x" * 80 for index in range(150))
+        parts = split_message(text)
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(all(len(part) <= MESSAGE_LIMIT for part in parts))
+        self.assertIn("satır 149", parts[-1])
 
 
 if __name__ == "__main__":

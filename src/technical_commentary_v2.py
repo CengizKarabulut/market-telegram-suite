@@ -245,7 +245,9 @@ def _analyst_note(
             for item in divergences
         )
         divergence_text = f" Aktif uyumsuzluklar: {details}; bunlar erken kanıttır ve yapı/seviye teyidi gerektirir."
-    closing = f"Görünüm için ilk güçlenme koşulu: {scenario['strengthen'][0]}. İlk zayıflama koşulu: {scenario['weaken'][0]}."
+    strengthen_first = scenario["strengthen"][0].rstrip(". ")
+    weaken_first = scenario["weaken"][0].rstrip(". ")
+    closing = f"Mevcut okumayı teyit edecek ilk koşul: {strengthen_first}. Okumayı geçersizleştirecek ilk koşul: {weaken_first}."
     return (
         f"{opening} {trend} {momentum}{divergence_text} {price_action} {participation} "
         f"{location} {rs} {closing}"

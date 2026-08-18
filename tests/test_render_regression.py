@@ -1,11 +1,13 @@
-import unittest
-import os
 import tempfile
+import unittest
 from pathlib import Path
-import pandas as pd
+
 import numpy as np
-from src.technical_commentary import build_technical_commentary
+import pandas as pd
+
 from src.stock_dashboard import render_report
+from src.technical_commentary import build_technical_commentary
+
 
 class TestRenderRegression(unittest.TestCase):
     def test_render_v2_commentary_produces_valid_png(self):

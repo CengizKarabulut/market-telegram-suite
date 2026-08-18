@@ -363,7 +363,7 @@ def level_confluence_context(
     for name in ("manual", "month", "quarter", "year"):
         add("AVWAP" if name == "manual" else f"{name.title()} VWAP", vwaps.get(name), "VWAP")
     for name, value in levels.items():
-        if name != "current_open":
+        if not name.startswith("current"):
             add(name.upper(), value, "Önceki seviye")
     add("Swing High", structure.get("high"), "Yapı")
     add("Swing Low", structure.get("low"), "Yapı")

@@ -7,6 +7,34 @@ from typing import Any
 import requests
 
 DEFAULT_CHAT_ID = "-1003502567927"
+CAPTION_LIMIT = 1024
+MESSAGE_LIMIT = 4096
+
+
+def clip(text: str, limit: int) -> str:
+    """Telegram karakter sınırını aşan metni güvenli biçimde kısaltır."""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def split_message(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
+    """Uzun metni satır sınırlarını koruyarak Telegram mesaj sınırına böler."""
+    if len(text) <= limit:
+        return [text]
+    parts: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit:
+            if current:
+                parts.append(current)
+            current = clip(line, limit)
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+    return parts
 
 
 def build_caption(status: dict[str, Any]) -> str:
@@ -79,7 +107,7 @@ def _destination() -> tuple[str, str, str]:
 
 def send_photo(image_path: Path, status: dict[str, Any]) -> None:
     token, chat_id, thread_id = _destination()
-    payload = {"chat_id": chat_id, "caption": build_caption(status)}
+    payload = {"chat_id": chat_id, "caption": clip(build_caption(status), CAPTION_LIMIT)}
     if thread_id:
         payload["message_thread_id"] = thread_id
     with image_path.open("rb") as image:
@@ -93,7 +121,23 @@ def send_photo(image_path: Path, status: dict[str, Any]) -> None:
         raise RuntimeError(f"Telegram gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}")
 
 
+def send_report_detail(status: dict[str, Any]) -> bool:
+    """Fotoğraf açıklamasına sığmayan V2 analist notunu ayrı mesaj olarak gönderir."""
+    commentary = status.get("technical_commentary", {})
+    detail = str(commentary.get("telegram_detail", "")).strip()
+    if not detail:
+        return False
+    header = f"📝 {status.get('symbol', '—')} — Ayrıntılı Teknik Okuma ({status.get('timestamp', '—')})"
+    send_text(f"{header}\n\n{detail}")
+    return True
+
+
 def send_text(text: str) -> None:
+    for part in split_message(text):
+        _send_single_text(part)
+
+
+def _send_single_text(text: str) -> None:
     token, chat_id, thread_id = _destination()
     payload = {"chat_id": chat_id, "text": text}
     if thread_id:

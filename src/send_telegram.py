@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from src.telegram_client import build_caption, send_photo
+from src.telegram_client import build_caption, send_photo, send_report_detail
 
 
 def caption(status: dict) -> str:
@@ -14,7 +14,8 @@ def caption(status: dict) -> str:
 def send(image_path: Path, json_path: Path) -> None:
     status = json.loads(json_path.read_text(encoding="utf-8"))
     send_photo(image_path, status)
-    print("Telegram raporu gönderildi.")
+    detail_sent = send_report_detail(status)
+    print("Telegram raporu gönderildi." + (" Ayrıntılı analist notu da iletildi." if detail_sent else ""))
 
 
 def main() -> None:
