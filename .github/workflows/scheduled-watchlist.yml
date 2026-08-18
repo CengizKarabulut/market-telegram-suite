@@ -1,37 +1,65 @@
-name: Zamanlanmış Watchlist Taraması
+name: BIST Geneli Teknik Tarama
 
 on:
   workflow_dispatch:
     inputs:
+      universe:
+        description: "Sembol kaynağı (auto: borsapy + önbellek, file: watchlist.txt)"
+        required: true
+        default: "auto"
+        type: choice
+        options: [auto, provider, file]
+      limit:
+        description: "En fazla kaç sembol taransın (0 = sınırsız)"
+        required: true
+        default: "0"
+        type: string
+      screens:
+        description: "Tarama adları (virgülle, boşsa hepsi)"
+        required: false
+        default: ""
+        type: string
       bb_rank_max:
-        description: "Bollinger genişlik percentile üst sınırı"
+        description: "Bollinger genişlik yüzdeliği üst sınırı"
         required: true
         default: "20"
         type: string
       rvol_min:
-        description: "Minimum RVOL"
+        description: "Minimum RVOL (sıkışma + hacim taraması)"
         required: true
         default: "1.5"
         type: string
+      rvol_spike:
+        description: "Hacim patlaması eşiği"
+        required: true
+        default: "3.0"
+        type: string
+      min_turnover:
+        description: "Minimum 20 bar ortalama TL hacmi"
+        required: true
+        default: "20000000"
+        type: string
       send_telegram:
-        description: "Eşleşme varsa Telegram'a gönder"
+        description: "Özeti Telegram'a gönder"
         required: true
         default: true
         type: boolean
   schedule:
+    # Hafta içi 19:30 TR (16:30 UTC); BIST 18:00'de kapandığı için barlar kesinleşmiş olur.
     - cron: "30 16 * * 1-5"
 
 permissions:
   contents: read
 
 concurrency:
-  group: scheduled-watchlist-${{ github.ref }}
+  group: bist-screener-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  scan-watchlist:
+  screen:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 600+ sembolde indirme ve iki asamali tarama uzun surebilir.
+    timeout-minutes: 60
     steps:
       - name: Kodu indir
         uses: actions/checkout@v6
@@ -46,12 +74,24 @@ jobs:
         run: python -m pip install --requirement requirements.txt
 
       - name: Testleri çalıştır
-        run: python -m unittest discover -s tests -v
+        run: python -m unittest discover -s tests
 
-      - name: Watchlist tara
+      - name: Sembol evrenini önbellekten getir
+        uses: actions/cache@v4
+        with:
+          path: reports/bist_universe.json
+          key: bist-universe-${{ github.run_id }}
+          restore-keys: bist-universe-
+
+      - name: Taramayı çalıştır
         env:
-          BB_RANK_MAX: ${{ inputs.bb_rank_max || '20' }}
-          RVOL_MIN: ${{ inputs.rvol_min || '1.5' }}
+          INPUT_UNIVERSE: ${{ inputs.universe || 'auto' }}
+          INPUT_LIMIT: ${{ inputs.limit || '0' }}
+          INPUT_SCREENS: ${{ inputs.screens }}
+          INPUT_BB_RANK_MAX: ${{ inputs.bb_rank_max || '20' }}
+          INPUT_RVOL_MIN: ${{ inputs.rvol_min || '1.5' }}
+          INPUT_RVOL_SPIKE: ${{ inputs.rvol_spike || '3.0' }}
+          INPUT_MIN_TURNOVER: ${{ inputs.min_turnover || '20000000' }}
           SEND_TELEGRAM: ${{ github.event_name == 'schedule' || inputs.send_telegram }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: "-1003502567927"
@@ -59,19 +99,24 @@ jobs:
         run: |
           SEND_FLAG=""
           if [ "$SEND_TELEGRAM" = "true" ]; then SEND_FLAG="--send-telegram"; fi
-          python -m src.watchlist_scan \
+          python -m src.screener_cli \
+            --universe "$INPUT_UNIVERSE" \
             --watchlist watchlist.txt \
-            --provider AUTO \
-            --period 2y \
-            --bb-rank-max "$BB_RANK_MAX" \
-            --rvol-min "$RVOL_MIN" \
+            --limit "$INPUT_LIMIT" \
+            --screens "$INPUT_SCREENS" \
+            --bb-rank-max "$INPUT_BB_RANK_MAX" \
+            --rvol-min "$INPUT_RVOL_MIN" \
+            --rvol-spike "$INPUT_RVOL_SPIKE" \
+            --min-turnover "$INPUT_MIN_TURNOVER" \
             $SEND_FLAG
 
       - name: Tarama sonucunu sakla
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: watchlist-tarama
-          path: reports/watchlist_scan.json
+          name: bist-tarama
+          path: |
+            reports/screener.json
+            reports/bist_universe.json
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 30
