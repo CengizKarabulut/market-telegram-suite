@@ -175,6 +175,14 @@ def forming_bar_fraction(data: pd.DataFrame, interval: str, now: pd.Timestamp | 
         if elapsed <= 0 or elapsed >= session_minutes:
             return 1.0
         return max(elapsed / session_minutes, 0.25)
+    if spec.key in {"1wk", "1mo"}:
+        # Devam eden hafta/ay barının hacmi de eksiktir; geçen süreye oranlanır.
+        period_end = last + (pd.Timedelta(days=7) if spec.key == "1wk" else pd.offsets.MonthBegin(1))
+        total = (period_end - last).total_seconds() / 60
+        elapsed = (current - last).total_seconds() / 60
+        if elapsed <= 0 or elapsed >= total:
+            return 1.0
+        return max(elapsed / total, 0.25)
     if not spec.intraday:
         return 1.0
     elapsed = (current - last).total_seconds() / 60

@@ -401,13 +401,13 @@ class FormingBarTests(unittest.TestCase):
         data = pd.DataFrame({"Close": [1, 2, 3]}, index=index)
         self.assertEqual(forming_bar_fraction(data, "1h", pd.Timestamp("2026-08-19 13:10")), 1.0)
 
-    def test_weekly_interval_is_never_scaled(self) -> None:
-        """Haftalık/aylık barlarda seans içi orantılama uygulanmaz."""
+    def test_unknown_interval_is_not_scaled(self) -> None:
+        """Tanımlı olmayan bir aralıkta oranlama yapılmaz."""
         from src.screener import forming_bar_fraction
 
         index = pd.date_range("2026-08-19 10:00", periods=3, freq="1h")
         data = pd.DataFrame({"Close": [1, 2, 3]}, index=index)
-        self.assertEqual(forming_bar_fraction(data, "1wk", pd.Timestamp("2026-08-19 12:30")), 1.0)
+        self.assertEqual(forming_bar_fraction(data, "2h", pd.Timestamp("2026-08-19 15:00")), 1.0)
 
     def test_very_early_bar_has_a_floor(self) -> None:
         """Barın ilk dakikalarında aşırı büyütme yapılmamalı."""
@@ -543,3 +543,58 @@ class MultiTimeframeTests(unittest.TestCase):
         merged = merge_interval_results({"1h": first, "1d": second})
         self.assertEqual(merged["corporate_actions"], ["AKFIS", "ORGE"])
         self.assertIn("XXX", merged["errors"])
+
+
+class SlowIntervalFormingBarTests(unittest.TestCase):
+    """Devam eden hafta/ay barının hacmi eksiktir; oranlanmazsa RVOL düşük çıkar."""
+
+    def test_midweek_bar_is_partial(self) -> None:
+        from src.screener import forming_bar_fraction
+
+        data = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex([pd.Timestamp("2026-08-17")]))
+        fraction = forming_bar_fraction(data, "1wk", pd.Timestamp("2026-08-20"))
+        self.assertLess(fraction, 1.0)
+        self.assertGreater(fraction, 0.25)
+
+    def test_completed_week_is_full(self) -> None:
+        from src.screener import forming_bar_fraction
+
+        data = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex([pd.Timestamp("2026-08-17")]))
+        self.assertEqual(forming_bar_fraction(data, "1wk", pd.Timestamp("2026-08-24")), 1.0)
+
+    def test_mid_month_bar_is_partial(self) -> None:
+        from src.screener import forming_bar_fraction
+
+        data = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex([pd.Timestamp("2026-08-01")]))
+        self.assertLess(forming_bar_fraction(data, "1mo", pd.Timestamp("2026-08-10")), 0.5)
+
+    def test_completed_month_is_full(self) -> None:
+        from src.screener import forming_bar_fraction
+
+        data = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex([pd.Timestamp("2026-08-01")]))
+        self.assertEqual(forming_bar_fraction(data, "1mo", pd.Timestamp("2026-09-05")), 1.0)
+
+
+class FiveIntervalMergeTests(unittest.TestCase):
+    def test_five_timeframes_merge_and_rank(self) -> None:
+        from src.screener import merge_interval_results
+
+        def payload(ticker: str) -> dict:
+            return {
+                "requested": 10, "processed": 10, "illiquid": 0, "no_match": 0,
+                "errors": {}, "error_kinds": {}, "corporate_actions": [], "freshness": {},
+                "results": [{
+                    "ticker": ticker, "close": 10.0, "rvol": 2.0, "bb_width_percentile": 20.0,
+                    "screens": ["trend_devami"], "setup": "Trend devamı", "setup_bias": "yukarı",
+                    "notes": [], "excess_return_20": 1.0,
+                }],
+            }
+
+        merged = merge_interval_results({
+            "1h": payload("WIDE"), "4h": payload("WIDE"), "1d": payload("WIDE"),
+            "1wk": payload("WIDE"), "1mo": payload("NARROW"),
+        })
+        top = merged["results"][0]
+        self.assertEqual(top["ticker"], "WIDE")
+        self.assertEqual(len(top["matched_intervals"]), 4)
+        self.assertTrue(top["multi_timeframe"])
