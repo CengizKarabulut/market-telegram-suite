@@ -1,0 +1,64 @@
+name: Telegram Komut Botu
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub Actions sürekli çalışan bir dinleyici sunmaz; komutlar yoklama ile
+    # alınır. Beş dakikalık aralık, GitHub'ın izin verdiği en sık değerdir.
+    # Seans saatleri ve öncesi/sonrası: 09:00-21:00 TR (06:00-18:00 UTC).
+    - cron: "*/5 6-18 * * 1-5"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: telegram-bot
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v6
+
+      - name: Python kur
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Bağımlılıkları yükle
+        run: python -m pip install --requirement requirements.txt
+
+      - name: Durum dosyalarını önbellekten getir
+        uses: actions/cache@v4
+        with:
+          path: |
+            reports/telegram_offset.json
+            reports/screener.json
+            reports/bist_universe.json
+          key: telegram-bot-${{ github.run_id }}
+          restore-keys: telegram-bot-
+
+      - name: Komutları işle
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1003502567927"
+          TELEGRAM_MESSAGE_THREAD_ID: "3982"
+          # Boş bırakılırsa herkes komut verebilir. Kısıtlamak için depo
+          # ayarlarından TELEGRAM_ALLOWED_USERS secret'ını tanımlayın.
+          TELEGRAM_ALLOWED_USERS: ${{ secrets.TELEGRAM_ALLOWED_USERS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python -m src.bot_runner
+
+      - name: Komut çıktılarını sakla
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bot-ciktilari-${{ github.run_id }}
+          path: reports/komut/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7

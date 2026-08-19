@@ -1,0 +1,126 @@
+"""Telegram komut botu.
+
+GitHub Actions sürekli çalışan bir sunucu sunmadığı için bot, webhook yerine
+belirli aralıklarla `getUpdates` çağırarak yeni mesajları toplar. Bu nedenle
+komutlara yanıt anlık değil, en fazla yoklama aralığı kadar gecikmeyle gelir.
+
+İşlenen son mesaj kimliği diske yazılır; aynı komut iki kez çalıştırılmaz.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import requests
+
+OFFSET_PATH = Path("reports/telegram_offset.json")
+COMMAND_PATTERN = re.compile(r"^/(?P<command>[a-zA-ZğüşıöçĞÜŞİÖÇ]+)(?:@\S+)?(?P<args>.*)$", re.DOTALL)
+VALID_TICKER = re.compile(r"^[A-Z0-9]{4,6}$")
+
+HELP_TEXT = (
+    "Kullanılabilir komutlar:\n"
+    "/rapor SEMBOL [aralık] — tek hisse teknik raporu (ör. /rapor THYAO 4h)\n"
+    "/tara [aralık] — yeni tarama başlatır (ör. /tara 1h,1d)\n"
+    "/liste — son taramanın tam listesi\n"
+    "/yardim — bu mesaj\n\n"
+    "Geçerli aralıklar: 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1wk, 1mo"
+)
+
+
+@dataclass(frozen=True)
+class Command:
+    name: str
+    args: list[str]
+    chat_id: int
+    user_id: int
+    user_name: str
+    update_id: int
+
+
+def load_offset(path: Path = OFFSET_PATH) -> int:
+    """En son işlenen güncelleme kimliği; tekrar işlemeyi önler."""
+    try:
+        return int(json.loads(path.read_text(encoding="utf-8"))["offset"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+
+
+def save_offset(offset: int, path: Path = OFFSET_PATH) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"offset": int(offset)}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def parse_command(update: dict[str, Any]) -> Command | None:
+    """Telegram güncellemesinden komutu çıkarır; komut değilse None."""
+    message = update.get("message") or update.get("channel_post") or {}
+    text = str(message.get("text", "")).strip()
+    if not text.startswith("/"):
+        return None
+    match = COMMAND_PATTERN.match(text)
+    if not match:
+        return None
+    sender = message.get("from") or {}
+    return Command(
+        name=match.group("command").casefold(),
+        args=match.group("args").split(),
+        chat_id=int(message.get("chat", {}).get("id", 0)),
+        user_id=int(sender.get("id", 0)),
+        user_name=str(sender.get("username") or sender.get("first_name") or "bilinmiyor"),
+        update_id=int(update.get("update_id", 0)),
+    )
+
+
+def allowed_users() -> set[int]:
+    """Boş bırakılırsa herkes komut verebilir; aksi halde yalnızca listedekiler."""
+    raw = os.getenv("TELEGRAM_ALLOWED_USERS", "").strip()
+    if not raw:
+        return set()
+    return {int(item) for item in re.split(r"[,\s]+", raw) if item.strip().isdigit()}
+
+
+def is_authorized(command: Command, allowed: set[int]) -> bool:
+    return not allowed or command.user_id in allowed
+
+
+def fetch_updates(token: str, offset: int, timeout: int = 10) -> list[dict[str, Any]]:
+    response = requests.get(
+        f"https://api.telegram.org/bot{token}/getUpdates",
+        params={"offset": offset + 1, "timeout": 0, "allowed_updates": json.dumps(["message"])},
+        timeout=timeout,
+    )
+    if not response.ok:
+        raise RuntimeError(f"getUpdates başarısız: HTTP {response.status_code} — {response.text[:200]}")
+    payload = response.json()
+    return list(payload.get("result", []))
+
+
+def validate_report_args(args: list[str], intervals: set[str]) -> tuple[str | None, str, str | None]:
+    """/rapor argümanlarını doğrular; (sembol, aralık, hata) döndürür."""
+    if not args:
+        return None, "", "Sembol belirtilmedi. Örnek: /rapor THYAO"
+    ticker = args[0].strip().upper().removesuffix(".IS")
+    if not VALID_TICKER.match(ticker):
+        return None, "", f"Geçersiz sembol: {args[0]}. Örnek: /rapor THYAO"
+    interval = args[1].strip().lower() if len(args) > 1 else "1d"
+    if interval not in intervals:
+        return None, "", f"Geçersiz aralık: {args[1]}. Geçerli değerler: {', '.join(sorted(intervals))}"
+    return ticker, interval, None
+
+
+def validate_scan_args(args: list[str], intervals: set[str]) -> tuple[str, str | None]:
+    """/tara argümanlarını doğrular; (aralık listesi, hata) döndürür."""
+    if not args:
+        return "1h,1d", None
+    requested = [item.strip().lower() for item in args[0].split(",") if item.strip()]
+    invalid = [item for item in requested if item not in intervals]
+    if invalid:
+        return "", f"Geçersiz aralık: {', '.join(invalid)}. Geçerli değerler: {', '.join(sorted(intervals))}"
+    return ",".join(requested), None
