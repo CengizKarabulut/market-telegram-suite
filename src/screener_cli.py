@@ -234,9 +234,13 @@ def main() -> None:
     payload["elapsed_seconds"] = round(elapsed, 1)
     payload["batches"] = len(chunked(symbols, args.batch_size))
 
+    # Ham veri çerçeveleri JSON'a yazılamaz ve yazılmamalıdır; rapor üretimi için
+    # ayrılıp payload'dan çıkarılır.
+    scan_frames = payload.pop("frames", {})
+
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     print(f"Tarama bitti: {payload['processed']} işlendi, {payload['matched']} eşleşme, {len(payload['errors'])} hata, {elapsed / 60:.1f} dk.")
     print(f"JSON: {output}")
 
@@ -253,7 +257,6 @@ def main() -> None:
     # olanlar için tam rapor üretilir, aksi halde kanal tekrarla dolar.
     state_path = Path(args.state)
     reported = load_state(state_path)
-    scan_frames = payload.pop("frames", {})
     fresh = select_new(payload["results"], reported, args.report_top)
     symbol_images: list[Path] = []
     produced: list[dict[str, Any]] = []
