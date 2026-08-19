@@ -118,6 +118,28 @@ def relative_strength_label(excess: float) -> str:
     return "Endeksle paralel"
 
 
+def forming_bar_fraction(data: pd.DataFrame, interval: str, now: pd.Timestamp | None = None) -> float:
+    """Son barın ne kadarının tamamlandığını verir (0-1).
+
+    Gün içi taramada mevcut bar henüz kapanmamıştır; yarım barın hacmini tam bar
+    ortalamasıyla kıyaslamak RVOL'ü sistematik olarak düşük gösterir. Saat başı
+    çalışan taramalarda hacim koşulları bu yüzden hiç tetiklenmez.
+    """
+    from src.intervals import resolve
+
+    spec = resolve(interval)
+    if not spec.intraday:
+        return 1.0
+    stamps = pd.DatetimeIndex(data.index)
+    last = stamps[-1]
+    current = now or (pd.Timestamp.now(tz=last.tz) if last.tz else pd.Timestamp.now())
+    elapsed = (current - last).total_seconds() / 60
+    if elapsed <= 0 or elapsed >= spec.minutes:
+        return 1.0
+    # Çok kısa süre geçtiyse aşırı büyütme yapmamak için taban konur.
+    return max(elapsed / spec.minutes, 0.25)
+
+
 def bar_freshness(data: pd.DataFrame, interval: str, now: pd.Timestamp | None = None) -> dict[str, Any]:
     """Son barın ne kadar eski olduğunu ölçer.
 
@@ -152,6 +174,7 @@ def basic_metrics(data: pd.DataFrame) -> dict[str, float]:
     stack_up = all(close > _number(row.get(f"EMA_{period}", math.nan)) for period in (21, 55) if f"EMA_{period}" in data)
     stack_down = all(close < _number(row.get(f"EMA_{period}", math.nan)) for period in (21, 55) if f"EMA_{period}" in data)
     return {
+        "rvol_raw": volume / _number(baseline) if _number(baseline) > 0 else math.nan,
         "pierced_down": bool(pierced_down),
         "pierced_up": bool(pierced_up),
         "stacked": bool(stack_up or stack_down),
@@ -275,6 +298,11 @@ def screen_symbol_detailed(
     enabled = list(enabled)
     data = calculate_indicators(prices, interval)
     metrics = basic_metrics(data)
+    fraction = forming_bar_fraction(data, interval)
+    if fraction < 1.0 and math.isfinite(metrics["rvol"]):
+        # Oluşmakta olan bar, tamamlanan kısmına göre ölçeklenir.
+        metrics["rvol"] = metrics["rvol"] / fraction
+        metrics["bar_fraction"] = fraction
     if not passes_liquidity(metrics, options):
         return None, "illiquid"
     candidates = [name for name in enabled if SCREENS[name]["cheap"](metrics, options)]
@@ -289,16 +317,24 @@ def screen_symbol_detailed(
         atr_pct=metrics["atr_pct"],
         rsi=metrics["rsi"],
     )
-    needs_deep = [name for name in candidates if name in DEEP_SCREENS]
+    if metrics.get("bar_fraction"):
+        result.detail["bar_fraction"] = round(float(metrics["bar_fraction"]), 2)
+        result.notes.append(f"Mevcut bar %{metrics['bar_fraction'] * 100:.0f} tamamlandı; RVOL orantılandı")
     shallow = [name for name in candidates if name not in DEEP_SCREENS]
     matched = list(shallow)
-    if needs_deep:
+    # Ucuz filtreyi geçen her sembolde derin analiz çalışır: eşleşen sembol sayısı
+    # zaten azdır (yüzlerce değil onlarca) ve böylece her sonuç kurulum adı taşır.
+    if candidates:
         setup_context = deep_context(data)
         setup = setup_context["setup"]
         result.setup = str(setup.get("name", ""))
         result.setup_bias = str(setup.get("bias", ""))
         result.detail["duration"] = setup_context["duration"]["summary"]
-        matched.extend(name for name in needs_deep if SCREENS[name]["deep"](setup))
+        # Ucuz ön koşul yalnızca derin analizi çalıştırmaya değer mi kararı içindir.
+        # Analiz bir kez çalıştıktan sonra tüm derin koşullar değerlendirilir; aksi
+        # halde kurulum "başarısız kırılım" derken tarama bunu kredilendirmez.
+        matched.extend(name for name in enabled if name in DEEP_SCREENS and SCREENS[name]["deep"](setup))
+        matched = list(dict.fromkeys(matched))
     if not matched:
         return None, "no_match"
     result.screens = matched

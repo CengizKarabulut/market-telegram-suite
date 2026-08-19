@@ -352,3 +352,66 @@ class NoiseControlTests(unittest.TestCase):
         self.assertFalse(SCREENS["asiri_bolge"]["cheap"](quiet, options))
         active = {**quiet, "rvol": 1.4}
         self.assertTrue(SCREENS["trend_devami"]["cheap"](active, options))
+
+
+class DeepScreenCreditTests(unittest.TestCase):
+    def test_all_deep_screens_are_evaluated_once_analysis_ran(self) -> None:
+        """Ucuz filtre yalnızca derin analizi tetikler; sonuç tüm koşullara bakar."""
+        from unittest.mock import patch
+
+        from src.screener import screen_symbol_detailed
+
+        data = frame(seed=12, spike=8.0)
+        fake = {
+            "setup": {"name": "Destekte reddedilme / başarısız aşağı kırılım", "bias": "iki yönlü"},
+            "duration": {"summary": "3 bardır dar bant"},
+            "participation_reading": {},
+        }
+        with patch("src.screener.deep_context", return_value=fake):
+            result, _ = screen_symbol_detailed(
+                "TEST", data, default_options(), ["hacim_patlamasi", "basarisiz_kirilim", "karar_bolgesi"]
+            )
+        self.assertIsNotNone(result)
+        self.assertIn("basarisiz_kirilim", result.screens)
+
+    def test_screens_are_not_duplicated(self) -> None:
+        from unittest.mock import patch
+
+        from src.screener import screen_symbol_detailed
+
+        fake = {"setup": {"name": "Trend devamı", "bias": "yukarı"}, "duration": {"summary": ""}, "participation_reading": {}}
+        with patch("src.screener.deep_context", return_value=fake):
+            result, _ = screen_symbol_detailed("TEST", frame(seed=13, spike=8.0), default_options(), ["hacim_patlamasi", "trend_devami"])
+        if result:
+            self.assertEqual(len(result.screens), len(set(result.screens)))
+
+
+class FormingBarTests(unittest.TestCase):
+    def test_half_finished_hourly_bar_doubles_rvol(self) -> None:
+        from src.screener import forming_bar_fraction
+
+        index = pd.date_range("2026-08-19 10:00", periods=3, freq="1h")
+        data = pd.DataFrame({"Close": [1, 2, 3]}, index=index)
+        self.assertAlmostEqual(forming_bar_fraction(data, "1h", pd.Timestamp("2026-08-19 12:30")), 0.5, places=2)
+
+    def test_completed_bar_is_not_scaled(self) -> None:
+        from src.screener import forming_bar_fraction
+
+        index = pd.date_range("2026-08-19 10:00", periods=3, freq="1h")
+        data = pd.DataFrame({"Close": [1, 2, 3]}, index=index)
+        self.assertEqual(forming_bar_fraction(data, "1h", pd.Timestamp("2026-08-19 13:10")), 1.0)
+
+    def test_daily_interval_is_never_scaled(self) -> None:
+        from src.screener import forming_bar_fraction
+
+        index = pd.date_range("2026-08-19 10:00", periods=3, freq="1h")
+        data = pd.DataFrame({"Close": [1, 2, 3]}, index=index)
+        self.assertEqual(forming_bar_fraction(data, "1d", pd.Timestamp("2026-08-19 12:30")), 1.0)
+
+    def test_very_early_bar_has_a_floor(self) -> None:
+        """Barın ilk dakikalarında aşırı büyütme yapılmamalı."""
+        from src.screener import forming_bar_fraction
+
+        index = pd.date_range("2026-08-19 10:00", periods=3, freq="1h")
+        data = pd.DataFrame({"Close": [1, 2, 3]}, index=index)
+        self.assertGreaterEqual(forming_bar_fraction(data, "1h", pd.Timestamp("2026-08-19 12:02")), 0.25)
