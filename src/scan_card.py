@@ -41,17 +41,32 @@ def _tone_for(item: dict[str, Any]) -> str:
 def _summary_blocks(payload: dict[str, Any], universe_source: str, elapsed: float, limit: int) -> list[_Block]:
     labels = {name: SCREENS[name]["label"] for name in SCREENS}
     broken = len(payload.get("error_kinds", {}).get("ariza", []))
+    illiquid = payload.get("illiquid", payload.get("filtered_out", 0))
+    no_match = payload.get("no_match", 0)
     blocks = [
         _Block("section", "TARAMA ÖZETİ", 23, ACCENT),
         _Block(
             "body",
             f"Evren {payload['requested']} sembol ({universe_source}) · İşlenen {payload['processed']} · "
-            f"Eşleşen {payload['matched']} · Likidite elemesi {payload['filtered_out']} · Arıza {broken} · Süre {elapsed / 60:.1f} dk",
+            f"Eşleşen {payload['matched']} · Likidite elemesi {illiquid} · Koşul karşılamayan {no_match} · "
+            f"Arıza {broken} · Süre {elapsed / 60:.1f} dk",
             16,
             MUTED,
         ),
-        _Block("gap", "", 14, WHITE),
     ]
+    freshness = payload.get("freshness", {})
+    if freshness.get("stale"):
+        age = freshness.get("age_minutes", 0) / 60
+        blocks.append(
+            _Block(
+                "body",
+                f"⚠ Son bar {age:.1f} saat önceye ait; seans dışı tarama. Hacim ve RVOL değerleri güncel katılımı yansıtmaz.",
+                16,
+                YELLOW,
+                "bold",
+            )
+        )
+    blocks.append(_Block("gap", "", 14, WHITE))
     results = payload.get("results", [])[:limit]
     if not results:
         blocks.append(_Block("body", "Bu taramada koşulları karşılayan sembol bulunamadı.", 18, MUTED))
@@ -100,7 +115,7 @@ def render_scan_cards(
     universe_source: str,
     elapsed: float,
     title: str = "BIST Teknik Tarama",
-    limit: int = 20,
+    limit: int = 15,
     stem: str = "scan_card",
 ) -> list[Path]:
     """Tarama özetini bir veya birkaç karta çizer."""

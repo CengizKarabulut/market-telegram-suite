@@ -118,6 +118,24 @@ def relative_strength_label(excess: float) -> str:
     return "Endeksle paralel"
 
 
+def bar_freshness(data: pd.DataFrame, interval: str, now: pd.Timestamp | None = None) -> dict[str, Any]:
+    """Son barın ne kadar eski olduğunu ölçer.
+
+    Seans dışında çalışan taramada son bar gece barıdır; RVOL neredeyse sıfır
+    çıkar ve hacme dayalı koşullar anlamsızlaşır. Bu durum raporlanmalıdır.
+    """
+    from src.intervals import resolve
+
+    spec = resolve(interval)
+    stamps = pd.DatetimeIndex(data.index)
+    last = stamps[-1]
+    current = now or pd.Timestamp.now(tz=last.tz) if last.tz else (now or pd.Timestamp.now())
+    age_minutes = (current - last).total_seconds() / 60
+    # Bir barlık gecikme normaldir; iki katından fazlası bayat sayılır.
+    stale = age_minutes > spec.minutes * 2.5
+    return {"last_bar": last.isoformat(), "age_minutes": round(age_minutes, 1), "stale": bool(stale)}
+
+
 def basic_metrics(data: pd.DataFrame) -> dict[str, float]:
     """İlk aşama için gereken ucuz ölçütler."""
     row = data.iloc[-1]
@@ -166,7 +184,7 @@ SCREENS: dict[str, dict[str, Any]] = {
     "asiri_bolge": {
         "label": "Uç RSI bölgesi",
         "description": "RSI uç bölgede; tükenme veya devam ayrımı için izlenmeli.",
-        "cheap": lambda m, o: m["rsi"] <= 25 or m["rsi"] >= 75,
+        "cheap": lambda m, o: (m["rsi"] <= 25 or m["rsi"] >= 75) and m["rvol"] >= 1.0,
         "deep": None,
     },
     "basarisiz_kirilim": {
@@ -183,8 +201,8 @@ SCREENS: dict[str, dict[str, Any]] = {
     },
     "trend_devami": {
         "label": "Trend devamı",
-        "description": "Yapı, dizilim ve yönlülük aynı yönde.",
-        "cheap": lambda m, o: m["adx"] >= 22 and m["stacked"],
+        "description": "Yapı, dizilim ve yönlülük aynı yönde ve harekete katılım var.",
+        "cheap": lambda m, o: m["adx"] >= 25 and m["stacked"] and m["rvol"] >= 1.0,
         "deep": lambda setup: str(setup.get("name", "")) == "Trend devamı",
     },
     "tukenme": {
@@ -241,23 +259,27 @@ def deep_context(data: pd.DataFrame) -> dict[str, Any]:
     return build_setup_context(data, context, semantic)
 
 
-def screen_symbol(
+def screen_symbol_detailed(
     ticker: str,
     prices: pd.DataFrame,
     options: dict[str, float],
     enabled: Iterable[str],
     interval: str = "1d",
     benchmark: pd.Series | None = None,
-) -> ScreenResult | None:
-    """Tek sembolü tarar; eşleşme yoksa None döner."""
+) -> tuple[ScreenResult | None, str]:
+    """Tek sembolü tarar ve eşleşme yoksa nedenini de döndürür.
+
+    Neden bilgisi olmadan 'likidite elemesi' ile 'koşul karşılanmadı' aynı
+    sayaçta toplanır ve rapor yanıltıcı olur.
+    """
     enabled = list(enabled)
     data = calculate_indicators(prices, interval)
     metrics = basic_metrics(data)
     if not passes_liquidity(metrics, options):
-        return None
+        return None, "illiquid"
     candidates = [name for name in enabled if SCREENS[name]["cheap"](metrics, options)]
     if not candidates:
-        return None
+        return None, "no_match"
     result = ScreenResult(
         ticker=ticker,
         close=metrics["close"],
@@ -278,7 +300,7 @@ def screen_symbol(
         result.detail["duration"] = setup_context["duration"]["summary"]
         matched.extend(name for name in needs_deep if SCREENS[name]["deep"](setup))
     if not matched:
-        return None
+        return None, "no_match"
     result.screens = matched
     result.excess_return_20 = excess_return(data, benchmark)
     result.relative_strength = relative_strength_label(result.excess_return_20)
@@ -288,7 +310,19 @@ def screen_symbol(
         result.notes.append("Bantlar zaten geniş; hareketin geç aşaması olabilir")
     if result.setup_bias == "iki yönlü":
         result.notes.append("Kurulum koşullu; yön kapanışla netleşir")
-    return result
+    return result, "matched"
+
+
+def screen_symbol(
+    ticker: str,
+    prices: pd.DataFrame,
+    options: dict[str, float],
+    enabled: Iterable[str],
+    interval: str = "1d",
+    benchmark: pd.Series | None = None,
+) -> ScreenResult | None:
+    """Geriye dönük uyumluluk: yalnızca eşleşmeyi döndürür."""
+    return screen_symbol_detailed(ticker, prices, options, enabled, interval, benchmark)[0]
 
 
 def rank_key(result: ScreenResult) -> tuple:
@@ -325,8 +359,10 @@ def run_screen(
     matches: list[ScreenResult] = []
     kept_frames: dict[str, pd.DataFrame] = {}
     errors: dict[str, str] = {}
-    skipped_liquidity = 0
+    illiquid = 0
+    no_match = 0
     processed = 0
+    freshness: dict[str, Any] | None = None
     for batch in chunked(symbols, batch_size):
         try:
             frames = fetch(batch)
@@ -341,9 +377,16 @@ def run_screen(
                 continue
             try:
                 processed += 1
-                result = screen_symbol(ticker, frame, options, enabled, interval, benchmark)
+                if freshness is None:
+                    # İlk geçerli sembolden bar tazeliği ölçülür; seans dışı
+                    # taramada hacim koşulları anlamsızlaşır ve bu raporlanmalıdır.
+                    freshness = bar_freshness(frame, interval)
+                result, reason = screen_symbol_detailed(ticker, frame, options, enabled, interval, benchmark)
                 if result is None:
-                    skipped_liquidity += 1
+                    if reason == "illiquid":
+                        illiquid += 1
+                    else:
+                        no_match += 1
                     continue
                 matches.append(result)
                 if keep_frames:
@@ -360,7 +403,10 @@ def run_screen(
         "requested": len(symbols),
         "processed": processed,
         "matched": len(matches),
-        "filtered_out": skipped_liquidity,
+        "freshness": freshness or {},
+        "illiquid": illiquid,
+        "no_match": no_match,
+        "filtered_out": illiquid + no_match,
         "errors": errors,
         "error_kinds": {kind: sorted(tickers) for kind, tickers in error_kinds.items()},
         "options": options,

@@ -291,3 +291,64 @@ class FrameReuseTests(unittest.TestCase):
             ["SESSIZ"], lambda batch: {t: store[t] for t in batch}, enabled=["hacim_patlamasi"], keep_frames=True
         )
         self.assertEqual(payload["frames"], {})
+
+
+class CounterTests(unittest.TestCase):
+    def test_illiquid_and_no_match_are_counted_separately(self) -> None:
+        thin = frame(seed=3)
+        thin["Volume"] = 1.0
+        store = {"CANLI": frame(seed=2, spike=8.0), "SESSIZ": frame(seed=4), "SIG": thin}
+        payload = run_screen(list(store), lambda batch: {t: store[t] for t in batch}, enabled=["hacim_patlamasi"])
+        self.assertEqual(payload["matched"], 1)
+        self.assertEqual(payload["illiquid"], 1)
+        self.assertEqual(payload["no_match"], 1)
+        self.assertEqual(payload["filtered_out"], 2)
+
+    def test_detailed_screen_reports_the_reason(self) -> None:
+        from src.screener import screen_symbol_detailed
+
+        thin = frame(seed=3)
+        thin["Volume"] = 1.0
+        _, reason = screen_symbol_detailed("SIG", thin, default_options(), ["hacim_patlamasi"])
+        self.assertEqual(reason, "illiquid")
+        _, reason = screen_symbol_detailed("SESSIZ", frame(seed=4), default_options(), ["hacim_patlamasi"])
+        self.assertEqual(reason, "no_match")
+
+
+class FreshnessTests(unittest.TestCase):
+    def test_overnight_scan_is_flagged_as_stale(self) -> None:
+        from src.screener import bar_freshness
+
+        index = pd.date_range("2026-08-18 10:00", periods=8, freq="1h")
+        data = pd.DataFrame({"Close": range(8)}, index=index)
+        result = bar_freshness(data, "1h", pd.Timestamp("2026-08-19 03:11"))
+        self.assertTrue(result["stale"])
+        self.assertGreater(result["age_minutes"], 600)
+
+    def test_in_session_scan_is_not_stale(self) -> None:
+        from src.screener import bar_freshness
+
+        index = pd.date_range("2026-08-18 10:00", periods=8, freq="1h")
+        data = pd.DataFrame({"Close": range(8)}, index=index)
+        self.assertFalse(bar_freshness(data, "1h", pd.Timestamp("2026-08-18 18:00"))["stale"])
+
+    def test_payload_carries_freshness(self) -> None:
+        store = {"OK": frame(seed=2, spike=8.0)}
+        payload = run_screen(["OK"], lambda batch: {t: store[t] for t in batch}, enabled=["hacim_patlamasi"])
+        self.assertIn("freshness", payload)
+        self.assertIn("stale", payload["freshness"])
+
+
+class NoiseControlTests(unittest.TestCase):
+    def test_trend_and_extreme_rsi_require_participation(self) -> None:
+        """Seans dışında RVOL sıfıra yakındır; bu taramalar tetiklenmemeli."""
+        quiet = {
+            "bb_rank": 50.0, "rvol": 0.05, "rsi": 80.0, "adx": 30.0, "atr_pct": 2.0,
+            "close": 10.0, "turnover": 1e8, "macd_hist": 0.0, "volume": 1e6,
+            "pierced_down": False, "pierced_up": False, "stacked": True,
+        }
+        options = default_options()
+        self.assertFalse(SCREENS["trend_devami"]["cheap"](quiet, options))
+        self.assertFalse(SCREENS["asiri_bolge"]["cheap"](quiet, options))
+        active = {**quiet, "rvol": 1.4}
+        self.assertTrue(SCREENS["trend_devami"]["cheap"](active, options))
