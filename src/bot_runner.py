@@ -131,19 +131,12 @@ def execute(command, intervals: set[str]) -> None:
     reply(chat_id, f"Bilinmeyen komut: /{command.name}\n\n{HELP_TEXT}")
 
 
-def main() -> None:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    if not token:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN tanımlı değil.")
-    from src.telegram_bot import allowed_users
-
-    allowed = allowed_users()
+def process_once(token: str, allowed: set[int], long_poll: int) -> int:
+    """Bir tur güncelleme çeker ve işler; işlenen komut sayısını döndürür."""
     offset = load_offset()
-    updates = fetch_updates(token, offset)
+    updates = fetch_updates(token, offset, long_poll=long_poll)
     if not updates:
-        print("Yeni komut yok.")
-        return
-
+        return 0
     highest = offset
     handled = 0
     for update in updates:
@@ -155,7 +148,6 @@ def main() -> None:
             print(f"Yetkisiz komut atlandı: /{command.name} — {command.user_name} ({command.user_id})")
             continue
         if handled >= MAX_COMMANDS_PER_RUN:
-            # Tek yoklamada sınırsız komut işlemek koşu süresini öngörülemez kılar.
             print("Bu turda komut sınırına ulaşıldı; kalanlar sonraki turda işlenecek.")
             highest = int(update.get("update_id", 0)) - 1
             break
@@ -169,7 +161,53 @@ def main() -> None:
         print(f"  süre: {time.perf_counter() - started:.1f} sn")
         handled += 1
     save_offset(highest)
-    print(f"{handled} komut işlendi. Son güncelleme kimliği: {highest}")
+    return handled
+
+
+def restart_self() -> None:
+    """Koşu süresi dolduğunda kendini yeniden tetikler.
+
+    GitHub'ın beş dakikalık zamanlanmış koşuları güvenilir çalışmadığı için
+    dinleme zinciri koşudan koşuya devredilir; cron yalnızca zincir koptuğunda
+    devreye giren emniyet ağıdır.
+    """
+    token = os.getenv("GITHUB_TOKEN", "")
+    repository = os.getenv("GITHUB_REPOSITORY", "")
+    if not token or not repository:
+        print("Kendini yeniden tetikleyemedi: GitHub kimlik bilgisi yok.")
+        return
+    response = requests.post(
+        f"https://api.github.com/repos/{repository}/actions/workflows/telegram-bot.yml/dispatches",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+        json={"ref": os.getenv("GITHUB_REF_NAME", "main")},
+        timeout=30,
+    )
+    print("Sonraki dinleme turu tetiklendi." if response.status_code == 204 else f"Tetikleme başarısız: HTTP {response.status_code}")
+
+
+def main() -> None:
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN tanımlı değil.")
+    from src.telegram_bot import allowed_users
+
+    allowed = allowed_users()
+    budget = float(os.getenv("BOT_RUN_MINUTES", "50")) * 60
+    long_poll = int(os.getenv("BOT_LONG_POLL_SECONDS", "25"))
+    chain = os.getenv("BOT_SELF_RESTART", "1").strip().lower() in {"1", "true", "yes", "evet"}
+
+    started = time.perf_counter()
+    total = 0
+    print(f"Dinleme başladı: bütçe {budget / 60:.0f} dk, uzun yoklama {long_poll} sn.")
+    while time.perf_counter() - started < budget:
+        try:
+            total += process_once(token, allowed, long_poll)
+        except Exception as error:  # noqa: BLE001 -- ağ hatası dinlemeyi durdurmamalı
+            print(f"Yoklama hatası: {type(error).__name__}: {error}")
+            time.sleep(5)
+    print(f"Dinleme bitti. Toplam {total} komut işlendi.")
+    if chain:
+        restart_self()
 
 
 if __name__ == "__main__":

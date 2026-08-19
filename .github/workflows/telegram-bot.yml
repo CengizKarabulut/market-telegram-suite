@@ -3,23 +3,26 @@ name: Telegram Komut Botu
 on:
   workflow_dispatch:
   schedule:
-    # GitHub Actions sürekli çalışan bir dinleyici sunmaz; komutlar yoklama ile
-    # alınır. Beş dakikalık aralık, GitHub'ın izin verdiği en sık değerdir.
-    # Seans saatleri ve öncesi/sonrası: 09:00-21:00 TR (06:00-18:00 UTC).
-    - cron: "*/5 6-18 * * 1-5"
+    # Dinleme zinciri koşudan koşuya devredilir; bu cron yalnızca zincir
+    # koptuğunda (hata, iptal, kotanın dolması) yeniden başlatan emniyet ağıdır.
+    # GitHub'ın sık zamanlanmış koşuları güvenilir çalışmadığı için tek başına
+    # yeterli değildir.
+    - cron: "0 6-18 * * 1-5"
 
 permissions:
   contents: read
   actions: write
 
 concurrency:
+  # Aynı anda tek dinleyici çalışır; cron ile zincir çakışırsa yeni koşu sıraya
+  # girer ve öncekinin hemen ardından devam eder.
   group: telegram-bot
   cancel-in-progress: false
 
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - name: Kodu indir
         uses: actions/checkout@v6
@@ -52,6 +55,10 @@ jobs:
           # ayarlarından TELEGRAM_ALLOWED_USERS secret'ını tanımlayın.
           TELEGRAM_ALLOWED_USERS: ${{ secrets.TELEGRAM_ALLOWED_USERS }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Koşu bu süre boyunca dinler, sonra kendini yeniden tetikler.
+          BOT_RUN_MINUTES: "50"
+          BOT_LONG_POLL_SECONDS: "25"
+          BOT_SELF_RESTART: "1"
         run: python -m src.bot_runner
 
       - name: Komut çıktılarını sakla

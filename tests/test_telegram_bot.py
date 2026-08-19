@@ -129,3 +129,38 @@ class OffsetTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LongPollingTests(unittest.TestCase):
+    def test_long_poll_parameter_is_sent_to_telegram(self) -> None:
+        """Uzun yoklama olmadan komutlar ancak koşu başında görülür."""
+        from unittest.mock import Mock, patch
+
+        from src.telegram_bot import fetch_updates
+
+        response = Mock(ok=True, json=lambda: {"result": []})
+        with patch("src.telegram_bot.requests.get", return_value=response) as get:
+            fetch_updates("token", 5, long_poll=25)
+        params = get.call_args.kwargs["params"]
+        self.assertEqual(params["timeout"], 25)
+        self.assertEqual(params["offset"], 6)
+
+    def test_request_timeout_exceeds_long_poll(self) -> None:
+        """HTTP zaman aşımı, uzun yoklama süresinden kısa olursa bağlantı kopar."""
+        from unittest.mock import Mock, patch
+
+        from src.telegram_bot import fetch_updates
+
+        response = Mock(ok=True, json=lambda: {"result": []})
+        with patch("src.telegram_bot.requests.get", return_value=response) as get:
+            fetch_updates("token", 0, timeout=10, long_poll=25)
+        self.assertGreater(get.call_args.kwargs["timeout"], 25)
+
+    def test_failed_request_raises(self) -> None:
+        from unittest.mock import Mock, patch
+
+        from src.telegram_bot import fetch_updates
+
+        response = Mock(ok=False, status_code=401, text="unauthorized")
+        with patch("src.telegram_bot.requests.get", return_value=response), self.assertRaises(RuntimeError):
+            fetch_updates("token", 0)

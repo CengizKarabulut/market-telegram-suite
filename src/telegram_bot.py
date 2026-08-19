@@ -90,11 +90,18 @@ def is_authorized(command: Command, allowed: set[int]) -> bool:
     return not allowed or command.user_id in allowed
 
 
-def fetch_updates(token: str, offset: int, timeout: int = 10) -> list[dict[str, Any]]:
+def fetch_updates(token: str, offset: int, timeout: int = 10, long_poll: int = 0) -> list[dict[str, Any]]:
+    """Yeni güncellemeleri çeker.
+
+    `long_poll` saniye verilirse Telegram bağlantıyı o süre açık tutar ve mesaj
+    gelir gelmez döner. Böylece komutlara saniyeler içinde yanıt verilebilir;
+    GitHub Actions'ın sık zamanlanmış koşuları güvenilir çalışmadığı için tek
+    koşu içinde sürekli dinlemek tek pratik yöntemdir.
+    """
     response = requests.get(
         f"https://api.telegram.org/bot{token}/getUpdates",
-        params={"offset": offset + 1, "timeout": 0, "allowed_updates": json.dumps(["message"])},
-        timeout=timeout,
+        params={"offset": offset + 1, "timeout": long_poll, "allowed_updates": json.dumps(["message"])},
+        timeout=timeout + long_poll,
     )
     if not response.ok:
         raise RuntimeError(f"getUpdates başarısız: HTTP {response.status_code} — {response.text[:200]}")
