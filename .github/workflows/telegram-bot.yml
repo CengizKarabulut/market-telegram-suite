@@ -41,6 +41,7 @@ jobs:
         with:
           path: |
             reports/telegram_offset.json
+            reports/scan_schedule.json
             reports/screener.json
             reports/bist_universe.json
           key: telegram-bot-${{ github.run_id }}
@@ -59,6 +60,9 @@ jobs:
           BOT_RUN_MINUTES: "50"
           BOT_LONG_POLL_SECONDS: "25"
           BOT_SELF_RESTART: "1"
+          # Tarama zamanlamasını da bu süreç yürütür; GitHub'ın zamanlanmış
+          # koşuları güvenilir çalışmadığı için cron yalnızca yedektir.
+          BOT_DRIVES_SCAN: "1"
         run: python -m src.bot_runner
 
       - name: Komut çıktılarını sakla

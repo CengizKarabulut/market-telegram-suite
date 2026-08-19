@@ -18,6 +18,7 @@ import requests
 from src.analyst_card import render_analyst_cards, standardize_pages
 from src.intervals import INTERVALS, resolve
 from src.scan_card import render_scan_cards
+from src.scan_scheduler import due_slot, load_state, mark_done, now_market, save_state
 from src.stock_dashboard import (
     ScanConfig,
     build_status,
@@ -131,6 +132,26 @@ def execute(command, intervals: set[str]) -> None:
     reply(chat_id, f"Bilinmeyen komut: /{command.name}\n\n{HELP_TEXT}")
 
 
+def check_schedule() -> None:
+    """Zamanı gelen taramayı tetikler.
+
+    GitHub'ın zamanlanmış koşuları güvenilir çalışmadığı için tarama, sürekli
+    çalışan bu süreç tarafından başlatılır.
+    """
+    if os.getenv("BOT_DRIVES_SCAN", "1").strip().lower() not in {"1", "true", "yes", "evet"}:
+        return
+    state = load_state()
+    current = now_market()
+    slot = due_slot(current, state)
+    if slot is None:
+        return
+    print(f"Zamanlanmış tarama slotu: {slot.key} ({slot.intervals})")
+    ok, message = dispatch_scan(slot.intervals)
+    print(f"  {message}")
+    if ok:
+        save_state(mark_done(slot, current, state))
+
+
 def process_once(token: str, allowed: set[int], long_poll: int) -> int:
     """Bir tur güncelleme çeker ve işler; işlenen komut sayısını döndürür."""
     offset = load_offset()
@@ -201,6 +222,7 @@ def main() -> None:
     print(f"Dinleme başladı: bütçe {budget / 60:.0f} dk, uzun yoklama {long_poll} sn.")
     while time.perf_counter() - started < budget:
         try:
+            check_schedule()
             total += process_once(token, allowed, long_poll)
         except Exception as error:  # noqa: BLE001 -- ağ hatası dinlemeyi durdurmamalı
             print(f"Yoklama hatası: {type(error).__name__}: {error}")
