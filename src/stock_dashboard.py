@@ -122,6 +122,12 @@ def validate_price_data(data: pd.DataFrame, symbol: str, provider: str, spec: An
             "yeterli geçmiş oluşana kadar teknik rapor üretilemez."
         )
     data.attrs["short_history"] = len(data) < max(MA_PERIODS) + 5
+    # Düzeltilmemiş bölünme/sermaye artırımı tüm göstergeleri bozar; raporda
+    # sessizce geçmek yerine açıkça uyarılır.
+    if spec is not None and str(getattr(spec, "key", "")) in {"1d", "1wk", "1mo"}:
+        from src.screener import corporate_action_suspect
+
+        data.attrs["corporate_action"] = corporate_action_suspect(data)
     data.attrs["provider"] = provider
     return data
 
@@ -729,6 +735,7 @@ def build_status(
         bar_state,
     )
     context["short_history"] = bool(data.attrs.get("short_history", False))
+    context["corporate_action"] = data.attrs.get("corporate_action", {"suspect": False})
     context["bar_count"] = len(data)
     context["missing_periods"] = missing_ma_periods(len(data), MA_PERIODS)
     context["symbol"] = symbol
@@ -771,6 +778,7 @@ def build_status(
         "symbol": symbol,
         "report_detail": config.report_detail,
         "short_history": bool(data.attrs.get("short_history", False)),
+        "corporate_action": data.attrs.get("corporate_action", {"suspect": False}),
         "bar_count": len(data),
         "missing_periods": missing_ma_periods(len(data), MA_PERIODS),
         "missing_periods_text": ", ".join(f"EMA/SMA {period}" for period in missing_ma_periods(len(data), MA_PERIODS)) or "—",
@@ -882,6 +890,17 @@ def _draw_page_header(figure: plt.Figure, grid, status: dict[str, Any], subtitle
     bar_color = YELLOW if status["bar_state"]["is_live"] else LIGHT_GREEN
     header.text(0.0, 0.28, f"Bar: {status['timestamp']} | {status['interval']} | {status['bar_state']['label']} ({bar_state_plain(status['bar_state']).casefold()})", color=bar_color, fontsize=11, fontweight="bold", va="top")
     header.text(0.0, 0.10, f"Kaynak: {status['data_provider']} | Warm-up: {status['download_period']} | Durum raporudur; otomatik AL/SAT puanı değildir. Yatırım tavsiyesi değildir.", color=MUTED, fontsize=10, va="top")
+    action = status.get("corporate_action", {})
+    if action.get("suspect"):
+        header.text(
+            0.0,
+            -0.20,
+            f"⛔ VERİ UYARISI: {action.get('reason', 'olağandışı fiyat sıçraması')} Göstergeler güvenilir değildir.",
+            color=LIGHT_RED,
+            fontsize=11,
+            fontweight="bold",
+            va="top",
+        )
     if status.get("short_history"):
         header.text(
             1.0,

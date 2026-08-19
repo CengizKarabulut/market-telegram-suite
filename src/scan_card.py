@@ -98,6 +98,17 @@ def _summary_blocks(payload: dict[str, Any], universe_source: str, elapsed: floa
     if payload["matched"] > len(results):
         blocks.append(_Block("body", f"… ve {payload['matched'] - len(results)} sembol daha (tam liste JSON çıktısında).", 15, MUTED))
 
+    actions = payload.get("corporate_actions", [])
+    if actions:
+        blocks.append(
+            _Block(
+                "body",
+                f"⛔ Bölünme/sermaye artırımı şüphesi nedeniyle taramaya alınmayan {len(actions)} sembol: "
+                + ", ".join(actions[:8]),
+                14,
+                LIGHT_RED,
+            )
+        )
     gaps = payload.get("error_kinds", {})
     skipped = len(gaps.get("kisa_gecmis", [])) + len(gaps.get("veri_yok", []))
     if skipped:

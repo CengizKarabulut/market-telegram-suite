@@ -401,12 +401,13 @@ class FormingBarTests(unittest.TestCase):
         data = pd.DataFrame({"Close": [1, 2, 3]}, index=index)
         self.assertEqual(forming_bar_fraction(data, "1h", pd.Timestamp("2026-08-19 13:10")), 1.0)
 
-    def test_daily_interval_is_never_scaled(self) -> None:
+    def test_weekly_interval_is_never_scaled(self) -> None:
+        """Haftalık/aylık barlarda seans içi orantılama uygulanmaz."""
         from src.screener import forming_bar_fraction
 
         index = pd.date_range("2026-08-19 10:00", periods=3, freq="1h")
         data = pd.DataFrame({"Close": [1, 2, 3]}, index=index)
-        self.assertEqual(forming_bar_fraction(data, "1d", pd.Timestamp("2026-08-19 12:30")), 1.0)
+        self.assertEqual(forming_bar_fraction(data, "1wk", pd.Timestamp("2026-08-19 12:30")), 1.0)
 
     def test_very_early_bar_has_a_floor(self) -> None:
         """Barın ilk dakikalarında aşırı büyütme yapılmamalı."""
@@ -415,3 +416,62 @@ class FormingBarTests(unittest.TestCase):
         index = pd.date_range("2026-08-19 10:00", periods=3, freq="1h")
         data = pd.DataFrame({"Close": [1, 2, 3]}, index=index)
         self.assertGreaterEqual(forming_bar_fraction(data, "1h", pd.Timestamp("2026-08-19 12:02")), 0.25)
+
+
+class CorporateActionTests(unittest.TestCase):
+    """BIST'te günlük limit ±%10'dur; aşan hareket düzeltilmemiş veri demektir."""
+
+    def _series(self, factor: float | None = None) -> pd.DataFrame:
+        rng = np.random.default_rng(1)
+        bars = 200
+        close = 100 * np.exp(np.cumsum(rng.normal(0, 0.02, bars)))
+        if factor:
+            close[-3:] = close[-3:] / factor
+        return pd.DataFrame(
+            {"Open": close, "High": close * 1.01, "Low": close * 0.99, "Close": close, "Volume": np.full(bars, 1e6)},
+            index=pd.bdate_range("2026-01-01", periods=bars),
+        )
+
+    def test_normal_series_is_not_flagged(self) -> None:
+        from src.screener import corporate_action_suspect
+
+        self.assertFalse(corporate_action_suspect(self._series())["suspect"])
+
+    def test_split_is_detected_with_a_reason(self) -> None:
+        from src.screener import corporate_action_suspect
+
+        result = corporate_action_suspect(self._series(factor=5))
+        self.assertTrue(result["suspect"])
+        self.assertIn("bölünme", result["reason"])
+        self.assertIn("limiti", result["reason"])
+
+    def test_suspect_symbol_is_excluded_from_matches(self) -> None:
+        store = {"BOLUNDU": self._series(factor=5)}
+        payload = run_screen(["BOLUNDU"], lambda batch: {t: store[t] for t in batch})
+        self.assertEqual(payload["matched"], 0)
+        self.assertIn("BOLUNDU", payload["corporate_actions"])
+
+    def test_unknown_market_is_not_flagged(self) -> None:
+        from src.screener import corporate_action_suspect
+
+        self.assertFalse(corporate_action_suspect(self._series(factor=5), market="NASDAQ")["suspect"])
+
+
+class DailyFormingBarTests(unittest.TestCase):
+    def test_daily_bar_is_prorated_during_the_session(self) -> None:
+        from src.screener import forming_bar_fraction
+
+        data = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex([pd.Timestamp("2026-08-19 09:00")]))
+        self.assertLess(forming_bar_fraction(data, "1d", pd.Timestamp("2026-08-19 12:00")), 0.6)
+
+    def test_daily_bar_is_complete_after_the_close(self) -> None:
+        from src.screener import forming_bar_fraction
+
+        data = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex([pd.Timestamp("2026-08-19 09:00")]))
+        self.assertEqual(forming_bar_fraction(data, "1d", pd.Timestamp("2026-08-19 18:30")), 1.0)
+
+    def test_previous_day_bar_is_complete(self) -> None:
+        from src.screener import forming_bar_fraction
+
+        data = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex([pd.Timestamp("2026-08-19 09:00")]))
+        self.assertEqual(forming_bar_fraction(data, "1d", pd.Timestamp("2026-08-20 11:00")), 1.0)

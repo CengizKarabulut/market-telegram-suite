@@ -118,6 +118,37 @@ def relative_strength_label(excess: float) -> str:
     return "Endeksle paralel"
 
 
+# BIST'te günlük fiyat limiti ±%10'dur; tek barda bunu belirgin biçimde aşan
+# hareket piyasa hareketi olamaz. Bölünme, sermaye artırımı veya veri hatasıdır.
+# Düzeltilmemiş seri tüm göstergeleri bozar (RSI 18, CCI -589, "güçlü katılım").
+PRICE_LIMIT_BY_MARKET = {"BIST": 0.10}
+LIMIT_TOLERANCE = 1.25
+
+
+def corporate_action_suspect(data: pd.DataFrame, market: str = "BIST", lookback: int = 60) -> dict[str, Any]:
+    """Fiyat limitini aşan bar var mı? Varsa seri düzeltilmemiş demektir."""
+    limit = PRICE_LIMIT_BY_MARKET.get(market.upper())
+    if not limit or len(data) < 3:
+        return {"suspect": False}
+    closes = data["Close"].tail(lookback + 1)
+    returns = closes.pct_change().dropna()
+    threshold = limit * LIMIT_TOLERANCE
+    breaches = returns[returns.abs() > threshold]
+    if breaches.empty:
+        return {"suspect": False}
+    worst = breaches.abs().idxmax()
+    change = float(breaches.loc[worst])
+    age = int((pd.DatetimeIndex(closes.index) > worst).sum())
+    return {
+        "suspect": True,
+        "date": pd.Timestamp(worst).date().isoformat(),
+        "change_pct": round(change * 100, 2),
+        "bars_ago": age,
+        "reason": f"{pd.Timestamp(worst).date().isoformat()} tarihinde %{change * 100:.1f} hareket; "
+        f"BIST günlük limiti ±%{limit * 100:.0f} olduğundan bölünme/sermaye artırımı veya veri hatası olmalı.",
+    }
+
+
 def forming_bar_fraction(data: pd.DataFrame, interval: str, now: pd.Timestamp | None = None) -> float:
     """Son barın ne kadarının tamamlandığını verir (0-1).
 
@@ -128,11 +159,21 @@ def forming_bar_fraction(data: pd.DataFrame, interval: str, now: pd.Timestamp | 
     from src.intervals import resolve
 
     spec = resolve(interval)
-    if not spec.intraday:
-        return 1.0
     stamps = pd.DatetimeIndex(data.index)
     last = stamps[-1]
     current = now or (pd.Timestamp.now(tz=last.tz) if last.tz else pd.Timestamp.now())
+    if spec.key == "1d":
+        # Günlük bar da seans ortasında yarımdır; seans uzunluğu üzerinden ölçülür.
+        session_minutes = 480.0
+        session_start = last.normalize() + pd.Timedelta(hours=10)
+        if current.date() != last.date():
+            return 1.0
+        elapsed = (current - session_start).total_seconds() / 60
+        if elapsed <= 0 or elapsed >= session_minutes:
+            return 1.0
+        return max(elapsed / session_minutes, 0.25)
+    if not spec.intraday:
+        return 1.0
     elapsed = (current - last).total_seconds() / 60
     if elapsed <= 0 or elapsed >= spec.minutes:
         return 1.0
@@ -297,6 +338,9 @@ def screen_symbol_detailed(
     """
     enabled = list(enabled)
     data = calculate_indicators(prices, interval)
+    suspect = corporate_action_suspect(prices)
+    if suspect["suspect"]:
+        return None, "corporate_action"
     metrics = basic_metrics(data)
     fraction = forming_bar_fraction(data, interval)
     if fraction < 1.0 and math.isfinite(metrics["rvol"]):
@@ -397,6 +441,7 @@ def run_screen(
     errors: dict[str, str] = {}
     illiquid = 0
     no_match = 0
+    corporate_actions: list[str] = []
     processed = 0
     freshness: dict[str, Any] | None = None
     for batch in chunked(symbols, batch_size):
@@ -421,6 +466,8 @@ def run_screen(
                 if result is None:
                     if reason == "illiquid":
                         illiquid += 1
+                    elif reason == "corporate_action":
+                        corporate_actions.append(ticker)
                     else:
                         no_match += 1
                     continue
@@ -440,6 +487,7 @@ def run_screen(
         "processed": processed,
         "matched": len(matches),
         "freshness": freshness or {},
+        "corporate_actions": sorted(corporate_actions),
         "illiquid": illiquid,
         "no_match": no_match,
         "filtered_out": illiquid + no_match,

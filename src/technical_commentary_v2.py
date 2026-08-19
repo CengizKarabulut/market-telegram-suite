@@ -484,6 +484,14 @@ def build_technical_commentary(
         "method": "Deterministik, rejim-duyarlı teknik yorum; bağımsız kanıt aileleri kullanır ve birleşik AL/SAT puanı üretmez.",
         "limitations": [
             *(
+                [
+                    "VERİ UYARISI: " + str(context.get("corporate_action", {}).get("reason", ""))
+                    + " Bu seride göstergeler güvenilir değildir."
+                ]
+                if context.get("corporate_action", {}).get("suspect")
+                else []
+            ),
+            *(
                 [_short_history_note(context)]
                 if context.get("short_history")
                 else []
