@@ -209,10 +209,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     # 1 saatlik veride 2 yıllık dönem gereksiz ağırdır; aralığın kendi varsayılanı kullanılır.
-    period = args.period or resolve(args.interval).default_period
     universe = load_universe(args.universe, Path(args.watchlist))
     symbols = universe.symbols[: args.limit] if args.limit > 0 else universe.symbols
-    print(f"Evren: {len(symbols)} sembol ({universe.source}) | dönem {period}, aralık {args.interval}")
+    print(f"Evren: {len(symbols)} sembol ({universe.source}) | aralık(lar): {args.interval}")
 
     enabled = [name.strip() for name in args.screens.split(",") if name.strip()] or list(SCREENS)
     options = {
