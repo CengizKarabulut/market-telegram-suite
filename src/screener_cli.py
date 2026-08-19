@@ -27,7 +27,13 @@ from src.scan_state import (
     save_state,
     select_new,
 )
-from src.screener import SCREENS, chunked, default_options, run_screen
+from src.screener import (
+    SCREENS,
+    chunked,
+    default_options,
+    merge_interval_results,
+    run_screen,
+)
 from src.stock_dashboard import (
     ScanConfig,
     build_status,
@@ -183,7 +189,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--watchlist", default="watchlist.txt", help="Yerel sembol listesi (yedek kaynak)")
     parser.add_argument("--limit", type=int, default=0, help="En fazla kaç sembol taransın (0 = sınırsız)")
     parser.add_argument("--period", default="", help="Boşsa mum aralığının varsayılan dönemi kullanılır")
-    parser.add_argument("--interval", default="1d")
+    parser.add_argument("--interval", default="1d", help="Tek aralık veya virgülle birden fazla (ör. 1h,1d)")
     parser.add_argument("--batch-size", type=int, default=40)
     parser.add_argument("--screens", default="", help="Virgülle ayrılmış tarama adları; boşsa hepsi")
     parser.add_argument("--bb-rank-max", type=float, default=default_options()["bb_rank_max"])
@@ -215,28 +221,37 @@ def main() -> None:
         "rvol_spike": args.rvol_spike,
         "min_turnover": args.min_turnover,
     }
-    benchmark = fetch_benchmark(args.benchmark, period, args.interval)
-    if benchmark is None:
-        print(f"Uyarı: {args.benchmark} verisi alınamadı; göreceli güç hesaplanmayacak.")
+    intervals = [item.strip() for item in args.interval.split(",") if item.strip()] or ["1d"]
     started = time.perf_counter()
-    payload = run_screen(
-        symbols,
-        build_fetcher(period, args.interval),
-        options=options,
-        enabled=enabled,
-        interval=args.interval,
-        batch_size=args.batch_size,
-        benchmark=benchmark,
-        keep_frames=args.report_top > 0,
-    )
+    payloads: dict[str, dict[str, Any]] = {}
+    scan_frames: dict[str, Any] = {}
+    for interval in intervals:
+        interval_period = args.period or resolve(interval).default_period
+        benchmark = fetch_benchmark(args.benchmark, interval_period, interval)
+        if benchmark is None:
+            print(f"Uyarı: {args.benchmark} verisi alınamadı ({interval}); göreceli güç hesaplanmayacak.")
+        print(f"  {interval} taraması başlıyor (dönem {interval_period})…")
+        result = run_screen(
+            symbols,
+            build_fetcher(interval_period, interval),
+            options=options,
+            enabled=enabled,
+            interval=interval,
+            batch_size=args.batch_size,
+            benchmark=benchmark,
+            keep_frames=args.report_top > 0,
+        )
+        # Rapor üretimi en kısa zaman diliminin verisiyle yapılır.
+        for ticker, frame in result.pop("frames", {}).items():
+            scan_frames.setdefault(ticker, (interval, frame))
+        payloads[interval] = result
+        print(f"  {interval}: {result['matched']} eşleşme, {result['processed']} işlendi.")
+    payload = merge_interval_results(payloads) if len(payloads) > 1 else payloads[intervals[0]]
+    payload.pop("frames", None)
     elapsed = time.perf_counter() - started
     payload["universe_source"] = universe.source
     payload["elapsed_seconds"] = round(elapsed, 1)
     payload["batches"] = len(chunked(symbols, args.batch_size))
-
-    # Ham veri çerçeveleri JSON'a yazılamaz ve yazılmamalıdır; rapor üretimi için
-    # ayrılıp payload'dan çıkarılır.
-    scan_frames = payload.pop("frames", {})
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -246,8 +261,9 @@ def main() -> None:
 
     stamp = datetime.now(MARKET_TIMEZONE).strftime("%d.%m.%Y %H:%M")
     payload["timestamp"] = stamp
-    payload["interval"] = args.interval
-    payload["header_line"] = f"{stamp} · {args.interval} tarama"
+    payload["interval"] = intervals[0]
+    label = " + ".join(intervals)
+    payload["header_line"] = f"{stamp} · {label} tarama"
 
     reports_dir = output.parent
     scan_cards = render_scan_cards(payload, reports_dir, universe.source, elapsed, title=args.title)
@@ -263,11 +279,12 @@ def main() -> None:
     for item in fresh:
         ticker = item["ticker"]
         try:
-            prices = scan_frames.get(ticker)
-            if prices is None or prices.empty:
+            entry = scan_frames.get(ticker)
+            if entry is None:
                 print(f"  {ticker}: rapor için veri alınamadı, atlanıyor.")
                 continue
-            images = build_symbol_report(ticker, prices, reports_dir, args.interval, args.report_detail)
+            report_interval, prices = entry
+            images = build_symbol_report(ticker, prices, reports_dir, report_interval, args.report_detail)
             symbol_images.extend(images)
             produced.append(item)
             print(f"  {ticker}: {len(images)} sayfalık rapor üretildi.")

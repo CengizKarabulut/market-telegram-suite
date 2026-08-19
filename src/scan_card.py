@@ -88,6 +88,15 @@ def _summary_blocks(payload: dict[str, Any], universe_source: str, elapsed: floa
                 "bold",
             )
         )
+        matched_intervals = item.get("matched_intervals", [])
+        if len(matched_intervals) > 1:
+            setups = {info.get("setup", "") for info in item.get("intervals", {}).values() if info.get("setup")}
+            agreement = "aynı kurulum" if len(setups) == 1 else "farklı kurulumlar"
+            blocks.append(
+                _Block("body", f"      ✓✓ {' + '.join(matched_intervals)} — her iki zaman diliminde eşleşti ({agreement})", 15, LIGHT_GREEN)
+            )
+        elif matched_intervals:
+            blocks.append(_Block("body", f"      {matched_intervals[0]} zaman dilimi", 14, GRAY))
         detail = " — ".join(part for part in (setup, ", ".join(tags)) if part)
         if detail:
             blocks.append(_Block("body", f"      {detail}", 15, MUTED))

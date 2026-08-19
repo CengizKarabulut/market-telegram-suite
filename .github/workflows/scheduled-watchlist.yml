@@ -40,11 +40,11 @@ on:
         default: "20000000"
         type: string
       interval:
-        description: "Mum aralığı (saatlik tarama için 1h, kapanış taraması için 1d)"
+        description: "Mum aralığı (virgülle birden fazla: 1h,1d)"
         required: true
-        default: "1h"
+        default: "1h,1d"
         type: choice
-        options: ["15m", "30m", "1h", "4h", "1d"]
+        options: ["1h,1d", "15m", "30m", "1h", "4h", "1d", "1wk"]
       report_top:
         description: "Kaç yeni eşleşme için tam rapor üretilsin (0 = yalnızca tarama kartı)"
         required: true
@@ -56,8 +56,10 @@ on:
         default: true
         type: boolean
   schedule:
-    # Seans içi saatlik tarama: 10:30-17:30 TR = 07:30-14:30 UTC.
-    - cron: "30 7-14 * * 1-5"
+    # Seans içi tarama: 10:30, 12:30, 14:30, 17:30 TR (07:30, 09:30, 11:30, 14:30 UTC).
+    # İki saatlik aralık, sağlayıcı istek yükünü ikiye katlamadan çok zaman dilimli
+    # taramaya (1h + 1d) izin verir.
+    - cron: "30 7,9,11,14 * * 1-5"
     # Kapanış sonrası günlük tarama: 19:30 TR.
     - cron: "30 16 * * 1-5"
 
@@ -72,7 +74,7 @@ jobs:
   screen:
     runs-on: ubuntu-latest
     # 600+ sembolde indirme ve iki asamali tarama uzun surebilir.
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Kodu indir
         uses: actions/checkout@v6
@@ -108,7 +110,8 @@ jobs:
           INPUT_RVOL_SPIKE: ${{ inputs.rvol_spike || '3.0' }}
           INPUT_MIN_TURNOVER: ${{ inputs.min_turnover || '20000000' }}
           # Kapanış koşusu günlük barla, seans içi koşular saatlik barla çalışır.
-          INPUT_INTERVAL: ${{ inputs.interval || (github.event.schedule == '30 16 * * 1-5' && '1d' || '1h') }}
+          # Seans içi koşular saatlik + günlük birlikte; kapanış koşusu yalnızca günlük.
+          INPUT_INTERVAL: ${{ inputs.interval || (github.event.schedule == '30 16 * * 1-5' && '1d' || '1h,1d') }}
           INPUT_REPORT_TOP: ${{ inputs.report_top || '3' }}
           SEND_TELEGRAM: ${{ github.event_name == 'schedule' || inputs.send_telegram }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

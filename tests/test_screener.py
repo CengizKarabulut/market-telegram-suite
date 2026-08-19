@@ -475,3 +475,71 @@ class DailyFormingBarTests(unittest.TestCase):
 
         data = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex([pd.Timestamp("2026-08-19 09:00")]))
         self.assertEqual(forming_bar_fraction(data, "1d", pd.Timestamp("2026-08-20 11:00")), 1.0)
+
+
+class MultiTimeframeTests(unittest.TestCase):
+    def _payload(self, results: list[dict]) -> dict:
+        return {
+            "requested": 100, "processed": 90, "illiquid": 40, "no_match": 30,
+            "errors": {}, "error_kinds": {}, "corporate_actions": [], "freshness": {}, "results": results,
+        }
+
+    def _item(self, ticker: str, setup: str, screens: list[str], rvol: float = 2.0) -> dict:
+        return {
+            "ticker": ticker, "close": 10.0, "rvol": rvol, "bb_width_percentile": 20.0,
+            "screens": screens, "setup": setup, "setup_bias": "iki yönlü", "notes": [], "excess_return_20": 1.0,
+        }
+
+    def test_symbol_matching_both_timeframes_is_marked(self) -> None:
+        from src.screener import merge_interval_results
+
+        merged = merge_interval_results({
+            "1h": self._payload([self._item("AAA", "Sıkışma / karar bölgesi", ["sikisma_hacim"])]),
+            "1d": self._payload([self._item("AAA", "Sıkışma / karar bölgesi", ["karar_bolgesi"])]),
+        })
+        entry = merged["results"][0]
+        self.assertTrue(entry["multi_timeframe"])
+        self.assertEqual(entry["matched_intervals"], ["1h", "1d"])
+
+    def test_same_setup_across_timeframes_scores_higher_than_different(self) -> None:
+        from src.screener import merge_interval_results
+
+        same = merge_interval_results({
+            "1h": self._payload([self._item("AAA", "Trend devamı", ["trend_devami"])]),
+            "1d": self._payload([self._item("AAA", "Trend devamı", ["trend_devami"])]),
+        })["results"][0]["score"]
+        different = merge_interval_results({
+            "1h": self._payload([self._item("BBB", "Trend devamı", ["trend_devami"])]),
+            "1d": self._payload([self._item("BBB", "Sıkışma / karar bölgesi", ["trend_devami"])]),
+        })["results"][0]["score"]
+        self.assertGreater(same, different)
+
+    def test_multi_timeframe_outranks_single(self) -> None:
+        from src.screener import merge_interval_results
+
+        merged = merge_interval_results({
+            "1h": self._payload([self._item("MULTI", "Trend devamı", ["trend_devami"]), self._item("SOLO", "Tükenme denemesi", ["tukenme"])]),
+            "1d": self._payload([self._item("MULTI", "Trend devamı", ["trend_devami"])]),
+        })
+        self.assertEqual(merged["results"][0]["ticker"], "MULTI")
+
+    def test_screens_from_both_timeframes_are_unioned(self) -> None:
+        from src.screener import merge_interval_results
+
+        entry = merge_interval_results({
+            "1h": self._payload([self._item("AAA", "Trend devamı", ["trend_devami"])]),
+            "1d": self._payload([self._item("AAA", "Trend devamı", ["hacim_patlamasi"])]),
+        })["results"][0]
+        self.assertEqual(set(entry["screens"]), {"trend_devami", "hacim_patlamasi"})
+
+    def test_errors_and_corporate_actions_are_merged(self) -> None:
+        from src.screener import merge_interval_results
+
+        first = self._payload([])
+        first["errors"] = {"XXX": "veri yok"}
+        first["corporate_actions"] = ["ORGE"]
+        second = self._payload([])
+        second["corporate_actions"] = ["AKFIS"]
+        merged = merge_interval_results({"1h": first, "1d": second})
+        self.assertEqual(merged["corporate_actions"], ["AKFIS", "ORGE"])
+        self.assertIn("XXX", merged["errors"])

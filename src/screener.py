@@ -28,6 +28,9 @@ from src.setup_recognition import build_setup_context
 from src.stock_dashboard import MA_PERIODS, calculate_indicators
 
 BATCH_SIZE = 40
+# Zaman dilimlerini kısadan uzuna sıralamak için; birleşik listede görünen
+# değerler en kısa (en güncel) dilimden alınır.
+INTERVAL_ORDER = {"5m": 1, "15m": 2, "30m": 3, "1h": 4, "2h": 5, "4h": 6, "1d": 7, "1wk": 8, "1mo": 9}
 
 
 def _number(value: Any, default: float = math.nan) -> float:
@@ -497,4 +500,69 @@ def run_screen(
         "screens": enabled,
         "results": [item.as_dict() for item in matches],
         "frames": kept_frames,
+    }
+
+def merge_interval_results(payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Farklı zaman dilimlerinin sonuçlarını tek listede birleştirir.
+
+    Bir sembolün hem saatlik hem günlükte aynı kurulumu vermesi, tek zaman
+    dilimindeki eşleşmeden daha güçlü bir kanıttır; birleşik liste bunu görünür
+    kılar ve çok zaman dilimli eşleşmeleri öne çıkarır.
+    """
+    combined: dict[str, dict[str, Any]] = {}
+    for interval, payload in payloads.items():
+        for item in payload.get("results", []):
+            ticker = item["ticker"]
+            entry = combined.setdefault(ticker, {**item, "intervals": {}, "screens": []})
+            entry["intervals"][interval] = {
+                "screens": item.get("screens", []),
+                "setup": item.get("setup", ""),
+                "rvol": item.get("rvol"),
+                "bb_width_percentile": item.get("bb_width_percentile"),
+            }
+            entry["screens"] = list(dict.fromkeys(entry["screens"] + item.get("screens", [])))
+            # Görünen değerler en kısa zaman diliminden alınır; en güncel odur.
+            if interval == min(payloads, key=lambda key: INTERVAL_ORDER.get(key, 99)):
+                entry.update({key: item[key] for key in ("close", "rvol", "bb_width_percentile", "setup", "setup_bias", "notes")})
+            entry["excess_return_20"] = item.get("excess_return_20", entry.get("excess_return_20"))
+    results = []
+    for ticker, entry in combined.items():
+        matched_intervals = list(entry["intervals"])
+        entry["matched_intervals"] = matched_intervals
+        entry["multi_timeframe"] = len(matched_intervals) > 1
+        base = sum(SCREEN_WEIGHTS.get(name, 1.0) for name in entry["screens"])
+        # Aynı kurulumun birden fazla zaman diliminde görülmesi puanı yükseltir.
+        setups = {info.get("setup", "") for info in entry["intervals"].values() if info.get("setup")}
+        agreement = 1.6 if len(matched_intervals) > 1 and len(setups) == 1 else 1.3 if len(matched_intervals) > 1 else 1.0
+        entry["score"] = round(base * agreement, 2)
+        entry["ticker"] = ticker
+        results.append(entry)
+    results.sort(key=lambda item: (-item["score"], -abs(_number(item.get("excess_return_20"), 0.0))))
+    totals = {
+        "requested": max((payload.get("requested", 0) for payload in payloads.values()), default=0),
+        "processed": max((payload.get("processed", 0) for payload in payloads.values()), default=0),
+        "illiquid": max((payload.get("illiquid", 0) for payload in payloads.values()), default=0),
+        "no_match": max((payload.get("no_match", 0) for payload in payloads.values()), default=0),
+    }
+    errors: dict[str, str] = {}
+    corporate: list[str] = []
+    error_kinds: dict[str, list[str]] = {}
+    for payload in payloads.values():
+        errors.update(payload.get("errors", {}))
+        corporate.extend(payload.get("corporate_actions", []))
+        for kind, tickers in payload.get("error_kinds", {}).items():
+            error_kinds.setdefault(kind, [])
+            error_kinds[kind] = sorted(set(error_kinds[kind]) | set(tickers))
+    freshness = next((payload.get("freshness", {}) for payload in payloads.values() if payload.get("freshness")), {})
+    return {
+        **totals,
+        "matched": len(results),
+        "filtered_out": totals["illiquid"] + totals["no_match"],
+        "results": results,
+        "errors": errors,
+        "error_kinds": error_kinds,
+        "corporate_actions": sorted(set(corporate)),
+        "freshness": freshness,
+        "intervals": list(payloads),
+        "frames": {},
     }
