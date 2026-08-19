@@ -126,13 +126,26 @@ def relative_strength_label(excess: float) -> str:
 # Düzeltilmemiş seri tüm göstergeleri bozar (RSI 18, CCI -589, "güçlü katılım").
 PRICE_LIMIT_BY_MARKET = {"BIST": 0.10}
 LIMIT_TOLERANCE = 1.25
+# Bir barın kapsadığı işlem günü sayısı. Günlük limit birikimli olduğu için
+# haftalık barda beş, aylıkta yirmi iki günlük hareket tek barda toplanır;
+# günlük eşiği doğrudan uygulamak neredeyse her sembolü şüpheli gösterir.
+TRADING_DAYS_PER_BAR = {"5m": 1, "15m": 1, "30m": 1, "1h": 1, "2h": 1, "4h": 1, "1d": 1, "1wk": 5, "1mo": 22}
+# Aylık barda teorik sınır %700'ü aşar; tespit anlamını yitirdiğinden kapatılır.
+MAX_USABLE_THRESHOLD = 1.0
 
 
-def corporate_action_suspect(data: pd.DataFrame, market: str = "BIST", lookback: int = 60) -> dict[str, Any]:
-    """Fiyat limitini aşan bar var mı? Varsa seri düzeltilmemiş demektir."""
+def corporate_action_suspect(data: pd.DataFrame, market: str = "BIST", lookback: int = 60, interval: str = "1d") -> dict[str, Any]:
+    """Fiyat limitini aşan bar var mı? Varsa seri düzeltilmemiş demektir.
+
+    Eşik, barın kapsadığı işlem günü sayısına göre birikimli hesaplanır.
+    """
     limit = PRICE_LIMIT_BY_MARKET.get(market.upper())
     if not limit or len(data) < 3:
         return {"suspect": False}
+    days = TRADING_DAYS_PER_BAR.get(interval, 1)
+    limit = (1 + limit) ** days - 1
+    if limit > MAX_USABLE_THRESHOLD:
+        return {"suspect": False, "reason": f"{interval} aralığında birikimli limit anlamlı bir eşik vermiyor; kontrol uygulanmadı."}
     closes = data["Close"].tail(lookback + 1)
     returns = closes.pct_change().dropna()
     threshold = limit * LIMIT_TOLERANCE
@@ -148,7 +161,7 @@ def corporate_action_suspect(data: pd.DataFrame, market: str = "BIST", lookback:
         "change_pct": round(change * 100, 2),
         "bars_ago": age,
         "reason": f"{pd.Timestamp(worst).date().isoformat()} tarihinde %{change * 100:.1f} hareket; "
-        f"BIST günlük limiti ±%{limit * 100:.0f} olduğundan bölünme/sermaye artırımı veya veri hatası olmalı.",
+        f"{interval} aralığında birikimli limit ±%{limit * 100:.0f} olduğundan bölünme/sermaye artırımı veya veri hatası olmalı.",
     }
 
 
@@ -349,7 +362,7 @@ def screen_symbol_detailed(
     """
     enabled = list(enabled)
     data = calculate_indicators(prices, interval)
-    suspect = corporate_action_suspect(prices)
+    suspect = corporate_action_suspect(prices, interval=interval)
     if suspect["suspect"]:
         return None, "corporate_action"
     metrics = basic_metrics(data)

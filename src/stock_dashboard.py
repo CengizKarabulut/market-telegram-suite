@@ -127,7 +127,7 @@ def validate_price_data(data: pd.DataFrame, symbol: str, provider: str, spec: An
     if spec is not None and str(getattr(spec, "key", "")) in {"1d", "1wk", "1mo"}:
         from src.screener import corporate_action_suspect
 
-        data.attrs["corporate_action"] = corporate_action_suspect(data)
+        data.attrs["corporate_action"] = corporate_action_suspect(data, interval=str(spec.key))
     data.attrs["provider"] = provider
     return data
 

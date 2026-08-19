@@ -443,7 +443,35 @@ class CorporateActionTests(unittest.TestCase):
         result = corporate_action_suspect(self._series(factor=5))
         self.assertTrue(result["suspect"])
         self.assertIn("bölünme", result["reason"])
-        self.assertIn("limiti", result["reason"])
+        self.assertIn("limit", result["reason"])
+
+    def test_weekly_move_within_cumulative_limit_is_not_flagged(self) -> None:
+        """Haftalık barda %18 hareket normaldir; günlük eşik uygulanmamalı."""
+        from src.screener import corporate_action_suspect
+
+        frame = self._series()
+        frame.iloc[-2, frame.columns.get_loc("Close")] = frame["Close"].iloc[-3] * 1.18
+        self.assertFalse(corporate_action_suspect(frame, interval="1wk")["suspect"])
+
+    def test_same_move_is_flagged_on_daily(self) -> None:
+        from src.screener import corporate_action_suspect
+
+        frame = self._series()
+        frame.iloc[-2, frame.columns.get_loc("Close")] = frame["Close"].iloc[-3] * 1.18
+        self.assertTrue(corporate_action_suspect(frame, interval="1d")["suspect"])
+
+    def test_split_is_still_detected_on_weekly(self) -> None:
+        from src.screener import corporate_action_suspect
+
+        self.assertTrue(corporate_action_suspect(self._series(factor=5), interval="1wk")["suspect"])
+
+    def test_monthly_check_is_disabled_with_an_explanation(self) -> None:
+        """Aylık barda birikimli sınır %700'ü aşar; kontrol anlamını yitirir."""
+        from src.screener import corporate_action_suspect
+
+        result = corporate_action_suspect(self._series(factor=5), interval="1mo")
+        self.assertFalse(result["suspect"])
+        self.assertIn("uygulanmadı", result["reason"])
 
     def test_suspect_symbol_is_excluded_from_matches(self) -> None:
         store = {"BOLUNDU": self._series(factor=5)}
