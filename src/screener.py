@@ -344,7 +344,10 @@ def deep_context(data: pd.DataFrame) -> dict[str, Any]:
     row = data.iloc[-1]
     regime = "Trend / yönlü piyasa" if _number(row.get("ADX")) >= 25 else "Dengeli / sıkışan piyasa" if _number(row.get("ADX")) < 18 else "Geçiş / karma piyasa"
     context = {"regime": {"state": regime, "adx": _number(row.get("ADX"))}, "structure": structure, "profile": profile}
-    return build_setup_context(data, context, semantic)
+    result = build_setup_context(data, context, semantic)
+    # Çözülme eşikleri sade özet satırında kullanılır; yapı seviyeleri taşınır.
+    result["levels"] = {"swing_high": _number(structure.get("high")), "swing_low": _number(structure.get("low"))}
+    return result
 
 
 def screen_symbol_detailed(
@@ -398,6 +401,7 @@ def screen_symbol_detailed(
         result.setup = str(setup.get("name", ""))
         result.setup_bias = str(setup.get("bias", ""))
         result.detail["duration"] = setup_context["duration"]["summary"]
+        result.detail["levels"] = setup_context.get("levels", {})
         # Ucuz ön koşul yalnızca derin analizi çalıştırmaya değer mi kararı içindir.
         # Analiz bir kez çalıştıktan sonra tüm derin koşullar değerlendirilir; aksi
         # halde kurulum "başarısız kırılım" derken tarama bunu kredilendirmez.

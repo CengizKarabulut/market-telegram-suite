@@ -25,6 +25,7 @@ from src.analyst_card import (
     _paginate,
     render_analyst_card,
 )
+from src.plain_language import scan_line_plain
 from src.screener import SCREENS
 
 
@@ -77,31 +78,23 @@ def _summary_blocks(payload: dict[str, Any], universe_source: str, elapsed: floa
         setup = str(item.get("setup", ""))
         tags = [labels.get(name, name) for name in item.get("screens", [])]
         tags = [tag for tag in tags if tag.casefold() != setup.casefold()]
-        excess = item.get("excess_return_20")
-        rs = f"XU100 {excess:+.1f}p" if isinstance(excess, (int, float)) and math.isfinite(float(excess)) else "XU100 —"
-        blocks.append(
-            _Block(
-                "body",
-                f"{index}. {item['ticker']}   {item['close']:,.2f}   RVOL {item['rvol']:.2f}x   BB %{item['bb_width_percentile']:.0f}   {rs}",
-                18,
-                _tone_for(item),
-                "bold",
-            )
-        )
         matched_intervals = item.get("matched_intervals", [])
-        if len(matched_intervals) > 1:
-            setups = {info.get("setup", "") for info in item.get("intervals", {}).values() if info.get("setup")}
-            agreement = "aynı kurulum" if len(setups) == 1 else "farklı kurulumlar"
-            blocks.append(
-                _Block("body", f"      ✓✓ {' + '.join(matched_intervals)} — her iki zaman diliminde eşleşti ({agreement})", 15, LIGHT_GREEN)
-            )
-        elif matched_intervals:
-            blocks.append(_Block("body", f"      {matched_intervals[0]} zaman dilimi", 14, GRAY))
-        detail = " — ".join(part for part in (setup, ", ".join(tags)) if part)
-        if detail:
-            blocks.append(_Block("body", f"      {detail}", 15, MUTED))
+        # Başlık: sembol ve fiyat. Teknik ayrıntılar aşağıya, sade anlatım öne alınır;
+        # listeyi teknik analiz bilmeyen biri de okuyabilmelidir.
+        blocks.append(_Block("body", f"{index}. {item['ticker']}   {item['close']:,.2f} TL", 19, _tone_for(item), "bold"))
+        blocks.append(_Block("body", scan_line_plain(item), 15, WHITE))
+        excess = item.get("excess_return_20")
+        strength = f"XU100 {excess:+.1f}p" if isinstance(excess, (int, float)) and math.isfinite(float(excess)) else "XU100 —"
+        technical = f"RVOL {item['rvol']:.2f}x · BB %{item['bb_width_percentile']:.0f} · {strength}"
+        if matched_intervals:
+            technical += f" · {' + '.join(matched_intervals)}"
+        if setup:
+            technical += f" · {setup}"
+        if tags:
+            technical += f" · {', '.join(tags)}"
+        blocks.append(_Block("body", technical, 13, GRAY))
         for note in item.get("notes", [])[:1]:
-            blocks.append(_Block("body", f"      ⚠ {note}", 14, YELLOW))
+            blocks.append(_Block("body", f"⚠ {note}", 13, YELLOW))
         blocks.append(_Block("gap", "", 11, WHITE))
 
     if payload["matched"] > len(results):

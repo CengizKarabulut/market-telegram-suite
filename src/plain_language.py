@@ -38,6 +38,14 @@ SETUP_PLAIN = {
 }
 
 
+def _number(value: Any, default: float = math.nan) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return number if math.isfinite(number) else default
+
+
 def _fmt(value: Any) -> str:
     try:
         number = float(value)
@@ -152,3 +160,61 @@ def build_plain_summary(
         "sentences": sentences,
         "method": "Teknik sınıflamaların gündelik dile birebir çevirisi; yeni bir iddia veya tahmin içermez.",
     }
+
+# Tarama listesindeki her satır için kurulumun tek cümlelik gündelik karşılığı.
+SCAN_SETUP_PLAIN = {
+    "Destekte reddedilme / başarısız aşağı kırılım": "Fiyat aşağı kırmayı denedi ama başaramadı, geri döndü.",
+    "Dirençte reddedilme / başarısız yukarı kırılım": "Fiyat yukarı çıkmayı denedi ama tutunamadı, geri geldi.",
+    "Sıkışma / karar bölgesi": "Fiyat dar bir aralıkta sıkışmış, henüz yön seçmemiş.",
+    "Trend devamı": "Fiyat belirgin bir yönde ilerliyor.",
+    "Trend içi geri çekilme": "Ana yön korunuyor ama hareket duraklamış.",
+    "Tükenme denemesi": "Mevcut hareket yorulma belirtisi gösteriyor.",
+    "Mücadele / emilim bölgesi": "Alıcı ve satıcı çekişiyor, fiyat yol almıyor.",
+    "Yön arayışı / geçiş": "Göstergeler birbirini tutmuyor, yön belirsiz.",
+}
+
+
+def _volume_phrase(rvol: float) -> str:
+    if not math.isfinite(rvol):
+        return ""
+    if rvol >= 3:
+        return f"İşlem hacmi normalin {rvol:.1f} katı — çok yoğun ilgi var."
+    if rvol >= 1.5:
+        return f"İşlem hacmi normalin {rvol:.1f} katı."
+    if rvol < 0.8:
+        return "İşlem hacmi normalin altında; ilgi sınırlı."
+    return "İşlem hacmi normal seviyelerde."
+
+
+def _strength_phrase(excess: Any) -> str:
+    try:
+        value = float(excess)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(value):
+        return ""
+    if value >= 3:
+        return "Son bir ayda endeksten belirgin şekilde iyi performans gösterdi."
+    if value <= -3:
+        return "Son bir ayda endeksin gerisinde kaldı."
+    return "Endeksle benzer performans gösterdi."
+
+
+def scan_line_plain(item: dict[str, Any]) -> str:
+    """Tarama listesindeki bir satırı teknik terim kullanmadan anlatır."""
+    parts: list[str] = []
+    setup = str(item.get("setup", ""))
+    parts.append(SCAN_SETUP_PLAIN.get(setup, "Fiyatın durumu klasik bir kalıba tam oturmuyor."))
+    volume = _volume_phrase(_number(item.get("rvol")))
+    if volume:
+        parts.append(volume)
+    strength = _strength_phrase(item.get("excess_return_20"))
+    if strength:
+        parts.append(strength)
+    levels = item.get("levels") or {}
+    high, low = _number(levels.get("swing_high")), _number(levels.get("swing_low"))
+    if math.isfinite(high) and math.isfinite(low):
+        parts.append(f"Yön {_fmt(high)} üstünde veya {_fmt(low)} altında günlük kapanışla belli olur.")
+    if len(item.get("matched_intervals", [])) > 1:
+        parts.append("Birden fazla zaman diliminde aynı anda öne çıktı.")
+    return " ".join(parts)

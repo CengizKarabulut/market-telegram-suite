@@ -88,3 +88,67 @@ class PlainLanguageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScanLineTests(unittest.TestCase):
+    """Tarama listesi teknik analiz bilmeyen biri için de okunabilir olmalı."""
+
+    def _item(self, **overrides):
+        base = {
+            "setup": "Destekte reddedilme / başarısız aşağı kırılım",
+            "rvol": 2.49,
+            "excess_return_20": -5.5,
+            "levels": {"swing_high": 103.20, "swing_low": 89.10},
+            "matched_intervals": ["1d", "1wk"],
+        }
+        base.update(overrides)
+        return base
+
+    def test_line_avoids_technical_jargon(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        text = scan_line_plain(self._item())
+        for term in ("RVOL", "BB", "ATR", "EMA", "VAL", "VAH", "POC", "XU100"):
+            self.assertNotIn(term, text)
+
+    def test_line_states_the_thresholds(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        text = scan_line_plain(self._item())
+        self.assertIn("103.20", text)
+        self.assertIn("89.10", text)
+        self.assertIn("kapanışla", text)
+
+    def test_high_volume_is_described_plainly(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        self.assertIn("çok yoğun ilgi", scan_line_plain(self._item(rvol=4.2)))
+
+    def test_low_volume_is_described_plainly(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        self.assertIn("ilgi sınırlı", scan_line_plain(self._item(rvol=0.5)))
+
+    def test_relative_strength_is_described_plainly(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        self.assertIn("endeksten belirgin şekilde iyi", scan_line_plain(self._item(excess_return_20=8.0)))
+        self.assertIn("endeksin gerisinde", scan_line_plain(self._item(excess_return_20=-8.0)))
+
+    def test_multi_timeframe_is_mentioned(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        self.assertIn("Birden fazla zaman diliminde", scan_line_plain(self._item()))
+        self.assertNotIn("Birden fazla", scan_line_plain(self._item(matched_intervals=["1d"])))
+
+    def test_missing_levels_do_not_break_the_line(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        text = scan_line_plain(self._item(levels={}))
+        self.assertTrue(text)
+        self.assertNotIn("kapanışla belli olur", text)
+
+    def test_unknown_setup_has_a_fallback(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        self.assertIn("klasik bir kalıba tam oturmuyor", scan_line_plain(self._item(setup="Bilinmeyen")))
