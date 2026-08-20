@@ -86,3 +86,46 @@ class SemanticFeaturesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ParticipationDirectionTests(unittest.TestCase):
+    """Katılım etiketi son barın yönüyle çelişmemeli."""
+
+    def _participation(self, last_change: float):
+        import numpy as np
+
+        from src.divergence import detect_divergences
+        from src.market_context import market_structure, profile_context
+        from src.semantic_features import build_semantic_features
+        from src.stock_dashboard import MA_PERIODS, calculate_indicators
+
+        rng = np.random.default_rng(3)
+        bars = 300
+        index = pd.bdate_range("2025-01-01", periods=bars)
+        close = 30 * np.exp(np.cumsum(rng.normal(0, 0.012, bars)))
+        close[-6:-1] = close[-7] * np.array([1.02, 1.04, 1.07, 1.09, 1.12])
+        close[-1] = close[-2] * (1 + last_change)
+        volume = rng.lognormal(14, 0.3, bars)
+        volume[-1] *= 2.2
+        frame = pd.DataFrame(
+            {"Open": close, "High": close * 1.02, "Low": close * 0.98, "Close": close, "Volume": volume},
+            index=index,
+        )
+        data = calculate_indicators(frame, "1d")
+        semantic = build_semantic_features(
+            data, MA_PERIODS, {}, profile_context(data), {}, market_structure(data), detect_divergences(data)
+        )
+        return semantic["participation"]
+
+    def test_sharp_down_bar_is_not_called_upward_participation(self) -> None:
+        state = self._participation(-0.048)["state"]
+        self.assertNotIn("Yükseliş yönünde", state)
+        self.assertIn("çelişkili", state)
+
+    def test_agreeing_up_bar_keeps_upward_label(self) -> None:
+        self.assertEqual(self._participation(0.03)["state"], "Yükseliş yönünde güçlü katılım")
+
+    def test_current_bar_change_is_exposed(self) -> None:
+        participation = self._participation(-0.048)
+        self.assertIn("price_change_1", participation)
+        self.assertLess(participation["price_change_1"], 0)

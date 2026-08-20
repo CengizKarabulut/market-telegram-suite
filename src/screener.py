@@ -389,8 +389,13 @@ def screen_symbol_detailed(
         rsi=metrics["rsi"],
     )
     if metrics.get("bar_fraction"):
+        fraction_pct = float(metrics["bar_fraction"]) * 100
         result.detail["bar_fraction"] = round(float(metrics["bar_fraction"]), 2)
-        result.notes.append(f"Mevcut bar %{metrics['bar_fraction'] * 100:.0f} tamamlandı; RVOL orantılandı")
+        result.detail["rvol_observed"] = _number(metrics.get("rvol_raw"))
+        result.notes.append(
+            f"Mevcut bar %{fraction_pct:.0f} tamamlandı; gösterilen RVOL gün sonu projeksiyonudur "
+            f"(şu ana kadar gerçekleşen: {_number(metrics.get('rvol_raw')):.2f}x)"
+        )
     shallow = [name for name in candidates if name not in DEEP_SCREENS]
     matched = list(shallow)
     # Ucuz filtreyi geçen her sembolde derin analiz çalışır: eşleşen sembol sayısı

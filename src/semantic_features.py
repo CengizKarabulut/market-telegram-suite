@@ -302,10 +302,17 @@ def participation_context(data: pd.DataFrame) -> dict[str, Any]:
     down_volume = _number(data.loc[returns < 0, "Volume"].tail(10).mean())
     up_down_ratio = up_volume / down_volume if down_volume > 0 else math.nan
     price_change_5 = (_number(row["Close"]) / _number(data["Close"].iloc[-6]) - 1) * 100 if len(data) >= 6 else math.nan
-    if rvol_1 >= 1.5 and price_change_5 > 0 and obv_slope_5 > 0:
+    # Son barın kendi yönü. Beş barlık eğilim yukarı olsa bile bugün sert düşen
+    # bir hissede "yükseliş yönünde katılım" demek okuyanı yanıltır.
+    price_change_1 = (_number(row["Close"]) / _number(data["Close"].iloc[-2]) - 1) * 100 if len(data) >= 2 else math.nan
+    bar_agrees_up = not math.isfinite(price_change_1) or price_change_1 >= 0
+    bar_agrees_down = not math.isfinite(price_change_1) or price_change_1 <= 0
+    if rvol_1 >= 1.5 and price_change_5 > 0 and obv_slope_5 > 0 and bar_agrees_up:
         state, tone = "Yükseliş yönünde güçlü katılım", "positive"
-    elif rvol_1 >= 1.5 and price_change_5 < 0 and obv_slope_5 < 0:
+    elif rvol_1 >= 1.5 and price_change_5 < 0 and obv_slope_5 < 0 and bar_agrees_down:
         state, tone = "Düşüş yönünde güçlü katılım", "negative"
+    elif rvol_1 >= 1.5 and math.isfinite(price_change_1) and price_change_5 * price_change_1 < 0:
+        state, tone = "Yüksek katılım, yön çelişkili", "warning"
     elif rvol_1 < 0.8:
         state, tone = "Düşük katılım", "warning"
     elif obv_slope_5 > 0 and obv_slope_20 > 0:
@@ -322,6 +329,7 @@ def participation_context(data: pd.DataFrame) -> dict[str, Any]:
     )
     return {
         "state": state,
+        "price_change_1": price_change_1,
         "tone": tone,
         "rvol_1": rvol_1,
         "rvol_3_average": rvol_3,

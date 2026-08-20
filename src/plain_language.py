@@ -174,9 +174,20 @@ SCAN_SETUP_PLAIN = {
 }
 
 
-def _volume_phrase(rvol: float) -> str:
+def _volume_phrase(rvol: float, observed: float = math.nan, fraction: float = 1.0) -> str:
+    """Hacim cümlesi.
+
+    Bar henüz kapanmadıysa gösterilen RVOL bir projeksiyondur; gerçekleşmiş
+    değer gibi sunmak yanıltıcı olur, ikisi birlikte yazılır.
+    """
     if not math.isfinite(rvol):
         return ""
+    if fraction < 1.0 and math.isfinite(observed):
+        pace = "çok yoğun" if rvol >= 3 else "yoğun" if rvol >= 1.5 else "normal"
+        return (
+            f"İşlem hacmi şu ana kadar normalin {observed:.1f} katı; bu hızla giderse "
+            f"gün sonunda {rvol:.1f} katına ulaşır ({pace} ilgi)."
+        )
     if rvol >= 3:
         return f"İşlem hacmi normalin {rvol:.1f} katı — çok yoğun ilgi var."
     if rvol >= 1.5:
@@ -205,7 +216,11 @@ def scan_line_plain(item: dict[str, Any]) -> str:
     parts: list[str] = []
     setup = str(item.get("setup", ""))
     parts.append(SCAN_SETUP_PLAIN.get(setup, "Fiyatın durumu klasik bir kalıba tam oturmuyor."))
-    volume = _volume_phrase(_number(item.get("rvol")))
+    volume = _volume_phrase(
+        _number(item.get("rvol")),
+        _number(item.get("rvol_observed")),
+        _number(item.get("bar_fraction"), 1.0),
+    )
     if volume:
         parts.append(volume)
     strength = _strength_phrase(item.get("excess_return_20"))

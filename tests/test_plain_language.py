@@ -152,3 +152,37 @@ class ScanLineTests(unittest.TestCase):
         from src.plain_language import scan_line_plain
 
         self.assertIn("klasik bir kalıba tam oturmuyor", scan_line_plain(self._item(setup="Bilinmeyen")))
+
+
+class ProjectedVolumeTests(unittest.TestCase):
+    """Yarım barda gösterilen RVOL bir projeksiyondur; olgu gibi sunulmamalı."""
+
+    def test_forming_bar_states_both_values(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        text = scan_line_plain({
+            "setup": "Sıkışma / karar bölgesi", "rvol": 6.91, "rvol_observed": 2.02,
+            "bar_fraction": 0.29, "excess_return_20": 0.0, "levels": {}, "matched_intervals": ["1d"],
+        })
+        self.assertIn("şu ana kadar normalin 2.0 katı", text)
+        self.assertIn("bu hızla giderse", text)
+        self.assertIn("6.9 katına", text)
+
+    def test_completed_bar_states_a_single_value(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        text = scan_line_plain({
+            "setup": "Sıkışma / karar bölgesi", "rvol": 3.4, "bar_fraction": 1.0,
+            "excess_return_20": 0.0, "levels": {}, "matched_intervals": ["1d"],
+        })
+        self.assertIn("normalin 3.4 katı", text)
+        self.assertNotIn("bu hızla giderse", text)
+
+    def test_missing_observed_value_falls_back(self) -> None:
+        from src.plain_language import scan_line_plain
+
+        text = scan_line_plain({
+            "setup": "Trend devamı", "rvol": 2.0, "bar_fraction": 0.5,
+            "excess_return_20": 0.0, "levels": {}, "matched_intervals": ["1d"],
+        })
+        self.assertIn("normalin 2.0 katı", text)
