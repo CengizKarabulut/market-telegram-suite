@@ -33,6 +33,34 @@ class View:
 
 VIEWS: tuple[View, ...] = (
     View(
+        key="bollinger_macd",
+        title="Bollinger · Momentum · Hacim",
+        keys=("bbands", "macd", "smi", "obv"),
+        note="Bollinger 20/2 · MACD 12/26/9 · SMI 10/3/3 · OBV SMA14+BB2",
+        price_height=3.4,
+    ),
+    View(
+        key="ichimoku_rsi",
+        title="Ichimoku · Momentum · Volatilite",
+        keys=("ichimoku", "rsi", "cci", "atr"),
+        note="Ichimoku 9/26/52/26 · RSI 14/SMA14 · CCI 20/SMA14 · ATR RMA14",
+        price_height=3.4,
+    ),
+    View(
+        key="sar_vwap",
+        title="SAR · VWAP · Yön Gücü",
+        keys=("sar", "vwap", "stochrsi", "adx"),
+        note="Parabolic SAR · VWAP bantları · Stoch RSI · ADX/DMI 14",
+        price_height=3.4,
+    ),
+    View(
+        key="supertrend_fisher",
+        title="Supertrend · Para Akışı · Momentum",
+        keys=("supertrend", "fisher", "cmf", "momentum"),
+        note="Supertrend 10/3 · Fisher 9 · CMF 20 · Momentum 10",
+        price_height=3.4,
+    ),
+    View(
         key="klasik",
         title="Klasik",
         keys=("ma", "rsi", "bbpanel", "volume"),
@@ -78,7 +106,9 @@ VIEWS: tuple[View, ...] = (
 )
 
 #: Izgara olarak gonderilen dort kare
-GRID_SET: tuple[str, ...] = ("klasik", "trend", "kanal", "kirilim")
+GRID_SET: tuple[str, ...] = (
+    "bollinger_macd", "ichimoku_rsi", "sar_vwap", "supertrend_fisher"
+)
 
 VIEWS_BY_KEY: dict[str, View] = {v.key: v for v in VIEWS}
 
