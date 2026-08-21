@@ -180,8 +180,10 @@ def _ichimoku_overlays(s: dict[str, pd.Series]) -> list[Trace]:
             width=0.7,
             zorder=0,
         ),
-        Trace(name="Tenkan 9", y=s["ICH_tenkan"], color="mint", width=1.0),
-        Trace(name="Kijun 26", y=s["ICH_kijun"], color="accent4", width=1.2, tag=True),
+        Trace(name="Tenkan 9", y=s["ICH_tenkan"], color="#2962FF", width=1.0),
+        Trace(name="Kijun 26", y=s["ICH_kijun"], color="#B71C1C", width=1.2, tag=True),
+        Trace(name="Chikou 26", y=s["ICH_chikou"], color="#43A047",
+              width=0.9, legend=False),
     ]
 
 
@@ -275,8 +277,8 @@ def _rsi_panel(s: dict[str, pd.Series]) -> Panel:
         params="14",
         height=0.8,
         traces=[
-            Trace(name="RSI", y=s["RSI"], color="accent3", width=1.5),
-            Trace(name="RSI MA 14", y=s["RSI_ma"], color="muted", width=1.0, dash="dash"),
+            Trace(name="RSI", y=s["RSI"], color="accent2", width=1.5),
+            Trace(name="RSI MA 14", y=s["RSI_ma"], color="#FDD835", width=1.0),
             *_divergence_traces(s, "RSI"),
         ],
         hlines=[
@@ -339,8 +341,8 @@ def _stochrsi_panel(s: dict[str, pd.Series]) -> Panel:
         traces=[
             Trace(name="20–80 bölgesi", kind="band", y=upper, y2=lower,
                   color="accent3", width=0, fill_alpha=0.08, legend=False, zorder=0),
-            Trace(name="%K", y=s["SRSI_k"], color="accent2", width=1.4),
-            Trace(name="%D", y=s["SRSI_d"], color="accent1", width=1.1, dash="dash"),
+            Trace(name="%K", y=s["SRSI_k"], color="accent3", width=1.4),
+            Trace(name="%D", y=s["SRSI_d"], color="accent1", width=1.1),
             *_divergence_traces(s, "SRSI"),
         ],
         hlines=[HLine(80, "down", "dash", "80"), HLine(20, "up", "dash", "20")],
@@ -355,9 +357,9 @@ def _adx_panel(s: dict[str, pd.Series]) -> Panel:
         params="14",
         height=0.75,
         traces=[
-            Trace(name="+DI", y=s["DI_plus"], color="up", width=1.1),
-            Trace(name="-DI", y=s["DI_minus"], color="down", width=1.1),
-            Trace(name="ADX", y=s["ADX"], color="accent1", width=1.6),
+            Trace(name="+DI", y=s["DI_plus"], color="accent3", width=1.1),
+            Trace(name="-DI", y=s["DI_minus"], color="accent1", width=1.1),
+            Trace(name="ADX", y=s["ADX"], color="accent4", width=1.6),
         ],
         hlines=[HLine(25, "muted", "dash", "25")],
     )
@@ -413,9 +415,8 @@ def _rvol_panel(s: dict[str, pd.Series]) -> Panel:
 
 
 def _sar_overlays(s: dict[str, pd.Series]) -> list[Trace]:
-    roles = s["SAR_dir"].map({1.0: "up", -1.0: "down"})
     return [
-        Trace(name="Parabolic SAR", kind="dots", y=s["SAR"], colors=roles,
+        Trace(name="Parabolic SAR", kind="dots", y=s["SAR"], color="#FDD835",
               width=2.4, zorder=4, tag=True)
     ]
 
@@ -455,6 +456,7 @@ def _cci_panel(s: dict[str, pd.Series]) -> Panel:
             Trace(name="-100–100 bölgesi", kind="band", y=upper, y2=lower,
                   color="accent3", width=0, fill_alpha=0.08, legend=False, zorder=0),
             Trace(name="CCI", y=s["CCI"], color="accent3", width=1.4),
+            Trace(name="CCI SMA 14", y=s["CCI_ma"], color="#FDD835", width=1.0),
             *_divergence_traces(s, "CCI"),
         ],
         hlines=[HLine(100, "down", "dash", "100"), HLine(-100, "up", "dash", "-100")],
@@ -500,7 +502,7 @@ def _fisher_panel(s: dict[str, pd.Series]) -> Panel:
 def _cmf_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
         key="cmf", title="Chaikin Para Akışı", params="20", height=0.7,
-        traces=[Trace(name="CMF", y=s["CMF"], color="accent2", width=1.5), *_divergence_traces(s, "CMF")],
+        traces=[Trace(name="CMF", y=s["CMF"], color="#43A047", width=1.5), *_divergence_traces(s, "CMF")],
         zero_line=True,
         yrange=(-1, 1),
     )
@@ -517,11 +519,7 @@ def _momentum_panel(s: dict[str, pd.Series]) -> Panel:
 def _atr_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
         key="atr", title="ATR", params="14", height=0.65,
-        traces=[
-            Trace(name="ATR", y=s["ATR"], color="accent1", width=1.4),
-            Trace(name="ATR %", y=s["ATR_pct"], color="muted", width=0.9, dash="dot",
-                  legend=False),
-        ],
+        traces=[Trace(name="ATR", y=s["ATR"], color="#B71C1C", width=1.4)],
     )
 
 
@@ -531,10 +529,10 @@ def _obv_panel(s: dict[str, pd.Series]) -> Panel:
         traces=[
             Trace(
                 name="OBV bandı", kind="band", y=s["OBV_upper"], y2=s["OBV_lower"],
-                color="up", width=0.7, fill_alpha=0.08, legend=False,
+                color="#4CAF50", width=0.7, fill_alpha=0.08, legend=False,
             ),
             Trace(name="OBV", y=s["OBV"], color="accent3", width=1.4),
-            Trace(name="OBV SMA", y=s["OBV_ma"], color="accent1", width=1.0),
+            Trace(name="OBV SMA", y=s["OBV_ma"], color="#FDD835", width=1.0),
             *_divergence_traces(s, "OBV"),
         ],
     )
