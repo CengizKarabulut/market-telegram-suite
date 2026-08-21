@@ -13,6 +13,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .candlestick_patterns import detect_candlestick_patterns
+
 # --------------------------------------------------------------------------
 # Temel yardimcilar
 # --------------------------------------------------------------------------
@@ -779,6 +781,8 @@ def volume_profile(df: pd.DataFrame, bins: int = 48) -> dict[str, pd.Series]:
 
 #: Tum gostergelerin kanonik sirasi. CLI'daki --indicators bu anahtarlari alir.
 ALL_INDICATORS: tuple[str, ...] = (
+    # Fiyat davranışı
+    "candles",
     # Trend
     "ma", "supertrend", "ichimoku", "sar", "adx",
     # Momentum
@@ -791,6 +795,7 @@ ALL_INDICATORS: tuple[str, ...] = (
 
 #: Gostergenin ait oldugu kategori. Kareler her kategoriden birer tane secer.
 CATEGORY: dict[str, str] = {
+    "candles": "fiyat_davranisi",
     "ma": "trend", "supertrend": "trend", "ichimoku": "trend", "sar": "trend", "adx": "trend",
     "rsi": "momentum", "macd": "momentum", "smi": "momentum", "stochrsi": "momentum",
     "cci": "momentum", "willr": "momentum", "ao": "momentum",
@@ -804,6 +809,7 @@ CATEGORY: dict[str, str] = {
 NON_TEMPORAL: frozenset[str] = frozenset({"vprofile"})
 
 _COMPUTE = {
+    "candles": detect_candlestick_patterns,
     "ma": moving_averages,
     "supertrend": supertrend,
     "ichimoku": ichimoku,
