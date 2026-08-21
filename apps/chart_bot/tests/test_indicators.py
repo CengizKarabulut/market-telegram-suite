@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from src import indicators as ind
+from src.candlestick_patterns import detect_candlestick_patterns
 
 
 def synthetic_ohlcv(n: int = 400, seed: int = 7) -> pd.DataFrame:
@@ -148,7 +149,7 @@ class TestIndicators(unittest.TestCase):
     def test_every_indicator_has_a_category(self) -> None:
         self.assertEqual(set(ind.CATEGORY), set(ind.ALL_INDICATORS))
         self.assertEqual(set(ind.CATEGORY.values()),
-                         {"trend", "momentum", "volatilite", "hacim"})
+                         {"trend", "momentum", "volatilite", "hacim", "fiyat_davranisi"})
 
 
 class TestNewIndicators(unittest.TestCase):
@@ -205,6 +206,46 @@ class TestNewIndicators(unittest.TestCase):
         ratio = (out["ATR"] / self.df["Close"] * 100).dropna()
         pd.testing.assert_series_equal(ratio, out["ATR_pct"].dropna(),
                                        check_names=False)
+
+    def test_tradingview_momentum_and_fisher_trigger(self) -> None:
+        momentum = ind.momentum(self.df, 10)["MOM"]
+        pd.testing.assert_series_equal(
+            momentum, self.df["Close"] - self.df["Close"].shift(10),
+            check_names=False,
+        )
+        fisher = ind.fisher_transform(self.df)
+        pd.testing.assert_series_equal(
+            fisher["FISHER_trigger"], fisher["FISHER"].shift(1),
+            check_names=False,
+        )
+
+    def test_auto_vwap_daily_uses_current_month_and_ordered_bands(self) -> None:
+        out = ind.vwap(self.df, anchor="auto", interval="1d")
+        current_month = self.df.index.to_period("M") == self.df.index[-1].to_period("M")
+        self.assertTrue(out["VWAP"].loc[~current_month].isna().all())
+        self.assertEqual(out["VWAP_anchor"].iloc[-1], "Ay")
+        valid = out["VWAP"].notna()
+        self.assertTrue((out["VWAP_upper_3"][valid] >= out["VWAP_upper_2"][valid]).all())
+        self.assertTrue((out["VWAP_upper_2"][valid] >= out["VWAP"][valid]).all())
+        self.assertTrue((out["VWAP"][valid] >= out["VWAP_lower_2"][valid]).all())
+
+    def test_smi_cmf_and_obv_smoothing_are_finite(self) -> None:
+        smi = ind.stochastic_momentum_index(self.df)["SMI"].dropna()
+        cmf = ind.chaikin_money_flow(self.df)["CMF"].dropna()
+        obv = ind.obv(self.df)
+        self.assertGreater(len(smi), 300)
+        self.assertTrue(np.isfinite(smi).all())
+        self.assertTrue(((cmf >= -1.000001) & (cmf <= 1.000001)).all())
+        self.assertGreater(obv["OBV_ma"].notna().sum(), 300)
+        self.assertTrue((obv["OBV_upper"].dropna() >= obv["OBV_lower"].dropna()).all())
+
+    def test_candlestick_detector_marks_a_doji(self) -> None:
+        frame = self.df.iloc[:80].copy()
+        position = frame.index[-1]
+        frame.loc[position, ["Open", "Close", "High", "Low"]] = [100.0, 100.0, 110.0, 90.0]
+        patterns = detect_candlestick_patterns(frame)
+        self.assertIn("D", patterns["CANDLE_NEUTRAL_LABEL"].iloc[-1])
+        self.assertIn("Doji", patterns["CANDLE_NEUTRAL_NAMES"].iloc[-1])
 
     def test_compute_rejects_unknown_key(self) -> None:
         with self.assertRaises(KeyError):
