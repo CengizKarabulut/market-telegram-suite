@@ -256,6 +256,19 @@ def _macd_panel(s: dict[str, pd.Series]) -> Panel:
     )
 
 
+def _smi_panel(s: dict[str, pd.Series]) -> Panel:
+    return Panel(
+        key="smi", title="SMI", params="10, 3, 3", height=0.75,
+        traces=[
+            Trace(name="SMI", y=s["SMI"], color="accent3", width=1.5),
+            Trace(name="SMI EMA", y=s["SMI_signal"], color="accent1", width=1.2),
+        ],
+        hlines=[HLine(40, "down", "dash", "40"), HLine(-40, "up", "dash", "-40")],
+        zero_line=True,
+        yrange=(-120, 120),
+    )
+
+
 def _stochrsi_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
         key="stochrsi",
@@ -397,6 +410,38 @@ def _ao_panel(s: dict[str, pd.Series]) -> Panel:
     )
 
 
+def _fisher_panel(s: dict[str, pd.Series]) -> Panel:
+    return Panel(
+        key="fisher", title="Fisher Dönüşümü", params="9", height=0.75,
+        traces=[
+            Trace(name="Fisher", y=s["FISHER"], color="accent3", width=1.5),
+            Trace(name="Trigger", y=s["FISHER_trigger"], color="accent1", width=1.2),
+        ],
+        hlines=[
+            HLine(1.5, "down", "dash", "1.5"), HLine(0.75, "muted", "dot", "0.75"),
+            HLine(-0.75, "muted", "dot", "-0.75"), HLine(-1.5, "up", "dash", "-1.5"),
+        ],
+        zero_line=True,
+    )
+
+
+def _cmf_panel(s: dict[str, pd.Series]) -> Panel:
+    return Panel(
+        key="cmf", title="Chaikin Para Akışı", params="20", height=0.7,
+        traces=[Trace(name="CMF", y=s["CMF"], color="accent2", width=1.5)],
+        zero_line=True,
+        yrange=(-1, 1),
+    )
+
+
+def _momentum_panel(s: dict[str, pd.Series]) -> Panel:
+    return Panel(
+        key="momentum", title="Momentum", params="10", height=0.7,
+        traces=[Trace(name="MOM", y=s["MOM"], color="accent3", width=1.5)],
+        zero_line=True,
+    )
+
+
 def _atr_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
         key="atr", title="ATR", params="14", height=0.65,
@@ -410,10 +455,14 @@ def _atr_panel(s: dict[str, pd.Series]) -> Panel:
 
 def _obv_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
-        key="obv", title="OBV", params="EMA 20", height=0.75,
+        key="obv", title="OBV", params="SMA 14 + BB 2", height=0.75,
         traces=[
-            Trace(name="OBV", y=s["OBV"], color="accent2", width=1.4),
-            Trace(name="OBV EMA", y=s["OBV_ma"], color="accent1", width=1.0, dash="dash"),
+            Trace(
+                name="OBV bandı", kind="band", y=s["OBV_upper"], y2=s["OBV_lower"],
+                color="up", width=0.7, fill_alpha=0.08, legend=False,
+            ),
+            Trace(name="OBV", y=s["OBV"], color="accent3", width=1.4),
+            Trace(name="OBV SMA", y=s["OBV_ma"], color="accent1", width=1.0),
         ],
     )
 
@@ -491,6 +540,7 @@ _PANEL_BUILDERS = {
     "volume": lambda df, s: _volume_panel(df, s),
     "rsi": lambda df, s: _rsi_panel(s),
     "macd": lambda df, s: _macd_panel(s),
+    "smi": lambda df, s: _smi_panel(s),
     "stochrsi": lambda df, s: _stochrsi_panel(s),
     "adx": lambda df, s: _adx_panel(s),
     "bbstate": lambda df, s: _bbstate_panel(s),
@@ -499,6 +549,9 @@ _PANEL_BUILDERS = {
     "cci": lambda df, s: _cci_panel(s),
     "willr": lambda df, s: _willr_panel(s),
     "ao": lambda df, s: _ao_panel(s),
+    "fisher": lambda df, s: _fisher_panel(s),
+    "cmf": lambda df, s: _cmf_panel(s),
+    "momentum": lambda df, s: _momentum_panel(s),
     "atr": lambda df, s: _atr_panel(s),
     "obv": lambda df, s: _obv_panel(s),
     "kcpos": lambda df, s: _kcpos_panel(df, s),
@@ -518,6 +571,7 @@ REQUIRES: dict[str, tuple[str, ...]] = {
     "volume": ("volume",),
     "rsi": ("rsi",),
     "macd": ("macd",),
+    "smi": ("smi",),
     "stochrsi": ("stochrsi",),
     "adx": ("adx",),
     "bbstate": ("bbands",),
@@ -530,6 +584,9 @@ REQUIRES: dict[str, tuple[str, ...]] = {
     "cci": ("cci",),
     "willr": ("willr",),
     "ao": ("ao",),
+    "fisher": ("fisher",),
+    "cmf": ("cmf",),
+    "momentum": ("momentum",),
     "atr": ("atr",),
     "obv": ("obv",),
     "kcpos": ("keltner",),
