@@ -6,7 +6,17 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-INDICATORS = {"RSI": "RSI", "MACD": "MACD", "SMI": "SMI"}
+INDICATORS = {
+    "RSI": "RSI",
+    "MACD": "MACD",
+    "SMI": "SMI",
+    "Stoch RSI": "STOCH_K",
+    "CCI": "CCI",
+    "Fisher": "FISHER",
+    "OBV": "OBV",
+    "CMF": "CMF",
+    "Momentum": "MOMENTUM",
+}
 
 
 def _pivot_positions(series: pd.Series, left: int, right: int, low: bool) -> list[int]:
@@ -76,7 +86,7 @@ def detect_divergences(
     range_upper: int = 60,
     max_event_age: int = 5,
 ) -> dict[str, Any]:
-    """RSI, MACD ve SMI için teyitli normal/gizli uyumsuzlukları bulur.
+    """Yön/momentum osilatörleri için teyitli normal/gizli uyumsuzlukları bulur.
 
     Pivotlar osilatörde bulunur ve fiyat aynı pivot barlarından karşılaştırılır.
     ``range_lower/range_upper`` iki pivotun mesafesidir; ``max_event_age`` ise
@@ -141,7 +151,7 @@ def detect_divergences(
         "indicators": indicators,
         "events": events,
         "settings": settings,
-        "method": "TradingView RSI pivot semantiği; normal ve gizli uyumsuzluk, osilatör 5/5 pivotlarında ve aynı barlardaki fiyatla hesaplanır. Yalnız son 5 teyit barı aktif gösterilir.",
+        "method": "TradingView RSI 5/5 pivot semantiği tüm uygun osilatörlere uygulanır; normal ve gizli uyumsuzluk aynı pivot barlarındaki fiyatla hesaplanır. Yalnız son 5 teyit barı aktif gösterilir.",
     }
 
 
