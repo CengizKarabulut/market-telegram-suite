@@ -166,9 +166,12 @@ class TestNewIndicators(unittest.TestCase):
         self.assertGreater(below.mean(), 0.95)
 
     def test_cci_zero_mean_ish(self) -> None:
-        cci = ind.cci(self.df)["CCI"].dropna()
+        out = ind.cci(self.df)
+        cci = out["CCI"].dropna()
         self.assertTrue(((cci > -600) & (cci < 600)).all())
         self.assertLess(abs(float(cci.mean())), 120)
+        expected_ma = cci.rolling(14, min_periods=14).mean().dropna()
+        pd.testing.assert_series_equal(out["CCI_ma"].dropna(), expected_ma)
 
     def test_williams_r_bounds(self) -> None:
         willr = ind.williams_r(self.df)["WILLR"].dropna()
