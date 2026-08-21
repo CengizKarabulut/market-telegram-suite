@@ -651,8 +651,30 @@ def build_technical_commentary(
     supporting, counter, clarity = _evidence_and_clarity(context, decision, direction_tone, bar_state)
     changes = _changes(data, context)
     indicator_confirmation = _indicator_confirmation(data)
+    indicator_schemas = indicator_confirmation["schemas"]
+    schema_rows = [
+        [
+            item["name"],
+            item["state"],
+            "Durum · anlam · teyit · risk",
+            " ".join([item["reading"], item["plain"], item["confirmation"], item["risk"]]),
+            item["tone"],
+        ]
+        for item in indicator_schemas
+    ]
     reconciliation = reconcile(context.get("setup_context", {}).get("setup", {"name": direction}), supporting, counter)
     analyst_note = _analyst_note(opening, context, decision, scenario, reconciliation)
+    schema_note = "\n\n".join(
+        f"{item['name']}: {item['plain']} {item['confirmation']} {item['risk']}"
+        for item in indicator_schemas
+    )
+    analyst_note += "\n\nDört gösterge şeması:\n\n" + schema_note
+    literature_note = (
+        "Araştırmalar teknik örüntülerin bazı dönemlerde bilgi taşıyabildiğini, ancak sonucun "
+        "piyasa rejimine, örnekleme, işlem maliyetlerine ve kural seçimine duyarlı olduğunu gösterir. "
+        "Bu nedenle rapor tahmin veya mekanik AL/SAT puanı değil; kapanış, bağımsız teyit ve "
+        "geçersizlik koşulları üretir."
+    )
     rs_state, rs_tone, rs_meaning = _rs_text(decision)
     setup_context = context.get("setup_context", {})
     setup = setup_context.get("setup", {})
@@ -661,7 +683,7 @@ def build_technical_commentary(
         ["Rejim", regime, f"ADX Δ {adx_delta:+.2f}", opening, context.get("regime", {}).get("tone", "warning")],
         ["Yapı / trend", f"{context.get('structure', {}).get('state', '—')} | {semantic.get('trend_quality', {}).get('state', '—')}", semantic.get("trend_quality", {}).get("spread_state", "—"), semantic.get("trend_quality", {}).get("summary", "—"), context.get("structure", {}).get("tone", "neutral")],
         ["Momentum", semantic.get("momentum_character", {}).get("state", "—"), semantic.get("momentum_character", {}).get("macd", {}).get("histogram_character", "—"), semantic.get("momentum_character", {}).get("summary", "—"), semantic.get("momentum_character", {}).get("tone", "warning")],
-        ["Gösterge teyitleri", indicator_confirmation["state"], "Aynı aile tek kanıt", indicator_confirmation["summary"], "neutral"],
+        *schema_rows,
         ["Katılım", setup_context.get("participation_reading", {}).get("state", semantic.get("participation", {}).get("state", "—")), f"RVOL {semantic.get('participation', {}).get('rvol_1', math.nan):.2f}x", setup_context.get("participation_reading", {}).get("meaning", semantic.get("participation", {}).get("summary", "—")), setup_context.get("participation_reading", {}).get("tone", "warning")],
         ["Konum", context.get("profile", {}).get("position", "—"), context.get("profile", {}).get("poc_migration", "—"), _location_text(context), context.get("profile", {}).get("tone", "neutral")],
         ["Göreceli güç", rs_state, f"Eğim5 %{_number(decision.get('relative_strength', {}).get('ratio_slope_5_pct')):+.2f}", rs_meaning, rs_tone],
@@ -677,6 +699,24 @@ def build_technical_commentary(
         bar_state,
         bool(context.get("short_history")),
     )
+    plain["sentences"].insert(
+        -1,
+        "Dört gösterge grubunun ortak özeti: "
+        + " ".join(f"{item['name'].split(' · ', 1)[0]}. grup {item['state'].casefold()}." for item in indicator_schemas),
+    )
+    plain["text"] = " ".join(plain["sentences"])
+    schema_telegram_lines: list[str] = []
+    for item in indicator_schemas:
+        schema_telegram_lines.extend(
+            [
+                item["name"],
+                item["plain"],
+                f"Şu an: {item['reading']}",
+                f"Teyit: {item['confirmation']}",
+                f"Risk / bozulma: {item['risk']}",
+                "",
+            ]
+        )
     headline = f"{stance}. {opening} Teknik okuma netliği: {clarity['state'].casefold()}."
     telegram_detail = "\n".join(
         [
@@ -686,8 +726,10 @@ def build_technical_commentary(
             "🧭 Analist Notu",
             analyst_note,
             "",
-            "📐 Gösterge Teyitleri",
-            indicator_confirmation["summary"],
+            "📐 Dört Gösterge Şeması",
+            *schema_telegram_lines,
+            "📚 Yöntem ve Literatür Notu",
+            literature_note,
             "",
             "⚖️ Neden bu okuma?",
             reconciliation,
@@ -709,7 +751,7 @@ def build_technical_commentary(
         ]
     )
     return {
-        "version": "2.1",
+        "version": "2.2",
         "setup": setup,
         "duration": setup_context.get("duration", {}),
         "reconciliation": reconciliation,
@@ -719,6 +761,9 @@ def build_technical_commentary(
         "headline": headline,
         "analyst_note": analyst_note,
         "indicator_confirmation": indicator_confirmation,
+        "indicator_schemas": indicator_schemas,
+        "literature_basis": LITERATURE_BASIS,
+        "literature_note": literature_note,
         "direction": direction,
         "regime": regime,
         "changes": changes,
@@ -736,7 +781,10 @@ def build_technical_commentary(
         "telegram_summary": headline,
         "telegram_detail": telegram_detail,
         "framework": ["Regime", "Direction", "Location", "Setup", "Trigger", "Confirmation", "Risk", "Exit"],
-        "method": "Deterministik, rejim-duyarlı teknik yorum; bağımsız kanıt aileleri kullanır ve birleşik AL/SAT puanı üretmez.",
+        "method": (
+            "Deterministik, rejim-duyarlı teknik yorum; dört kullanıcı şemasını bağımsız kanıt "
+            "aileleri olarak okur, kapanış/teyit/geçersizlik koşulları verir ve birleşik AL/SAT puanı üretmez."
+        ),
         "limitations": [
             *(
                 [
@@ -755,5 +803,6 @@ def build_technical_commentary(
             "Volume Profile ve delta alanları yaklaşık OHLCV proxy'dir; gerçek footprint değildir.",
             "Göreceli güç fon akışı değildir; RVOL kurumsal katılımı kanıtlamaz.",
             "CANLI mum kapanışa kadar değişebilir; uyumsuzluk ve swingler sağ pivot barları tamamlanınca teyit edilir.",
+            "Teknik kuralların geçmiş başarısı geleceğe taşınmayabilir; veri madenciliği ve işlem maliyetleri sonucu zayıflatabilir.",
         ],
     }
