@@ -385,56 +385,252 @@ def _short_history_note(context: dict[str, Any]) -> str:
     )
 
 
-def _indicator_confirmation(data: pd.DataFrame) -> dict[str, str]:
-    """Gösterge ailelerini sade cümleye çevirir; ayrı oy veya puan üretmez."""
+LITERATURE_BASIS = [
+    {
+        "source": "Wilder (1978), New Concepts in Technical Trading Systems",
+        "role": "RSI, ATR, ADX/DMI ve Parabolic SAR farklı soruları ölçer; tek puana indirgenmez.",
+    },
+    {
+        "source": "Brock, Lakonishok & LeBaron (1992), Journal of Finance",
+        "role": "Trend ve kırılım kuralları tarihsel örneklerde bilgi taşıyabilir; sonuç piyasa ve döneme bağlıdır.",
+    },
+    {
+        "source": "Blume, Easley & O'Hara (1994), Journal of Finance",
+        "role": "Hacim, fiyatın tek başına göstermediği katılım ve bilgi kalitesi bağlamını sağlayabilir.",
+    },
+    {
+        "source": "Lo, Mamaysky & Wang (2000), Journal of Finance",
+        "role": "Grafik örüntüleri ölçülebilir hale getirilebilir; yine de istatistiksel ve koşullu okunmalıdır.",
+    },
+    {
+        "source": "Bajgrowicz & Scaillet (2012), Journal of Financial Economics",
+        "role": "Veri madenciliği, kural seçimi ve işlem maliyetleri görünen teknik başarıyı ortadan kaldırabilir.",
+    },
+]
+
+
+def _side(up: bool, down: bool) -> str:
+    if up and not down:
+        return "up"
+    if down and not up:
+        return "down"
+    return "mixed"
+
+
+def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
+    """Dört kullanıcı şemasını durum, anlam, teyit ve risk cümlelerine çevirir.
+
+    Aynı ailedeki göstergeler oy gibi sayılmaz. Her şemada fiyat/trend ana
+    bağlamdır; ivme, volatilite ve hacim o bağlamı teyit eder veya sınırlar.
+    """
     row = data.iloc[-1]
     previous = data.iloc[-2]
-    momentum: list[str] = []
-    flow: list[str] = []
+    price = _number(row.get("Close"))
 
-    rsi_value = _number(row.get("RSI"))
-    momentum.append(
-        f"RSI {rsi_value:.1f} ile " + ("güçlü bölgede" if rsi_value >= 50 else "zayıf bölgede")
-    )
-    hist = _number(row.get("MACD_HIST"))
+    bb_mid = _number(row.get("BB_MID"))
+    bb_upper = _number(row.get("BB_UPPER"))
+    bb_lower = _number(row.get("BB_LOWER"))
+    bb_width = _number(row.get("BB_WIDTH"))
+    prev_width = _number(previous.get("BB_WIDTH"))
+    macd_hist = _number(row.get("MACD_HIST"))
     prev_hist = _number(previous.get("MACD_HIST"))
-    momentum.append(
-        "MACD yükseliş ivmesi " + ("artıyor" if hist > prev_hist else "azalıyor")
-        if hist >= 0
-        else "MACD düşüş baskısı " + ("azalıyor" if hist > prev_hist else "artıyor")
+    smi = _number(row.get("SMI"))
+    smi_signal = _number(row.get("SMI_EMA"))
+    obv = _number(row.get("OBV"))
+    obv_ma = _number(row.get("OBV_SMA"))
+    bb_side = _side(price > bb_mid, price < bb_mid)
+    impulse_side = _side(macd_hist > 0 and smi > smi_signal, macd_hist < 0 and smi < smi_signal)
+    flow_side = _side(obv > obv_ma, obv < obv_ma)
+    schema1_side = bb_side if bb_side == impulse_side == flow_side else "mixed"
+    schema1_tone = {"up": "positive", "down": "negative"}.get(schema1_side, "warning")
+    band_position = (
+        "üst bandın üzerinde" if price > bb_upper
+        else "alt bandın altında" if price < bb_lower
+        else "orta çizginin üzerinde" if price > bb_mid
+        else "orta çizginin altında"
     )
-    momentum.append(
-        "SMI sinyalinin üzerinde" if _number(row.get("SMI")) > _number(row.get("SMI_EMA"))
-        else "SMI sinyalinin altında"
+    width_state = "genişliyor" if bb_width > prev_width else "daralıyor"
+    macd_state = (
+        "pozitif bölgede ve güçleniyor" if macd_hist >= 0 and macd_hist > prev_hist
+        else "pozitif ama ivme kaybediyor" if macd_hist >= 0
+        else "negatif bölgede fakat baskı azalıyor" if macd_hist > prev_hist
+        else "negatif bölgede ve baskı artıyor"
     )
-    momentum.append(
-        "Stokastik RSI kısa vadede yukarı dönük"
-        if _number(row.get("STOCH_K")) > _number(row.get("STOCH_D"))
-        else "Stokastik RSI kısa vadede aşağı dönük"
-    )
-    momentum.append(
-        "Fisher tetik çizgisinin üzerinde"
-        if _number(row.get("FISHER")) > _number(row.get("FISHER_TRIGGER"))
-        else "Fisher tetik çizgisinin altında"
-    )
-    momentum.append(
-        "10 barlık momentum pozitif"
-        if _number(row.get("MOMENTUM")) > 0
-        else "10 barlık momentum negatif"
-    )
+    schema1 = {
+        "name": "1 · Bollinger / MACD / SMI / OBV",
+        "state": {
+            "up": "Fiyat, ivme ve hacim yukarı yönde uyumlu",
+            "down": "Fiyat, ivme ve hacim aşağı yönde uyumlu",
+        }.get(schema1_side, "Fiyat, ivme ve hacim aynı şeyi söylemiyor"),
+        "tone": schema1_tone,
+        "reading": (
+            f"Fiyat {_fmt(price)} ile Bollinger {band_position}; bant alanı {width_state}. "
+            f"MACD histogramı {_fmt(macd_hist)} ve {macd_state}. "
+            f"SMI {_fmt(smi)}, sinyal çizgisi {_fmt(smi_signal)}; "
+            f"OBV {_fmt(obv, 0)}, SMA14 {_fmt(obv_ma, 0)}."
+        ),
+        "plain": (
+            "Bu grup hareketin yalnız yönüne değil, hareketin hız kazanıp kazanmadığına "
+            "ve işlem hacminin fiyatı destekleyip desteklemediğine bakar. "
+            + (
+                "Üç katman şu an birbirini destekliyor."
+                if schema1_side != "mixed"
+                else "Katmanlar ayrıştığı için tek başına güvenilir bir yön mesajı yok."
+            )
+        ),
+        "confirmation": (
+            "Teyit için fiyatın Bollinger orta çizgisinin aynı tarafında kapanması, "
+            "MACD/SMI ivmesinin o yönde sürmesi ve OBV'nin kendi ortalamasınca desteklenmesi gerekir."
+        ),
+        "risk": (
+            "Fiyat ilerlerken OBV geriler veya MACD histogramı ters yönde daralırsa hareketin "
+            "katılımı zayıf olabilir; bant dışına kısa süreli taşma tek başına kırılım sayılmaz."
+        ),
+    }
 
-    flow.append(
-        "CMF para akışı pozitif" if _number(row.get("CMF")) > 0 else "CMF para akışı negatif"
-    )
-    flow.append(
-        "OBV kendi SMA14 çizgisinin üzerinde"
-        if _number(row.get("OBV")) > _number(row.get("OBV_SMA"))
-        else "OBV kendi SMA14 çizgisinin altında"
+    span_a = _number(row.get("VISIBLE_SPAN_A"))
+    span_b = _number(row.get("VISIBLE_SPAN_B"))
+    cloud_top, cloud_bottom = max(span_a, span_b), min(span_a, span_b)
+    rsi = _number(row.get("RSI"))
+    rsi_ma = _number(row.get("RSI_MA"))
+    cci = _number(row.get("CCI"))
+    cci_ma = _number(row.get("CCI_MA"))
+    atr_pct = _number(row.get("ATR_PCT"))
+    cloud_side = _side(price > cloud_top, price < cloud_bottom)
+    oscillator_side = _side(rsi > 50 and cci > 0, rsi < 50 and cci < 0)
+    schema2_side = cloud_side if cloud_side == oscillator_side else "mixed"
+    schema2_tone = {"up": "positive", "down": "negative"}.get(schema2_side, "warning")
+    cloud_state = "bulutun üzerinde" if price > cloud_top else "bulutun altında" if price < cloud_bottom else "bulutun içinde"
+    schema2 = {
+        "name": "2 · Ichimoku / RSI / CCI / ATR",
+        "state": {
+            "up": "Ana yön ve momentum yukarı yönde uyumlu",
+            "down": "Ana yön ve momentum aşağı yönde uyumlu",
+        }.get(schema2_side, "Ana yön ile momentum arasında ayrışma var"),
+        "tone": schema2_tone,
+        "reading": (
+            f"Fiyat {cloud_state}. RSI {_fmt(rsi)} (SMA14 {_fmt(rsi_ma)}), "
+            f"CCI {_fmt(cci)} (SMA14 {_fmt(cci_ma)}), ATR% {_fmt(atr_pct)}."
+        ),
+        "plain": (
+            "Ichimoku büyük resmi, RSI ve CCI hareketin itiş gücünü, ATR ise fiyatın ne kadar "
+            "oynak olduğunu anlatır. ATR yön söylemez; beklenebilecek dalga boyunu gösterir. "
+            + (
+                "Yön ile itiş gücü aynı tarafta."
+                if schema2_side != "mixed"
+                else "Büyük resim ile kısa vadeli güç aynı tarafta olmadığı için acele yorum yapılmamalı."
+            )
+        ),
+        "confirmation": (
+            "Teyit için fiyatın bulut dışında kapanışlarını koruması, RSI'ın 50'nin ve CCI'ın "
+            "sıfırın aynı tarafında kalması gerekir."
+        ),
+        "risk": (
+            "Fiyat bulut içine dönerse yön avantajı zayıflar. ATR yükselirken seviyeler korunamıyorsa "
+            "bu güçten çok belirsizlik ve daha geniş fiyat salınımı anlamına gelebilir."
+        ),
+    }
+
+    psar = _number(row.get("PSAR"))
+    stoch_k = _number(row.get("STOCH_K"))
+    stoch_d = _number(row.get("STOCH_D"))
+    vwap = _number(row.get("VWAP"))
+    adx = _number(row.get("ADX"))
+    plus_di = _number(row.get("PLUS_DI"))
+    minus_di = _number(row.get("MINUS_DI"))
+    base_side = _side(price > psar and price > vwap, price < psar and price < vwap)
+    timing_side = _side(stoch_k > stoch_d and plus_di > minus_di, stoch_k < stoch_d and minus_di > plus_di)
+    schema3_side = base_side if base_side == timing_side else "mixed"
+    strong_trend = adx >= 25
+    schema3_tone = {"up": "positive", "down": "negative"}.get(schema3_side, "warning")
+    if schema3_side != "mixed" and not strong_trend:
+        schema3_tone = "neutral"
+    schema3 = {
+        "name": "3 · Parabolic SAR / Stoch RSI / Auto AVWAP / ADX-DMI",
+        "state": {
+            "up": "Yukarı yönlü takip koşulları uyumlu" if strong_trend else "Yukarı eğilim var, yön gücü henüz sınırlı",
+            "down": "Aşağı yönlü takip koşulları uyumlu" if strong_trend else "Aşağı eğilim var, yön gücü henüz sınırlı",
+        }.get(schema3_side, "Takip yönü ve kısa vadeli zamanlama ayrışıyor"),
+        "tone": schema3_tone,
+        "reading": (
+            f"Fiyat {_fmt(price)}; SAR {_fmt(psar)}, Auto AVWAP {_fmt(vwap)}. "
+            f"Stoch RSI K/D {_fmt(stoch_k)}/{_fmt(stoch_d)}; "
+            f"ADX {_fmt(adx)}, +DI {_fmt(plus_di)}, -DI {_fmt(minus_di)}."
+        ),
+        "plain": (
+            "SAR ve hacim ağırlıklı ortalama fiyatın hangi tarafında kalındığını, Stoch RSI kısa "
+            "vadeli dönüş zamanlamasını, ADX/DMI ise ortada gerçekten güçlü bir yön olup olmadığını anlatır. "
+            + (
+                "Yön bileşenleri uyumlu ve ADX yönün belirgin olduğunu gösteriyor."
+                if schema3_side != "mixed" and strong_trend
+                else "Bu nedenle mevcut hareket henüz tam bir trend teyidi sayılmıyor."
+            )
+        ),
+        "confirmation": (
+            "Teyit için fiyatın SAR ve Auto AVWAP'ın aynı tarafında kapanması, ilgili DI çizgisinin "
+            "üstün kalması ve ADX'in tercihen 25 üzerinde yükselmesi gerekir."
+        ),
+        "risk": (
+            "Stoch RSI aşırı bölgedeyken tek kesişim yanıltıcı olabilir. ADX düşükse SAR sık yön "
+            "değiştirir; AVWAP'ın çevresindeki gidip gelmeler trend yerine dengeye işaret edebilir."
+        ),
+    }
+
+    supertrend = _number(row.get("SUPERTREND"))
+    fisher = _number(row.get("FISHER"))
+    fisher_trigger = _number(row.get("FISHER_TRIGGER"))
+    cmf = _number(row.get("CMF"))
+    momentum = _number(row.get("MOMENTUM"))
+    trend_side = _side(price > supertrend, price < supertrend)
+    internal_side = _side(fisher > fisher_trigger and cmf > 0 and momentum > 0, fisher < fisher_trigger and cmf < 0 and momentum < 0)
+    schema4_side = trend_side if trend_side == internal_side else "mixed"
+    schema4_tone = {"up": "positive", "down": "negative"}.get(schema4_side, "warning")
+    schema4 = {
+        "name": "4 · Supertrend / Fisher / CMF / Momentum",
+        "state": {
+            "up": "Trend, dönüş ölçümü ve para akışı yukarı yönde uyumlu",
+            "down": "Trend, dönüş ölçümü ve para akışı aşağı yönde uyumlu",
+        }.get(schema4_side, "Trend ile dönüş/para akışı teyitleri ayrışıyor"),
+        "tone": schema4_tone,
+        "reading": (
+            f"Fiyat {_fmt(price)}, Supertrend {_fmt(supertrend)}. Fisher/Trigger "
+            f"{_fmt(fisher)}/{_fmt(fisher_trigger)}, CMF {_fmt(cmf)}, Momentum10 {_fmt(momentum)}."
+        ),
+        "plain": (
+            "Supertrend izlenen ana yönü, Fisher olası dönüş hızını, CMF para giriş-çıkış dengesini, "
+            "Momentum ise fiyatın 10 bar öncesine göre ilerleyip ilerlemediğini gösterir. "
+            + (
+                "Dört bileşen aynı yönü destekliyor."
+                if schema4_side != "mixed"
+                else "Ana yön ile iç güç aynı şeyi söylemediği için hareketin devamı henüz net değil."
+            )
+        ),
+        "confirmation": (
+            "Teyit için fiyatın Supertrend'in aynı tarafında kalması, Fisher'ın tetik çizgisiyle, "
+            "CMF'nin sıfır çizgisiyle ve Momentum'un yönüyle uyumunu koruması gerekir."
+        ),
+        "risk": (
+            "Fisher hızlı dönebilir ve tek başına erken sinyal üretebilir. CMF veya Momentum ana "
+            "trendi desteklemiyorsa fiyat hareketi katılımsız ya da yorulmaya açık olabilir."
+        ),
+    }
+    return [schema1, schema2, schema3, schema4]
+
+
+def _indicator_confirmation(data: pd.DataFrame) -> dict[str, Any]:
+    """Dört şemanın açıklamasını korur; ayrı oy veya birleşik puan üretmez."""
+    schemas = _indicator_schemas(data)
+    summary = " ".join(
+        f"{item['name'].split(' · ', 1)[0]}. grup: {item['state']}." for item in schemas
     )
     return {
-        "state": "Momentum ve para akışı birlikte okunur",
-        "summary": "; ".join(momentum) + ". Para akışı: " + "; ".join(flow) + ".",
-        "method": "Aynı ailedeki göstergeler bağımsız oy gibi toplanmaz; yön, ivme ve para akışı teyitleri olarak açıklanır.",
+        "state": "Dört gösterge grubu koşullu olarak birlikte okunur",
+        "summary": summary,
+        "schemas": schemas,
+        "method": (
+            "Her grupta fiyat/trend ana bağlamdır; ivme, volatilite ve hacim teyit veya risk "
+            "olarak kullanılır. Gruplar AL/SAT oyu gibi toplanmaz."
+        ),
     }
 
 
