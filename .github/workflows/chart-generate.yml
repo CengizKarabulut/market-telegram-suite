@@ -59,6 +59,7 @@ jobs:
             --interval "${{ inputs.interval }}" \
             --views "${{ inputs.views }}" \
             --theme "${{ inputs.theme }}" \
+            --grid 0 \
             --outdir out \
             $SEND_FLAG
       - name: Çıktıları sakla
