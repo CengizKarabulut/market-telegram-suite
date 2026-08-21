@@ -98,31 +98,35 @@ VIEWS: tuple[View, ...] = (
     # Onceki dort kapsamli sema secilebilir gorunum olarak korunur.
     View(
         key="bollinger_macd",
-        title="Bollinger · Momentum · Hacim",
-        keys=("bbands", "macd", "smi", "obv"),
+        title="Bollinger · MACD · SMI · OBV",
+        keys=("bbands", "macd", "smi", "obv", "candles"),
         note="Bollinger 20/2 · MACD 12/26/9 · SMI 10/3/3 · OBV SMA14+BB2",
-        price_height=3.4,
+        price_height=2.8,
+        panel_scale=1.30,
     ),
     View(
         key="ichimoku_rsi",
-        title="Ichimoku · Momentum · Volatilite",
-        keys=("ichimoku", "rsi", "cci", "atr"),
+        title="Ichimoku · RSI · CCI · ATR",
+        keys=("ichimoku", "rsi", "cci", "atr", "candles"),
         note="Ichimoku 9/26/52/26 · RSI 14/SMA14 · CCI 20/SMA14 · ATR RMA14",
-        price_height=3.4,
+        price_height=2.8,
+        panel_scale=1.30,
     ),
     View(
         key="sar_vwap",
-        title="SAR · VWAP · Yön Gücü",
-        keys=("sar", "vwap", "stochrsi", "adx"),
-        note="Parabolic SAR · VWAP bantları · Stoch RSI · ADX/DMI 14",
-        price_height=3.4,
+        title="Parabolic SAR · Stoch RSI · Auto AVWAP · ADX/DMI",
+        keys=("sar", "vwap", "stochrsi", "adx", "candles"),
+        note="Parabolic SAR · Stoch RSI 14/14/3/3 · Auto AVWAP 1/2/3σ · ADX/DMI 14",
+        price_height=2.8,
+        panel_scale=1.45,
     ),
     View(
         key="supertrend_fisher",
-        title="Supertrend · Para Akışı · Momentum",
-        keys=("supertrend", "fisher", "cmf", "momentum"),
+        title="Supertrend · Fisher · CMF · Momentum",
+        keys=("supertrend", "fisher", "cmf", "momentum", "candles"),
         note="Supertrend 10/3 · Fisher 9 · CMF 20 · Momentum 10",
-        price_height=3.4,
+        price_height=2.8,
+        panel_scale=1.30,
     ),
     View(
         key="klasik",
@@ -171,14 +175,10 @@ VIEWS: tuple[View, ...] = (
 
 # TradingView referanslarina gore Telegram'a ayri PNG olarak gonderilen seri.
 GRID_SET: tuple[str, ...] = (
-    "tv_macd_smi",
-    "tv_fisher_rsi",
-    "tv_candles_cci",
-    "tv_ichimoku_obv",
-    "tv_dmi_momentum",
-    "tv_vwap_stochrsi",
-    "tv_sar_cmf",
-    "tv_atr",
+    "bollinger_macd",
+    "ichimoku_rsi",
+    "sar_vwap",
+    "supertrend_fisher",
 )
 
 VIEWS_BY_KEY: dict[str, View] = {v.key: v for v in VIEWS}
