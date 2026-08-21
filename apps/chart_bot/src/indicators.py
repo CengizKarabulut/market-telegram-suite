@@ -90,6 +90,54 @@ def atr(df: pd.DataFrame, length: int = 14) -> pd.Series:
     return rma(true_range(df), length)
 
 
+def confirmed_divergence_lines(
+    df: pd.DataFrame,
+    oscillator: pd.Series,
+    prefix: str,
+    left: int = 5,
+    right: int = 5,
+    range_lower: int = 5,
+    range_upper: int = 60,
+) -> dict[str, pd.Series]:
+    """TradingView RSI semantiğiyle teyitli normal Bull/Bear çizgileri."""
+    values = oscillator.to_numpy(dtype="float64")
+    bull = np.full(len(df), np.nan)
+    bear = np.full(len(df), np.nan)
+    bull_points = np.full(len(df), np.nan)
+    bear_points = np.full(len(df), np.nan)
+    lows: list[int] = []
+    highs: list[int] = []
+    for position in range(left, len(values) - right):
+        window = values[position - left : position + right + 1]
+        if not np.isfinite(window).all():
+            continue
+        neighbours = np.concatenate((window[:left], window[left + 1 :]))
+        if values[position] < np.min(neighbours):
+            lows.append(position)
+        if values[position] > np.max(neighbours):
+            highs.append(position)
+
+    for first, second in zip(lows, lows[1:]):
+        if not range_lower <= second - first <= range_upper:
+            continue
+        if df["Low"].iloc[second] < df["Low"].iloc[first] and values[second] > values[first]:
+            bull[first : second + 1] = np.linspace(values[first], values[second], second - first + 1)
+            bull_points[second] = values[second]
+    for first, second in zip(highs, highs[1:]):
+        if not range_lower <= second - first <= range_upper:
+            continue
+        if df["High"].iloc[second] > df["High"].iloc[first] and values[second] < values[first]:
+            bear[first : second + 1] = np.linspace(values[first], values[second], second - first + 1)
+            bear_points[second] = values[second]
+
+    return {
+        f"{prefix}_div_bull": pd.Series(bull, index=df.index),
+        f"{prefix}_div_bear": pd.Series(bear, index=df.index),
+        f"{prefix}_div_bull_points": pd.Series(bull_points, index=df.index),
+        f"{prefix}_div_bear_points": pd.Series(bear_points, index=df.index),
+    }
+
+
 # --------------------------------------------------------------------------
 # 1. Hareketli ortalamalar (tek "ortalama" gostergesi)
 # --------------------------------------------------------------------------
@@ -384,7 +432,9 @@ def rsi(
     value = 100.0 - (100.0 / (1.0 + rs))
     # avg_loss == 0 iken RSI tanim geregi 100
     value = value.where(~((avg_loss == 0) & avg_gain.notna()), 100.0)
-    return {"RSI": value, "RSI_ma": sma(value, signal_length)}
+    result = {"RSI": value, "RSI_ma": sma(value, signal_length)}
+    result.update(confirmed_divergence_lines(df, value, "RSI"))
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -405,7 +455,9 @@ def macd(
     signal_calculator = ema if signal_ma.upper() == "EMA" else sma
     line = oscillator(close, fast) - oscillator(close, slow)
     sig = signal_calculator(line, signal)
-    return {"MACD": line, "MACD_signal": sig, "MACD_hist": line - sig}
+    result = {"MACD": line, "MACD_signal": sig, "MACD_hist": line - sig}
+    result.update(confirmed_divergence_lines(df, line, "MACD"))
+    return result
 
 
 def stochastic_momentum_index(
@@ -422,7 +474,9 @@ def stochastic_momentum_index(
     double_relative = ema(ema(relative, d_length), d_length)
     double_range = ema(ema(price_range, d_length), d_length)
     value = 200.0 * double_relative / double_range.replace(0, np.nan)
-    return {"SMI": value, "SMI_signal": ema(value, ema_length)}
+    result = {"SMI": value, "SMI_signal": ema(value, ema_length)}
+    result.update(confirmed_divergence_lines(df, value, "SMI"))
+    return result
 
 
 def fisher_transform(df: pd.DataFrame, length: int = 9) -> dict[str, pd.Series]:
@@ -443,7 +497,9 @@ def fisher_transform(df: pd.DataFrame, length: int = 9) -> dict[str, pd.Series]:
         previous_fisher = fisher[i - 1] if i and np.isfinite(fisher[i - 1]) else 0.0
         fisher[i] = 0.5 * np.log((1.0 + value) / (1.0 - value)) + 0.5 * previous_fisher
     line = pd.Series(fisher, index=df.index, dtype="float64")
-    return {"FISHER": line, "FISHER_trigger": line.shift(1)}
+    result = {"FISHER": line, "FISHER_trigger": line.shift(1)}
+    result.update(confirmed_divergence_lines(df, line, "FISHER"))
+    return result
 
 
 def chaikin_money_flow(df: pd.DataFrame, length: int = 20) -> dict[str, pd.Series]:
@@ -452,13 +508,19 @@ def chaikin_money_flow(df: pd.DataFrame, length: int = 20) -> dict[str, pd.Serie
     multiplier = ((df["Close"] - df["Low"]) - (df["High"] - df["Close"])) / span
     money_flow = multiplier.fillna(0.0) * df["Volume"].fillna(0.0)
     volume = df["Volume"].rolling(length, min_periods=length).sum().replace(0, np.nan)
-    return {"CMF": money_flow.rolling(length, min_periods=length).sum() / volume}
+    value = money_flow.rolling(length, min_periods=length).sum() / volume
+    result = {"CMF": value}
+    result.update(confirmed_divergence_lines(df, value, "CMF"))
+    return result
 
 
 def momentum(df: pd.DataFrame, length: int = 10) -> dict[str, pd.Series]:
     """TradingView Momentum: source - source[length]."""
     close = df["Close"]
-    return {"MOM": close - close.shift(length)}
+    value = close - close.shift(length)
+    result = {"MOM": value}
+    result.update(confirmed_divergence_lines(df, value, "MOM"))
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -479,7 +541,9 @@ def stoch_rsi(
     raw = 100.0 * (base - lowest) / (highest - lowest).replace(0, np.nan)
     k = sma(raw, k_smooth)
     d = sma(k, d_smooth)
-    return {"SRSI_k": k, "SRSI_d": d}
+    result = {"SRSI_k": k, "SRSI_d": d}
+    result.update(confirmed_divergence_lines(df, k, "SRSI"))
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -580,7 +644,10 @@ def cci(df: pd.DataFrame, length: int = 20) -> dict[str, pd.Series]:
     mad = tp.rolling(length, min_periods=length).apply(
         lambda w: np.abs(w - w.mean()).mean(), raw=True
     )
-    return {"CCI": (tp - ma) / (0.015 * mad.replace(0, np.nan))}
+    value = (tp - ma) / (0.015 * mad.replace(0, np.nan))
+    result = {"CCI": value}
+    result.update(confirmed_divergence_lines(df, value, "CCI"))
+    return result
 
 
 def williams_r(df: pd.DataFrame, length: int = 14) -> dict[str, pd.Series]:
@@ -661,12 +728,14 @@ def obv(
     else:
         smoothing = pd.Series(np.nan, index=df.index, dtype="float64")
     deviation = value.rolling(signal_length, min_periods=signal_length).std(ddof=0) * bb_mult
-    return {
+    result = {
         "OBV": value,
         "OBV_ma": smoothing,
         "OBV_upper": smoothing + deviation,
         "OBV_lower": smoothing - deviation,
     }
+    result.update(confirmed_divergence_lines(df, value, "OBV"))
+    return result
 
 
 def volume_profile(df: pd.DataFrame, bins: int = 48) -> dict[str, pd.Series]:
