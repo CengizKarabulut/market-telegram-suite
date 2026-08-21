@@ -58,7 +58,12 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - name: Raporu üret
         run: |
-          python -m src.stock_dashboard +            --ticker "${{ inputs.ticker }}" +            --market "${{ inputs.market }}" +            --provider "${{ inputs.provider }}" +            --interval "${{ inputs.interval }}" +            --report-detail "${{ inputs.report_detail }}"
+          python -m src.stock_dashboard \
+            --ticker "${{ inputs.ticker }}" \
+            --market "${{ inputs.market }}" \
+            --provider "${{ inputs.provider }}" \
+            --interval "${{ inputs.interval }}" \
+            --report-detail "${{ inputs.report_detail }}"
       - name: Telegram'a gönder
         if: inputs.send_telegram
         env:
