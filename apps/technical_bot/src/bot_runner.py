@@ -72,6 +72,8 @@ DISPATCH_RETRY_SECONDS = 300.0
 # Takip kontrolü her turda değil, belirli aralıklarla yapılır; her sembol için
 # bir indirme isteği gittiği için sık kontrol sağlayıcıyı gereksiz yorar.
 WATCH_CHECK_SECONDS = 600.0
+BOT_WORKFLOW_FILE = os.getenv("BOT_WORKFLOW_FILE", "technical-bot.yml")
+SCAN_WORKFLOW_FILE = os.getenv("SCAN_WORKFLOW_FILE", "technical-scan.yml")
 _last_dispatch_attempt = 0.0
 _last_watch_check = 0.0
 
@@ -95,7 +97,7 @@ def dispatch_scan(intervals: str) -> tuple[bool, str]:
     if not token or not repository:
         return False, "Tarama tetiklenemedi: GitHub kimlik bilgisi yok."
     response = requests.post(
-        f"https://api.github.com/repos/{repository}/actions/workflows/scheduled-watchlist.yml/dispatches",
+        f"https://api.github.com/repos/{repository}/actions/workflows/{SCAN_WORKFLOW_FILE}/dispatches",
         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
         json={
             "ref": os.getenv("GITHUB_REF_NAME", "main"),
@@ -451,13 +453,13 @@ def restart_self() -> None:
     dinleme zinciri koşudan koşuya devredilir; cron yalnızca zincir koptuğunda
     devreye giren emniyet ağıdır.
     """
-    token = os.getenv("GITHUB_TOKEN", "")
+    token = os.getenv("GH_PAT", "").strip() or os.getenv("GITHUB_TOKEN", "").strip()
     repository = os.getenv("GITHUB_REPOSITORY", "")
     if not token or not repository:
         print("Kendini yeniden tetikleyemedi: GitHub kimlik bilgisi yok.")
         return
     response = requests.post(
-        f"https://api.github.com/repos/{repository}/actions/workflows/telegram-bot.yml/dispatches",
+        f"https://api.github.com/repos/{repository}/actions/workflows/{BOT_WORKFLOW_FILE}/dispatches",
         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
         json={"ref": os.getenv("GITHUB_REF_NAME", "main")},
         timeout=30,

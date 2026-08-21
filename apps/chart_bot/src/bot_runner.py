@@ -36,7 +36,7 @@ import requests
 
 from . import bot
 
-WORKFLOW_FILE = os.environ.get("BOT_WORKFLOW_FILE", "telegram-bot.yml")
+WORKFLOW_FILE = os.environ.get("BOT_WORKFLOW_FILE", "chart-bot.yml")
 
 
 def _restart_token() -> tuple[str, str] | None:

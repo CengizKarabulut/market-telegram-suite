@@ -45,6 +45,7 @@ class Command:
     user_id: int
     user_name: str
     update_id: int
+    message_thread_id: int | None = None
 
 
 def load_offset(path: Path = OFFSET_PATH) -> int:
@@ -80,6 +81,11 @@ def parse_command(update: dict[str, Any]) -> Command | None:
         user_id=int(sender.get("id", 0)),
         user_name=str(sender.get("username") or sender.get("first_name") or "bilinmiyor"),
         update_id=int(update.get("update_id", 0)),
+        message_thread_id=(
+            int(message["message_thread_id"])
+            if message.get("message_thread_id") is not None
+            else None
+        ),
     )
 
 
@@ -92,7 +98,27 @@ def allowed_users() -> set[int]:
 
 
 def is_authorized(command: Command, allowed: set[int]) -> bool:
-    return not allowed or command.user_id in allowed
+    """Kullanıcı, sohbet ve forum konusu kısıtlarını birlikte uygular."""
+    if allowed and command.user_id not in allowed:
+        return False
+
+    expected_chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if expected_chat:
+        try:
+            if command.chat_id != int(expected_chat):
+                return False
+        except ValueError:
+            return False
+
+    expected_thread = os.getenv("TELEGRAM_MESSAGE_THREAD_ID", "").strip()
+    if expected_thread:
+        try:
+            if command.message_thread_id != int(expected_thread):
+                return False
+        except ValueError:
+            return False
+
+    return True
 
 
 def fetch_updates(token: str, offset: int, timeout: int = 10, long_poll: int = 0) -> list[dict[str, Any]]:

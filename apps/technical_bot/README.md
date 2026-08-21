@@ -24,7 +24,9 @@ Forum konu kimliği, hedef konu bağlantısının sonundaki sayıdan alınır: `
 1. Telegram'da `@BotFather` üzerinden bir bot oluşturun.
 2. Botu hedef gruba ekleyip mesaj ve fotoğraf gönderme yetkisi verin.
 3. GitHub reposunda **Settings → Secrets and variables → Actions** bölümünü açın.
-4. `TELEGRAM_BOT_TOKEN` adlı repository secret oluşturup BotFather token'ını kaydedin.
+4. `TECHNICAL_BOT_TOKEN` adlı repository secret oluşturup BotFather token'ını kaydedin.
+5. Ortak grup için `TELEGRAM_CHAT_ID`, bu botun forum konusu için
+   `TECHNICAL_TOPIC_ID` secret'larını tanımlayın.
 
 Token'ı hiçbir dosyaya, issue'ya veya Actions loguna yazmayın.
 

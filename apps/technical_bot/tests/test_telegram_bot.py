@@ -67,6 +67,28 @@ class AuthorizationTests(unittest.TestCase):
     def test_unlisted_user_is_rejected(self) -> None:
         self.assertFalse(is_authorized(self._command(7), {42}))
 
+    def test_rejects_command_from_another_chat(self) -> None:
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "-200"}, clear=False):
+            self.assertFalse(is_authorized(self._command(1), set()))
+
+    def test_rejects_command_from_another_topic(self) -> None:
+        command = Command("rapor", ["THYAO"], -100, 1, "test", 1, 99)
+        with patch.dict(
+            os.environ,
+            {"TELEGRAM_CHAT_ID": "-100", "TELEGRAM_MESSAGE_THREAD_ID": "3982"},
+            clear=False,
+        ):
+            self.assertFalse(is_authorized(command, set()))
+
+    def test_accepts_command_from_configured_topic(self) -> None:
+        command = Command("rapor", ["THYAO"], -100, 1, "test", 1, 3982)
+        with patch.dict(
+            os.environ,
+            {"TELEGRAM_CHAT_ID": "-100", "TELEGRAM_MESSAGE_THREAD_ID": "3982"},
+            clear=False,
+        ):
+            self.assertTrue(is_authorized(command, set()))
+
     def test_allowlist_is_read_from_environment(self) -> None:
         with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "42, 43 44"}, clear=True):
             self.assertEqual(allowed_users(), {42, 43, 44})

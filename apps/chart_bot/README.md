@@ -320,7 +320,8 @@ Token'ı bilen biri botu kendi grubuna ekleyebilir; o gruptan gelen komutlara bo
 
 ### Botu sürekli çalışır tutmak
 
-**GitHub Actions üzerinde zincir (önerilen).** `.github/workflows/telegram-bot.yml`
+**GitHub Actions üzerinde zincir (önerilen).** Monorepo kökündeki
+`.github/workflows/chart-bot.yml`
 tek koşu içinde **50 dakika boyunca sürekli dinler**, süre dolunca kendini yeniden
 tetikler ve zincir devam eder. Komutlara saniyeler içinde cevap gelir.
 
@@ -328,15 +329,17 @@ Sık cron (`*/5 * * * *`) kullanılmamasının sebebi: GitHub'ın beş dakikalı
 pratikte çoğu zaman atlanır, komutlar dakikalarca cevapsız kalır. Buradaki saatlik cron
 yalnızca zincir koparsa (hata, iptal, kota) devreye giren emniyet ağıdır.
 
-Gerekli secret'lar: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_TOPIC_ID` ve
-zincir için `GH_PAT`.
+Gerekli repository secret'ları: `CHART_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+`CHART_TOPIC_ID` ve zincir için `GH_PAT`. Workflow bu değerleri uygulamanın
+beklediği ortam değişkenlerine eşler.
 
 > **`GH_PAT` neden gerekli:** GitHub, `GITHUB_TOKEN` ile tetiklenen olayların yeni koşu
 > başlatmasını engeller (sonsuz döngü koruması). Zincirin sürmesi için `actions: write`
 > yetkili bir kişisel erişim jetonu gerekir. Tanımlı değilse koşu biter ve cron bir
 > sonraki saat başında yeniden başlatır — bot çalışır ama saatte bir kopar.
 
-Zinciri **bir kez elle başlatmak** gerekir: `Actions → Telegram Komut Botu → Run workflow`.
+Zinciri **bir kez elle başlatmak** gerekir:
+`Actions → Grafik Telegram Botu → Run workflow`.
 Koşu 50 dakika "çalışıyor" görünür; bu normal, dinliyor demektir. Durdurmak için çalışan
 koşuyu iptal edin (cron bir sonraki saat başında yeniden başlatır) ya da workflow'u
 Actions sekmesinden devre dışı bırakın.
@@ -356,8 +359,8 @@ python -m src.bot --once          # bekleyenleri işle ve çık
 Açılışta otomatik başlatmak için Görev Zamanlayıcı:
 
 ```powershell
-$exe = "$HOME\Documents\Codex\market-chart-lab\.venv\Scripts\python.exe"
-$dir = "$HOME\Documents\Codex\market-chart-lab"
+$exe = "$HOME\Documents\Codex\market-telegram-suite\apps\chart_bot\.venv\Scripts\python.exe"
+$dir = "$HOME\Documents\Codex\market-telegram-suite\apps\chart_bot"
 $action  = New-ScheduledTaskAction -Execute $exe -Argument "-m src.bot" -WorkingDirectory $dir
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 Register-ScheduledTask -TaskName "MarketChartLabBot" -Action $action -Trigger $trigger
@@ -369,7 +372,8 @@ Register-ScheduledTask -TaskName "MarketChartLabBot" -Action $action -Trigger $t
 Çıktılar hem artifact olarak yüklenir hem de istenirse Telegram'a gönderilir. Izgara görseli
 geniş olduğu için Telegram'a **dosya olarak** gönderilir; fotoğraf olarak gönderilse Telegram
 uzun kenarı ~1280 piksele indirir ve yazılar okunmaz hale gelir.
-`TELEGRAM_BOT_TOKEN` ve `TELEGRAM_CHAT_ID` depo secret'ı olarak tanımlanmalıdır.
+`CHART_BOT_TOKEN`, `TELEGRAM_CHAT_ID` ve `CHART_TOPIC_ID` depo secret'ı
+olarak tanımlanmalıdır.
 
 ## Testler
 
