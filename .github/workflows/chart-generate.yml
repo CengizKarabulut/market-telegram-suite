@@ -54,7 +54,12 @@ jobs:
         run: |
           SEND_FLAG=""
           if [ "${{ inputs.send_telegram }}" = "true" ]; then SEND_FLAG="--telegram"; fi
-          python -m src.cli +            --symbol "${{ inputs.symbol }}" +            --interval "${{ inputs.interval }}" +            --views "${{ inputs.views }}" +            --theme "${{ inputs.theme }}" +            --outdir out +            $SEND_FLAG
+          python -m src.cli \
+            --symbol "${{ inputs.symbol }}" \
+            --interval "${{ inputs.interval }}" \
+            --views "${{ inputs.views }}" \
+            --theme "${{ inputs.theme }}" \
+            --outdir out +            $SEND_FLAG
       - name: Çıktıları sakla
         uses: actions/upload-artifact@v7
         with:
