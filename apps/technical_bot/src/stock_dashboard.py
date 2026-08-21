@@ -19,9 +19,9 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from src.candlestick_patterns import detect_candlestick_patterns
 from src.analyst_card import render_analyst_cards, standardize_pages
 from src.bar_state import build_bar_state
+from src.candlestick_patterns import detect_candlestick_patterns
 from src.decision_context import build_decision_context
 from src.intervals import (
     ABSOLUTE_MINIMUM_BARS,
