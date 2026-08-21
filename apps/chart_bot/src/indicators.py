@@ -26,6 +26,15 @@ def ema(series: pd.Series, length: int) -> pd.Series:
     return series.ewm(span=length, adjust=False, min_periods=length).mean()
 
 
+def wma(series: pd.Series, length: int) -> pd.Series:
+    """TradingView ta.wma: en yeni bara en buyuk agirlik verilir."""
+    weights = np.arange(1.0, length + 1.0)
+    denominator = float(weights.sum())
+    return series.rolling(length, min_periods=length).apply(
+        lambda values: float(np.dot(values, weights) / denominator), raw=True
+    )
+
+
 def rma(series: pd.Series, length: int) -> pd.Series:
     """Wilder yumusatmasi. TradingView'daki ta.rma() ile ayni.
 
@@ -102,7 +111,11 @@ def moving_averages(
     out: dict[str, pd.Series] = {}
     for kind, length in specs:
         key = f"{kind.upper()}{length}"
-        out[key] = ema(close, length) if kind.lower() == "ema" else sma(close, length)
+        calculators = {"ema": ema, "sma": sma, "wma": wma}
+        normalized = kind.lower()
+        if normalized not in calculators:
+            raise ValueError(f"Desteklenmeyen ortalama turu: {kind}")
+        out[key] = calculators[normalized](close, length)
     return out
 
 
@@ -112,10 +125,25 @@ def moving_averages(
 
 
 def bollinger(
-    df: pd.DataFrame, length: int = 20, mult: float = 2.0
+    df: pd.DataFrame, length: int = 20, mult: float = 2.0, ma_type: str = "SMA"
 ) -> dict[str, pd.Series]:
     close = df["Close"]
-    mid = sma(close, length)
+    normalized = ma_type.upper()
+    if normalized == "SMA":
+        mid = sma(close, length)
+    elif normalized == "EMA":
+        mid = ema(close, length)
+    elif normalized in {"SMMA", "RMA", "SMMA (RMA)"}:
+        mid = rma(close, length)
+    elif normalized == "WMA":
+        mid = wma(close, length)
+    elif normalized == "VWMA":
+        volume = df["Volume"].astype("float64")
+        mid = (close * volume).rolling(length, min_periods=length).sum() / volume.rolling(
+            length, min_periods=length
+        ).sum().replace(0, np.nan)
+    else:
+        raise ValueError(f"Desteklenmeyen Bollinger ortalamasi: {ma_type}")
     # TradingView ta.stdev() populasyon standart sapmasi kullanir (ddof=0)
     std = close.rolling(length, min_periods=length).std(ddof=0)
     upper = mid + mult * std
@@ -324,12 +352,72 @@ def rsi(
 
 
 def macd(
-    df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9
+    df: pd.DataFrame,
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
+    oscillator_ma: str = "EMA",
+    signal_ma: str = "EMA",
 ) -> dict[str, pd.Series]:
     close = df["Close"]
-    line = ema(close, fast) - ema(close, slow)
-    sig = line.ewm(span=signal, adjust=False, min_periods=signal).mean()
+    oscillator = ema if oscillator_ma.upper() == "EMA" else sma
+    signal_calculator = ema if signal_ma.upper() == "EMA" else sma
+    line = oscillator(close, fast) - oscillator(close, slow)
+    sig = signal_calculator(line, signal)
     return {"MACD": line, "MACD_signal": sig, "MACD_hist": line - sig}
+
+
+def stochastic_momentum_index(
+    df: pd.DataFrame,
+    k_length: int = 10,
+    d_length: int = 3,
+    ema_length: int = 3,
+) -> dict[str, pd.Series]:
+    """TradingView yerlesik SMI (Pine v6) 10/3/3 formulu."""
+    highest = df["High"].rolling(k_length, min_periods=k_length).max()
+    lowest = df["Low"].rolling(k_length, min_periods=k_length).min()
+    relative = df["Close"] - (highest + lowest) / 2.0
+    price_range = highest - lowest
+    double_relative = ema(ema(relative, d_length), d_length)
+    double_range = ema(ema(price_range, d_length), d_length)
+    value = 200.0 * double_relative / double_range.replace(0, np.nan)
+    return {"SMI": value, "SMI_signal": ema(value, ema_length)}
+
+
+def fisher_transform(df: pd.DataFrame, length: int = 9) -> dict[str, pd.Series]:
+    """TradingView yerlesik Fisher Transform Pine v6 formulu."""
+    source = (df["High"] + df["Low"]) / 2.0
+    highest = source.rolling(length, min_periods=length).max()
+    lowest = source.rolling(length, min_periods=length).min()
+    normalized = (source - lowest) / (highest - lowest).replace(0, np.nan) - 0.5
+    values = np.full(len(df), np.nan)
+    fisher = np.full(len(df), np.nan)
+    for i in range(len(df)):
+        if not np.isfinite(normalized.iloc[i]):
+            continue
+        previous_value = values[i - 1] if i and np.isfinite(values[i - 1]) else 0.0
+        value = 0.66 * float(normalized.iloc[i]) + 0.67 * previous_value
+        value = min(max(value, -0.999), 0.999)
+        values[i] = value
+        previous_fisher = fisher[i - 1] if i and np.isfinite(fisher[i - 1]) else 0.0
+        fisher[i] = 0.5 * np.log((1.0 + value) / (1.0 - value)) + 0.5 * previous_fisher
+    line = pd.Series(fisher, index=df.index, dtype="float64")
+    return {"FISHER": line, "FISHER_trigger": line.shift(1)}
+
+
+def chaikin_money_flow(df: pd.DataFrame, length: int = 20) -> dict[str, pd.Series]:
+    """Standart CMF: fiyat konumu ile agirliklandirilmis hacmin 20 barlik orani."""
+    span = (df["High"] - df["Low"]).replace(0, np.nan)
+    multiplier = ((df["Close"] - df["Low"]) - (df["High"] - df["Close"])) / span
+    money_flow = multiplier.fillna(0.0) * df["Volume"].fillna(0.0)
+    volume = df["Volume"].rolling(length, min_periods=length).sum().replace(0, np.nan)
+    return {"CMF": money_flow.rolling(length, min_periods=length).sum() / volume}
+
+
+def momentum(df: pd.DataFrame, length: int = 10) -> dict[str, pd.Series]:
+    """TradingView Momentum: source - source[length]."""
+    close = df["Close"]
+    return {"MOM": close - close.shift(length)}
 
 
 # --------------------------------------------------------------------------
@@ -501,11 +589,40 @@ def donchian(df: pd.DataFrame, length: int = 20) -> dict[str, pd.Series]:
 # --------------------------------------------------------------------------
 
 
-def obv(df: pd.DataFrame, signal_length: int = 20) -> dict[str, pd.Series]:
-    """On-Balance Volume: kapanis yukselirse hacmi ekler, duserse cikarir."""
-    direction = np.sign(df["Close"].diff().fillna(0.0))
+def obv(
+    df: pd.DataFrame,
+    signal_length: int = 14,
+    ma_type: str = "SMA + Bollinger Bands",
+    bb_mult: float = 2.0,
+) -> dict[str, pd.Series]:
+    """TradingView OBV; gorsel referanstaki SMA14 ve 2 std bandiyla."""
+    if float(df["Volume"].fillna(0.0).sum()) == 0.0:
+        raise ValueError("Veri saglayici hacim verisi sunmuyor; OBV hesaplanamaz.")
+    direction = np.sign(df["Close"].diff())
     value = (direction * df["Volume"].fillna(0.0)).cumsum()
-    return {"OBV": value, "OBV_ma": ema(value, signal_length)}
+    normalized = ma_type.upper()
+    if normalized in {"SMA", "SMA + BOLLINGER BANDS"}:
+        smoothing = sma(value, signal_length)
+    elif normalized == "EMA":
+        smoothing = ema(value, signal_length)
+    elif normalized in {"SMMA", "RMA", "SMMA (RMA)"}:
+        smoothing = rma(value, signal_length)
+    elif normalized == "WMA":
+        smoothing = wma(value, signal_length)
+    elif normalized == "VWMA":
+        volume = df["Volume"].astype("float64")
+        smoothing = (value * volume).rolling(signal_length).sum() / volume.rolling(
+            signal_length
+        ).sum().replace(0, np.nan)
+    else:
+        smoothing = pd.Series(np.nan, index=df.index, dtype="float64")
+    deviation = value.rolling(signal_length, min_periods=signal_length).std(ddof=0) * bb_mult
+    return {
+        "OBV": value,
+        "OBV_ma": smoothing,
+        "OBV_upper": smoothing + deviation,
+        "OBV_lower": smoothing - deviation,
+    }
 
 
 def volume_profile(df: pd.DataFrame, bins: int = 48) -> dict[str, pd.Series]:
@@ -552,20 +669,21 @@ ALL_INDICATORS: tuple[str, ...] = (
     # Trend
     "ma", "supertrend", "ichimoku", "sar", "adx",
     # Momentum
-    "rsi", "macd", "stochrsi", "cci", "willr", "ao",
+    "rsi", "macd", "smi", "stochrsi", "cci", "willr", "ao", "fisher", "momentum",
     # Volatilite
     "bbands", "atr", "keltner", "donchian",
     # Hacim
-    "volume", "vwap", "obv", "vprofile",
+    "volume", "vwap", "obv", "cmf", "vprofile",
 )
 
 #: Gostergenin ait oldugu kategori. Kareler her kategoriden birer tane secer.
 CATEGORY: dict[str, str] = {
     "ma": "trend", "supertrend": "trend", "ichimoku": "trend", "sar": "trend", "adx": "trend",
-    "rsi": "momentum", "macd": "momentum", "stochrsi": "momentum",
+    "rsi": "momentum", "macd": "momentum", "smi": "momentum", "stochrsi": "momentum",
     "cci": "momentum", "willr": "momentum", "ao": "momentum",
+    "fisher": "momentum", "momentum": "momentum",
     "bbands": "volatilite", "atr": "volatilite", "keltner": "volatilite", "donchian": "volatilite",
-    "volume": "hacim", "vwap": "hacim", "obv": "hacim", "vprofile": "hacim",
+    "volume": "hacim", "vwap": "hacim", "obv": "hacim", "cmf": "hacim", "vprofile": "hacim",
 }
 
 #: Zaman eksenli olmayan gostergeler (fiyat seviyesine gore hesaplananlar).
@@ -580,10 +698,13 @@ _COMPUTE = {
     "adx": adx_dmi,
     "rsi": rsi,
     "macd": macd,
+    "smi": stochastic_momentum_index,
     "stochrsi": stoch_rsi,
     "cci": cci,
     "willr": williams_r,
     "ao": awesome_oscillator,
+    "fisher": fisher_transform,
+    "momentum": momentum,
     "bbands": bollinger,
     "atr": atr_bands,
     "keltner": keltner,
@@ -591,6 +712,7 @@ _COMPUTE = {
     "volume": volume_bars,
     "vwap": vwap,
     "obv": obv,
+    "cmf": chaikin_money_flow,
     "vprofile": volume_profile,
 }
 
