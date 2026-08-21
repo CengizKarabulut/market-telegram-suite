@@ -109,7 +109,10 @@ class MarketContextTests(unittest.TestCase):
         self.assertIn("gerçek footprint delta değildir", context["order_flow_proxy"]["method"])
         self.assertEqual(set(context["ma_structure"]["groups"]), {"Çok kısa", "Kısa", "Orta", "Uzun"})
         self.assertIn(context["regime"]["persistence_bars"], {2})
-        self.assertEqual(set(context["divergences"]["indicators"]), {"RSI", "MACD", "SMI"})
+        self.assertEqual(
+            set(context["divergences"]["indicators"]),
+            {"RSI", "MACD", "SMI", "Stoch RSI", "CCI", "Fisher", "OBV", "CMF", "Momentum"},
+        )
         self.assertEqual(context["divergences"]["settings"]["lookback_right"], 5)
         self.assertEqual(context["divergences"]["settings"]["active_max_age"], 5)
 
