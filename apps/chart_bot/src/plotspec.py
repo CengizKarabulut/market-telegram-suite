@@ -294,9 +294,13 @@ def _macd_panel(s: dict[str, pd.Series]) -> Panel:
 
 
 def _smi_panel(s: dict[str, pd.Series]) -> Panel:
+    upper = pd.Series(40.0, index=s["SMI"].index)
+    lower = pd.Series(-40.0, index=s["SMI"].index)
     return Panel(
         key="smi", title="SMI", params="10, 3, 3", height=0.75,
         traces=[
+            Trace(name="Nötr bölge", kind="band", y=upper, y2=lower,
+                  color="accent3", width=0, fill_alpha=0.08, legend=False, zorder=0),
             Trace(name="SMI", y=s["SMI"], color="accent3", width=1.5),
             Trace(name="SMI EMA", y=s["SMI_signal"], color="accent1", width=1.2),
             *_divergence_traces(s, "SMI"),
@@ -308,12 +312,16 @@ def _smi_panel(s: dict[str, pd.Series]) -> Panel:
 
 
 def _stochrsi_panel(s: dict[str, pd.Series]) -> Panel:
+    upper = pd.Series(80.0, index=s["SRSI_k"].index)
+    lower = pd.Series(20.0, index=s["SRSI_k"].index)
     return Panel(
         key="stochrsi",
         title="Stoch RSI",
         params="14, 14, 3, 3",
         height=0.7,
         traces=[
+            Trace(name="20–80 bölgesi", kind="band", y=upper, y2=lower,
+                  color="accent3", width=0, fill_alpha=0.08, legend=False, zorder=0),
             Trace(name="%K", y=s["SRSI_k"], color="accent2", width=1.4),
             Trace(name="%D", y=s["SRSI_d"], color="accent1", width=1.1, dash="dash"),
             *_divergence_traces(s, "SRSI"),
@@ -422,9 +430,16 @@ def _vprofile_overlays(s: dict[str, pd.Series]) -> list[Trace]:
 
 
 def _cci_panel(s: dict[str, pd.Series]) -> Panel:
+    upper = pd.Series(100.0, index=s["CCI"].index)
+    lower = pd.Series(-100.0, index=s["CCI"].index)
     return Panel(
         key="cci", title="CCI", params="20", height=0.75,
-        traces=[Trace(name="CCI", y=s["CCI"], color="accent3", width=1.4), *_divergence_traces(s, "CCI")],
+        traces=[
+            Trace(name="-100–100 bölgesi", kind="band", y=upper, y2=lower,
+                  color="accent3", width=0, fill_alpha=0.08, legend=False, zorder=0),
+            Trace(name="CCI", y=s["CCI"], color="accent3", width=1.4),
+            *_divergence_traces(s, "CCI"),
+        ],
         hlines=[HLine(100, "down", "dash", "100"), HLine(-100, "up", "dash", "-100")],
         zero_line=True,
     )
@@ -727,6 +742,7 @@ def build_spec(
     title: str,
     subtitle: str,
     price_height: float = 3.4,
+    panel_scale: float = 1.0,
     note: str = "",
     last_bar_open: bool = False,
     log_price: bool | None = None,
@@ -737,7 +753,9 @@ def build_spec(
         if key in _OVERLAY_BUILDERS:
             overlays.extend(_OVERLAY_BUILDERS[key](df, series))
         elif key in _PANEL_BUILDERS:
-            panels.append(_PANEL_BUILDERS[key](df, series))
+            panel = _PANEL_BUILDERS[key](df, series)
+            panel.height *= panel_scale
+            panels.append(panel)
     return ChartSpec(
         df=df,
         overlays=overlays,
