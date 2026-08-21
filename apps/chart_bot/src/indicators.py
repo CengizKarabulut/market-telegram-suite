@@ -276,42 +276,83 @@ def ichimoku(
 
 def vwap(
     df: pd.DataFrame,
-    anchor: str = "session",
-    window: int = 20,
+    anchor: str = "auto",
+    interval: str = "1d",
+    window: int = 14,
     mult: float = 2.0,
 ) -> dict[str, pd.Series]:
-    """Hacim agirlikli ortalama fiyat.
+    """TradingView VWAP Auto Anchored: hlc3 ve 1/2/3 std sapma bantlari.
 
-    anchor='session' : her gun/hafta basinda sifirlanan kumulatif VWAP
-                       (gun ici barlar icin dogru olan surum)
-    anchor='rolling' : son 'window' barin hacim agirlikli ortalamasi
-                       (gunluk ve ustu periyotlar icin anlamli olan surum)
+    Auto capa resmi TradingView kuralidir: intraday=son seans, 1D=son ay,
+    2D-10D=son ceyrek, 11D-60D=son yil, daha uzun=son on yil. Desteklenen
+    uygulama araliklarinda 1wk ceyrege, 1mo yila karsilik gelir.
     """
-    tp = (df["High"] + df["Low"] + df["Close"]) / 3.0
-    vol = df["Volume"].astype("float64").fillna(0.0)
+    source = (df["High"] + df["Low"] + df["Close"]) / 3.0
+    volume = df["Volume"].astype("float64").fillna(0.0)
+    if float(volume.sum()) == 0.0:
+        raise ValueError("Veri saglayici hacim verisi sunmuyor; VWAP hesaplanamaz.")
 
-    if anchor == "session":
-        if isinstance(df.index, pd.DatetimeIndex):
-            groups = df.index.normalize()
-        else:  # tarih bilgisi yoksa rolling'e dus
-            return vwap(df, anchor="rolling", window=window, mult=mult)
-        pv = (tp * vol).groupby(groups).cumsum()
-        cv = vol.groupby(groups).cumsum()
-        line = pv / cv.replace(0, np.nan)
-        var = ((tp - line) ** 2 * vol).groupby(groups).cumsum() / cv.replace(0, np.nan)
-        dev = np.sqrt(var)
+    index = pd.DatetimeIndex(df.index)
+    if anchor == "auto":
+        if interval in {"1m", "5m", "15m", "30m", "1h", "2h", "3h", "4h"}:
+            groups = pd.Series(index.normalize(), index=df.index)
+            anchor_label = "Seans"
+        elif interval == "1d":
+            groups = pd.Series(index.to_period("M").astype(str), index=df.index)
+            anchor_label = "Ay"
+        elif interval == "1wk":
+            groups = pd.Series(index.to_period("Q").astype(str), index=df.index)
+            anchor_label = "Çeyrek"
+        elif interval == "1mo":
+            groups = pd.Series(index.to_period("Y").astype(str), index=df.index)
+            anchor_label = "Yıl"
+        else:
+            decades = (index.year // 10) * 10
+            groups = pd.Series(decades, index=df.index)
+            anchor_label = "10 yıl"
+        active_group = groups.iloc[-1]
+        active = groups.eq(active_group)
+    elif anchor == "session":
+        groups = pd.Series(index.normalize(), index=df.index)
+        active = groups.eq(groups.iloc[-1])
+        anchor_label = "Seans"
+    elif anchor == "rolling":
+        pv = (source * volume).rolling(window, min_periods=window).sum()
+        cumulative_volume = volume.rolling(window, min_periods=window).sum().replace(0, np.nan)
+        line = pv / cumulative_volume
+        variance = (
+            (source.pow(2) * volume).rolling(window, min_periods=window).sum()
+            / cumulative_volume
+            - line.pow(2)
+        ).clip(lower=0)
+        deviation = np.sqrt(variance)
+        active = pd.Series(True, index=df.index)
+        anchor_label = f"Rolling {window}"
+        groups = pd.Series(0, index=df.index)
     else:
-        pv = (tp * vol).rolling(window, min_periods=window).sum()
-        cv = vol.rolling(window, min_periods=window).sum()
-        line = pv / cv.replace(0, np.nan)
-        dev = (tp - line).rolling(window, min_periods=window).std(ddof=0)
+        raise ValueError(f"Desteklenmeyen VWAP capa turu: {anchor}")
 
-    return {
-        "VWAP": line,
-        "VWAP_upper": line + mult * dev,
-        "VWAP_lower": line - mult * dev,
-    }
+    if anchor != "rolling":
+        pv = (source * volume).groupby(groups).cumsum()
+        cumulative_volume = volume.groupby(groups).cumsum().replace(0, np.nan)
+        line = pv / cumulative_volume
+        variance = (
+            (source.pow(2) * volume).groupby(groups).cumsum()
+            / cumulative_volume
+            - line.pow(2)
+        ).clip(lower=0)
+        deviation = np.sqrt(variance)
+        line = line.where(active)
+        deviation = deviation.where(active)
 
+    result = {"VWAP": line, "VWAP_anchor": pd.Series(anchor_label, index=df.index)}
+    for multiplier in (1, 2, 3):
+        result[f"VWAP_upper_{multiplier}"] = line + multiplier * deviation
+        result[f"VWAP_lower_{multiplier}"] = line - multiplier * deviation
+    # Eski cizim/rapor tuketicileri ikinci bandi kullanmaya devam edebilsin.
+    result["VWAP_upper"] = result["VWAP_upper_2"]
+    result["VWAP_lower"] = result["VWAP_lower_2"]
+    return result
 
 # --------------------------------------------------------------------------
 # 6. Hacim + RVOL
