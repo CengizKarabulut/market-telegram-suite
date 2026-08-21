@@ -225,6 +225,18 @@ def _draw_trace(ax, trace: Trace, theme: Theme, n: int) -> None:
             point_colors = color
         ax.scatter(x[mask], y[mask], s=trace.width * 2.2, c=point_colors,
                    marker="o", linewidths=0, zorder=trace.zorder)
+        if trace.labels is not None:
+            labels = trace.labels.astype(str).to_numpy()
+            offset = -7 if trace.text_position == "bottom" else 7
+            vertical = "top" if trace.text_position == "bottom" else "bottom"
+            for position in np.flatnonzero(mask):
+                label = labels[position]
+                if label and label != "nan":
+                    ax.annotate(
+                        label, (x[position], y[position]), xytext=(0, offset),
+                        textcoords="offset points", ha="center", va=vertical,
+                        fontsize=5.8, color=color, fontweight="bold", zorder=trace.zorder + 1,
+                    )
         return
 
     if trace.kind in {"bars", "hist"} and trace.y is not None:
