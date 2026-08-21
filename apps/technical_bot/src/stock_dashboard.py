@@ -333,12 +333,19 @@ def true_range(data: pd.DataFrame) -> pd.Series:
 def adx_dmi(data: pd.DataFrame, length: int = 14) -> tuple[pd.Series, pd.Series, pd.Series]:
     up_move = data["High"].diff()
     down_move = -data["Low"].diff()
-    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=data.index)
-    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=data.index)
+    plus_dm = pd.Series(
+        np.where(up_move.isna(), np.nan, np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)),
+        index=data.index,
+    )
+    minus_dm = pd.Series(
+        np.where(down_move.isna(), np.nan, np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)),
+        index=data.index,
+    )
     atr_value = rma(true_range(data), length)
-    plus_di = 100 * rma(plus_dm, length) / atr_value.replace(0, np.nan)
-    minus_di = 100 * rma(minus_dm, length) / atr_value.replace(0, np.nan)
-    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    plus_di = (100 * rma(plus_dm, length) / atr_value.replace(0, np.nan)).ffill()
+    minus_di = (100 * rma(minus_dm, length) / atr_value.replace(0, np.nan)).ffill()
+    denominator = (plus_di + minus_di).where((plus_di + minus_di) != 0, 1.0)
+    dx = 100 * (plus_di - minus_di).abs() / denominator
     return plus_di, minus_di, rma(dx, length)
 
 
