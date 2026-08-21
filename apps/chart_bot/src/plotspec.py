@@ -218,6 +218,20 @@ def _volume_panel(df: pd.DataFrame, s: dict[str, pd.Series]) -> Panel:
     )
 
 
+def _divergence_traces(s: dict[str, pd.Series], prefix: str) -> list[Trace]:
+    """Teyitli normal uyumsuzlukları osilatör panelinde gösterir."""
+    bull = s.get(f"{prefix}_div_bull")
+    bear = s.get(f"{prefix}_div_bear")
+    if bull is None or bear is None:
+        return []
+    return [
+        Trace(name="Bull uyumsuzluk", y=bull, color="up", width=2.0, legend=False, zorder=5),
+        Trace(name="Bear uyumsuzluk", y=bear, color="down", width=2.0, legend=False, zorder=5),
+        Trace(name="Bull", kind="dots", y=s.get(f"{prefix}_div_bull_points"), color="up", width=3.0, legend=False, zorder=6),
+        Trace(name="Bear", kind="dots", y=s.get(f"{prefix}_div_bear_points"), color="down", width=3.0, legend=False, zorder=6),
+    ]
+
+
 def _rsi_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
         key="rsi",
@@ -227,6 +241,7 @@ def _rsi_panel(s: dict[str, pd.Series]) -> Panel:
         traces=[
             Trace(name="RSI", y=s["RSI"], color="accent3", width=1.5),
             Trace(name="RSI MA 14", y=s["RSI_ma"], color="muted", width=1.0, dash="dash"),
+            *_divergence_traces(s, "RSI"),
         ],
         hlines=[
             HLine(70, "down", "dash", "70"),
@@ -253,6 +268,7 @@ def _macd_panel(s: dict[str, pd.Series]) -> Panel:
             Trace(name="Histogram", kind="hist", y=hist, colors=roles, legend=False),
             Trace(name="MACD", y=s["MACD"], color="accent3", width=1.4),
             Trace(name="Sinyal", y=s["MACD_signal"], color="accent1", width=1.2),
+            *_divergence_traces(s, "MACD"),
         ],
         zero_line=True,
     )
@@ -264,6 +280,7 @@ def _smi_panel(s: dict[str, pd.Series]) -> Panel:
         traces=[
             Trace(name="SMI", y=s["SMI"], color="accent3", width=1.5),
             Trace(name="SMI EMA", y=s["SMI_signal"], color="accent1", width=1.2),
+            *_divergence_traces(s, "SMI"),
         ],
         hlines=[HLine(40, "down", "dash", "40"), HLine(-40, "up", "dash", "-40")],
         zero_line=True,
@@ -280,6 +297,7 @@ def _stochrsi_panel(s: dict[str, pd.Series]) -> Panel:
         traces=[
             Trace(name="%K", y=s["SRSI_k"], color="accent2", width=1.4),
             Trace(name="%D", y=s["SRSI_d"], color="accent1", width=1.1, dash="dash"),
+            *_divergence_traces(s, "SRSI"),
         ],
         hlines=[HLine(80, "down", "dash", "80"), HLine(20, "up", "dash", "20")],
         yrange=(0, 100),
@@ -387,7 +405,7 @@ def _vprofile_overlays(s: dict[str, pd.Series]) -> list[Trace]:
 def _cci_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
         key="cci", title="CCI", params="20", height=0.75,
-        traces=[Trace(name="CCI", y=s["CCI"], color="accent3", width=1.4)],
+        traces=[Trace(name="CCI", y=s["CCI"], color="accent3", width=1.4), *_divergence_traces(s, "CCI")],
         hlines=[HLine(100, "down", "dash", "100"), HLine(-100, "up", "dash", "-100")],
         zero_line=True,
     )
@@ -418,6 +436,7 @@ def _fisher_panel(s: dict[str, pd.Series]) -> Panel:
         traces=[
             Trace(name="Fisher", y=s["FISHER"], color="accent3", width=1.5),
             Trace(name="Trigger", y=s["FISHER_trigger"], color="accent1", width=1.2),
+            *_divergence_traces(s, "FISHER"),
         ],
         hlines=[
             HLine(1.5, "down", "dash", "1.5"), HLine(0.75, "muted", "dot", "0.75"),
@@ -430,7 +449,7 @@ def _fisher_panel(s: dict[str, pd.Series]) -> Panel:
 def _cmf_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
         key="cmf", title="Chaikin Para Akışı", params="20", height=0.7,
-        traces=[Trace(name="CMF", y=s["CMF"], color="accent2", width=1.5)],
+        traces=[Trace(name="CMF", y=s["CMF"], color="accent2", width=1.5), *_divergence_traces(s, "CMF")],
         zero_line=True,
         yrange=(-1, 1),
     )
@@ -439,7 +458,7 @@ def _cmf_panel(s: dict[str, pd.Series]) -> Panel:
 def _momentum_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
         key="momentum", title="Momentum", params="10", height=0.7,
-        traces=[Trace(name="MOM", y=s["MOM"], color="accent3", width=1.5)],
+        traces=[Trace(name="MOM", y=s["MOM"], color="accent3", width=1.5), *_divergence_traces(s, "MOM")],
         zero_line=True,
     )
 
@@ -465,6 +484,7 @@ def _obv_panel(s: dict[str, pd.Series]) -> Panel:
             ),
             Trace(name="OBV", y=s["OBV"], color="accent3", width=1.4),
             Trace(name="OBV SMA", y=s["OBV_ma"], color="accent1", width=1.0),
+            *_divergence_traces(s, "OBV"),
         ],
     )
 
