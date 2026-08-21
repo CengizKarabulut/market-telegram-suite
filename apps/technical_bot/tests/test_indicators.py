@@ -104,7 +104,7 @@ class IndicatorTests(unittest.TestCase):
         self.assertEqual([item["period"] for item in status["ma"]], MA_TABLE_PERIODS)
         self.assertTrue(all("wma" in item for item in status["ma"]))
         self.assertIn("technical_commentary", status)
-        self.assertEqual(len(status["technical_commentary"]["visual_rows"]), 9)
+        self.assertEqual(len(status["technical_commentary"]["visual_rows"]), 12)
 
     def test_core_indicators_are_finite(self) -> None:
         row = calculate_indicators(synthetic_prices()).iloc[-1]
