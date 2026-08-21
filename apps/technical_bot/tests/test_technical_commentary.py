@@ -93,7 +93,7 @@ class TechnicalCommentaryV2Tests(unittest.TestCase):
     def test_method_uses_independent_families_without_vote_score(self) -> None:
         result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
         self.assertIn("birleşik AL/SAT puanı üretmez", result["method"])
-        self.assertEqual(len(result["state_map"]), 8)
+        self.assertEqual(len(result["state_map"]), 9)
         self.assertNotIn("/4", result["analyst_note"])
         self.assertIn(result["clarity"]["state"], {"Yüksek", "Orta", "Düşük"})
 
