@@ -95,7 +95,7 @@ def detect_divergences(
     indicators: dict[str, dict[str, Any]] = {}
     events: list[dict[str, Any]] = []
     settings = _settings(left, right, range_lower, range_upper, max_event_age)
-    required = {"Low", "High", *INDICATORS.values()}
+    required = {"Low", "High"}
     if len(data) < left + right + range_lower + 1 or not required.issubset(data.columns):
         for name in INDICATORS:
             indicators[name] = {
@@ -107,6 +107,14 @@ def detect_divergences(
         return {"indicators": indicators, "events": events, "settings": settings}
 
     for name, column in INDICATORS.items():
+        if column not in data:
+            indicators[name] = {
+                "detected": False,
+                "state": "Gösterge verisi yok",
+                "tone": "neutral",
+                "event_age": None,
+            }
+            continue
         oscillator = data[column]
         candidates: list[dict[str, Any]] = []
         low_pivots = _pivot_positions(oscillator, left, right, low=True)
