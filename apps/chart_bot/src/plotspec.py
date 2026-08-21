@@ -28,6 +28,8 @@ class Trace:
     dash: str | None = None  # None | dash | dot
     fill_alpha: float = 0.0
     colors: pd.Series | None = None  # bar/segment basina rol adi
+    labels: pd.Series | None = None  # nokta yaninda kisa formasyon etiketi
+    text_position: str = "top"
     legend: bool = True
     zorder: int = 2
     tag: bool = False  # sag eksende renkli deger etiketi cizilsin mi
@@ -77,6 +79,23 @@ class ChartSpec:
 #: Ortalamalar amber -> camgobegi -> mor sirasiyla; VWAP ve Ichimoku
 #: cizgileri baska belirtec kullanir, boylece hicbir ikisi ayni renk olmaz.
 _MA_COLORS = ("accent1", "accent3", "accent2", "accent4")
+
+
+def _candlestick_overlays(s: dict[str, pd.Series]) -> list[Trace]:
+    return [
+        Trace(
+            name="Bullish mum", kind="dots", y=s["CANDLE_BULL_Y"], color="up",
+            labels=s["CANDLE_BULL_LABEL"], text_position="bottom", width=10, legend=False, zorder=7,
+        ),
+        Trace(
+            name="Bearish mum", kind="dots", y=s["CANDLE_BEAR_Y"], color="down",
+            labels=s["CANDLE_BEAR_LABEL"], text_position="top", width=10, legend=False, zorder=7,
+        ),
+        Trace(
+            name="Nötr mum", kind="dots", y=s["CANDLE_NEUTRAL_Y"], color="muted",
+            labels=s["CANDLE_NEUTRAL_LABEL"], text_position="bottom", width=8, legend=False, zorder=6,
+        ),
+    ]
 
 
 def _ma_overlays(s: dict[str, pd.Series]) -> list[Trace]:
@@ -547,6 +566,7 @@ def _bbands_panel(df: pd.DataFrame, s: dict[str, pd.Series]) -> Panel:
 
 
 _OVERLAY_BUILDERS = {
+    "candles": lambda df, s: _candlestick_overlays(s),
     "ma": lambda df, s: _ma_overlays(s),
     "bbands": lambda df, s: _bb_overlays(s),
     "supertrend": lambda df, s: _supertrend_overlays(s),
@@ -585,6 +605,7 @@ _PANEL_BUILDERS = {
 #: Cizim anahtari -> ihtiyac duydugu hesap anahtari.
 #: Bir gorunum yalnizca kullandigi gostergeleri hesaplatsin diye gerekli.
 REQUIRES: dict[str, tuple[str, ...]] = {
+    "candles": ("candles",),
     "ma": ("ma",),
     "bbands": ("bbands",),
     "supertrend": ("supertrend",),
