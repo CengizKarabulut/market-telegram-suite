@@ -137,6 +137,17 @@ class TestViews(unittest.TestCase):
         with self.assertRaises(KeyError):
             resolve_views("yok")
 
+    def test_candlestick_overlay_keeps_only_latest_two_bars(self) -> None:
+        from src.plotspec import _recent_candle_series
+
+        numeric = pd.Series([1.0, 2.0, 3.0, 4.0])
+        labels = pd.Series(["A", "B", "C", "D"], dtype="object")
+        recent_numeric = _recent_candle_series(numeric)
+        recent_labels = _recent_candle_series(labels)
+        self.assertTrue(recent_numeric.iloc[:-2].isna().all())
+        self.assertEqual(recent_numeric.iloc[-2:].tolist(), [3.0, 4.0])
+        self.assertEqual(recent_labels.tolist(), ["", "", "C", "D"])
+
     def test_compute_keys_deduplicated(self) -> None:
         from src.plotspec import compute_keys_for
 
@@ -332,10 +343,14 @@ class TestFrameShape(unittest.TestCase):
         from src.views import resolve_views
 
         expected_panels = {
-            "bollinger_macd": 3,
-            "ichimoku_rsi": 3,
-            "sar_vwap": 2,
-            "supertrend_fisher": 3,
+            "tv_macd_smi": 2,
+            "tv_fisher_rsi": 2,
+            "tv_candles_cci": 1,
+            "tv_ichimoku_obv": 1,
+            "tv_dmi_momentum": 2,
+            "tv_vwap_stochrsi": 1,
+            "tv_sar_cmf": 1,
+            "tv_atr": 1,
         }
         original = pipeline.fetch_ohlcv
         pipeline.fetch_ohlcv = lambda symbol, period="1y", interval="1d", bars=None: (
