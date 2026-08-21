@@ -81,19 +81,36 @@ class ChartSpec:
 _MA_COLORS = ("accent1", "accent3", "accent2", "accent4")
 
 
+def _recent_candle_series(series: pd.Series, bars: int = 2) -> pd.Series:
+    """Formasyon rozetlerini yalnizca son tamamlanma bolgesinde tutar."""
+    out = series.copy()
+    if len(out) > bars:
+        if pd.api.types.is_object_dtype(out.dtype):
+            out.iloc[:-bars] = ""
+        else:
+            out.iloc[:-bars] = np.nan
+    return out
+
+
 def _candlestick_overlays(s: dict[str, pd.Series]) -> list[Trace]:
     return [
         Trace(
-            name="Bullish mum", kind="dots", y=s["CANDLE_BULL_Y"], color="up",
-            labels=s["CANDLE_BULL_LABEL"], text_position="bottom", width=10, legend=False, zorder=7,
+            name="Bullish mum", kind="dots",
+            y=_recent_candle_series(s["CANDLE_BULL_Y"]), color="up",
+            labels=_recent_candle_series(s["CANDLE_BULL_LABEL"]),
+            text_position="bottom", width=10, legend=False, zorder=7,
         ),
         Trace(
-            name="Bearish mum", kind="dots", y=s["CANDLE_BEAR_Y"], color="down",
-            labels=s["CANDLE_BEAR_LABEL"], text_position="top", width=10, legend=False, zorder=7,
+            name="Bearish mum", kind="dots",
+            y=_recent_candle_series(s["CANDLE_BEAR_Y"]), color="down",
+            labels=_recent_candle_series(s["CANDLE_BEAR_LABEL"]),
+            text_position="top", width=10, legend=False, zorder=7,
         ),
         Trace(
-            name="Nötr mum", kind="dots", y=s["CANDLE_NEUTRAL_Y"], color="muted",
-            labels=s["CANDLE_NEUTRAL_LABEL"], text_position="bottom", width=8, legend=False, zorder=6,
+            name="Nötr mum", kind="dots",
+            y=_recent_candle_series(s["CANDLE_NEUTRAL_Y"]), color="muted",
+            labels=_recent_candle_series(s["CANDLE_NEUTRAL_LABEL"]),
+            text_position="bottom", width=8, legend=False, zorder=6,
         ),
     ]
 
