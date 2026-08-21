@@ -150,22 +150,24 @@ def _ichimoku_overlays(s: dict[str, pd.Series]) -> list[Trace]:
 
 
 def _vwap_overlays(s: dict[str, pd.Series]) -> list[Trace]:
-    return [
-        Trace(
-            name="VWAP bandi",
-            kind="band",
-            y=s["VWAP_upper"],
-            y2=s["VWAP_lower"],
-            color="vwap",
-            width=0.7,
-            dash="dot",
-            fill_alpha=0.05,
-            legend=False,
-            zorder=1,
-        ),
-        Trace(name="VWAP", y=s["VWAP"], color="vwap", width=1.3, zorder=3, tag=True),
-    ]
-
+    traces: list[Trace] = []
+    for multiplier, role, alpha in ((3, "accent3", 0.03), (2, "up", 0.05), (1, "accent1", 0.07)):
+        traces.append(
+            Trace(
+                name=f"VWAP ±{multiplier}σ",
+                kind="band",
+                y=s[f"VWAP_upper_{multiplier}"],
+                y2=s[f"VWAP_lower_{multiplier}"],
+                color=role,
+                width=0.7,
+                dash="dot",
+                fill_alpha=alpha,
+                legend=multiplier == 1,
+                zorder=1,
+            )
+        )
+    traces.append(Trace(name="Auto AVWAP", y=s["VWAP"], color="vwap", width=1.5, zorder=3, tag=True))
+    return traces
 
 def clip_outliers(series: pd.Series, quantile: float = 0.95,
                   headroom: float = 1.25) -> tuple[float, int]:
