@@ -82,47 +82,50 @@ class TestViews(unittest.TestCase):
         from src.views import GRID_SET, VIEWS_BY_KEY
 
         expected = {
-            "bollinger_macd": ("bbands", "macd", "smi", "obv", "candles"),
-            "ichimoku_rsi": ("ichimoku", "rsi", "cci", "atr", "candles"),
-            "sar_vwap": ("sar", "vwap", "stochrsi", "adx", "candles"),
-            "supertrend_fisher": ("supertrend", "fisher", "cmf", "momentum", "candles"),
+            "tv_macd_smi": ("macd", "smi"),
+            "tv_fisher_rsi": ("fisher", "rsi"),
+            "tv_candles_cci": ("candles", "cci"),
+            "tv_ichimoku_obv": ("ichimoku", "obv"),
+            "tv_dmi_momentum": ("adx", "momentum"),
+            "tv_vwap_stochrsi": ("vwap", "stochrsi"),
+            "tv_sar_cmf": ("sar", "cmf"),
+            "tv_atr": ("atr",),
         }
         self.assertEqual(tuple(expected), GRID_SET)
         for key, keys in expected.items():
             self.assertEqual(VIEWS_BY_KEY[key].keys, keys)
 
-    def test_grid_views_do_not_repeat_a_display(self) -> None:
+    def test_reference_views_do_not_repeat_an_indicator(self) -> None:
         from src.views import GRID_SET, VIEWS_BY_KEY
 
-        used = [
-            k for key in GRID_SET for k in VIEWS_BY_KEY[key].keys if k != "candles"
-        ]
-        self.assertEqual(len(used), len(set(used)), "mum işaretleri dışındaki gösterim tekrarlanmamalı")
+        used = [k for key in GRID_SET for k in VIEWS_BY_KEY[key].keys]
+        self.assertEqual(len(used), len(set(used)))
 
-    def test_grid_views_follow_requested_overlay_panel_layout(self) -> None:
+    def test_candlestick_labels_only_exist_in_the_pattern_view(self) -> None:
+        from src.views import GRID_SET, VIEWS_BY_KEY
+
+        candle_views = [key for key in GRID_SET if "candles" in VIEWS_BY_KEY[key].keys]
+        self.assertEqual(candle_views, ["tv_candles_cci"])
+
+    def test_reference_views_follow_requested_overlay_panel_layout(self) -> None:
         from src.plotspec import _OVERLAY_BUILDERS, _PANEL_BUILDERS
         from src.views import GRID_SET, VIEWS_BY_KEY
 
         expected = {
-            "bollinger_macd": (2, 3),
-            "ichimoku_rsi": (2, 3),
-            "sar_vwap": (3, 2),
-            "supertrend_fisher": (2, 3),
+            "tv_macd_smi": (0, 2),
+            "tv_fisher_rsi": (0, 2),
+            "tv_candles_cci": (1, 1),
+            "tv_ichimoku_obv": (1, 1),
+            "tv_dmi_momentum": (0, 2),
+            "tv_vwap_stochrsi": (1, 1),
+            "tv_sar_cmf": (1, 1),
+            "tv_atr": (0, 1),
         }
         for key in GRID_SET:
             view = VIEWS_BY_KEY[key]
             overlays = [k for k in view.keys if k in _OVERLAY_BUILDERS]
             panels = [k for k in view.keys if k in _PANEL_BUILDERS]
             self.assertEqual((len(overlays), len(panels)), expected[key], key)
-
-    def test_grid_tiles_have_equal_height(self) -> None:
-        """Ayni panel sayisi -> ayni yukseklik -> izgarada hizali karolar."""
-        from src.views import GRID_SET, VIEWS_BY_KEY
-
-        heights = {
-            (VIEWS_BY_KEY[k].price_height, len(VIEWS_BY_KEY[k].keys)) for k in GRID_SET
-        }
-        self.assertEqual(len(heights), 1, "karolar farkli yukseklikte")
 
     def test_resolve_views(self) -> None:
         from src.views import DEFAULT_SET, VIEWS, resolve_views
@@ -220,13 +223,13 @@ class TestCLIArgs(unittest.TestCase):
         args = parse_args(["--symbol", "THYAO"])
         self.assertEqual((args.interval, args.theme), ("1d", "tv"))
         self.assertIsNone(args.bars)  # araliga gore secilir
-        self.assertEqual(args.grid, 2)
+        self.assertEqual(args.grid, 0)
 
     def test_default_bars_scale_with_interval(self) -> None:
         """Aylikta 250 bar 20 yil demektir; mumlar bir piksele iner."""
         from src.pipeline import default_bars
 
-        self.assertEqual(default_bars("1d"), 250)
+        self.assertEqual(default_bars("1d"), 170)
         self.assertLess(default_bars("1wk"), default_bars("1d"))
         self.assertLess(default_bars("1mo"), default_bars("1wk"))
         self.assertEqual(default_bars("bilinmeyen"), 250)
