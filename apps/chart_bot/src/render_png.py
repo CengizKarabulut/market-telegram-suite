@@ -133,11 +133,20 @@ def _x_ticks(index: pd.DatetimeIndex, count: int = 8) -> tuple[list[int], list[s
     n = len(index)
     if n == 0:
         return [], []
+    span_days = (index[-1] - index[0]).total_seconds() / 86400 if n > 1 else 1
+    if 60 <= span_days <= 500:
+        # TradingView gunluk gorunumunde zaman ekseni ay adlariyla okunur.
+        periods = index.to_period("M")
+        positions = [i for i in range(n) if i == 0 or periods[i] != periods[i - 1]]
+        if len(positions) > count + 2:
+            every = max(1, int(np.ceil(len(positions) / count)))
+            positions = positions[::every]
+        return positions, [fmt.tarih(index[p], "ay") for p in positions]
+
     step = max(1, n // count)
     positions = list(range(0, n, step))
     if positions[-1] < n - 1 - step * 0.55:
         positions.append(n - 1)
-    span_days = (index[-1] - index[0]).total_seconds() / 86400 if n > 1 else 1
     mode = "dakika" if span_days <= 3 else "saat" if span_days <= 20 else (
         "gun" if span_days <= 400 else "ay")
     return positions, [fmt.tarih(index[p], mode) for p in positions]
@@ -223,20 +232,28 @@ def _draw_trace(ax, trace: Trace, theme: Theme, n: int) -> None:
             point_colors = np.array(_role_colors(trace.colors, theme, color))[mask]
         else:
             point_colors = color
-        ax.scatter(x[mask], y[mask], s=trace.width * 2.2, c=point_colors,
-                   marker="o", linewidths=0, zorder=trace.zorder)
         if trace.labels is not None:
             labels = trace.labels.astype(str).to_numpy()
-            offset = -7 if trace.text_position == "bottom" else 7
+            offset = -12 if trace.text_position == "bottom" else 12
             vertical = "top" if trace.text_position == "bottom" else "bottom"
             for position in np.flatnonzero(mask):
                 label = labels[position]
                 if label and label != "nan":
+                    role = trace.colors.iloc[position] if trace.colors is not None else trace.color
+                    label_color = theme.c(role) if isinstance(role, str) and role else color
                     ax.annotate(
                         label, (x[position], y[position]), xytext=(0, offset),
                         textcoords="offset points", ha="center", va=vertical,
-                        fontsize=5.8, color=color, fontweight="bold", zorder=trace.zorder + 1,
+                        fontsize=6.2, color="#FFFFFF", fontweight="bold",
+                        bbox=dict(boxstyle="round,pad=0.32", facecolor=label_color,
+                                  edgecolor="none", alpha=0.96),
+                        arrowprops=dict(arrowstyle="-|>", color=label_color, lw=0.8,
+                                        shrinkA=0, shrinkB=2),
+                        zorder=trace.zorder + 1,
                     )
+        else:
+            ax.scatter(x[mask], y[mask], s=trace.width * 2.2, c=point_colors,
+                       marker="o", linewidths=0, zorder=trace.zorder)
         return
 
     if trace.kind in {"bars", "hist"} and trace.y is not None:
@@ -285,7 +302,8 @@ def _draw_trace(ax, trace: Trace, theme: Theme, n: int) -> None:
 
 def _style_axis(ax, theme: Theme, is_last: bool) -> None:
     ax.set_facecolor(theme.c("panel"))
-    ax.grid(True, color=theme.c("grid"), lw=0.6, alpha=theme.grid_alpha, zorder=0)
+    ax.grid(axis="y", color=theme.c("grid"), lw=0.6,
+            alpha=theme.grid_alpha, zorder=0)
     ax.set_axisbelow(True)
     for side in ("top", "right", "bottom", "left"):
         ax.spines[side].set_color(theme.c("axis"))
