@@ -426,6 +426,35 @@ def percentile_rank(series: pd.Series, length: int) -> pd.Series:
     return series.rolling(length, min_periods=max(10, length // 3)).apply(rank, raw=True)
 
 
+def auto_anchored_vwap(data: pd.DataFrame, interval: str) -> tuple[pd.Series, pd.Series, str]:
+    """TradingView Auto Anchored VWAP: hlc3, aktif son dönem ve ağırlıklı std."""
+    source = (data["High"] + data["Low"] + data["Close"]) / 3.0
+    volume = data["Volume"].astype(float).fillna(0.0)
+    index = pd.DatetimeIndex(data.index)
+    if interval in {"1m", "5m", "15m", "30m", "1h", "2h", "3h", "4h"}:
+        groups = pd.Series(index.normalize(), index=data.index)
+        label = "Seans"
+    elif interval == "1d":
+        groups = pd.Series(index.to_period("M").astype(str), index=data.index)
+        label = "Ay"
+    elif interval == "1wk":
+        groups = pd.Series(index.to_period("Q").astype(str), index=data.index)
+        label = "Çeyrek"
+    elif interval == "1mo":
+        groups = pd.Series(index.to_period("Y").astype(str), index=data.index)
+        label = "Yıl"
+    else:
+        groups = pd.Series((index.year // 10) * 10, index=data.index)
+        label = "10 yıl"
+    cumulative_volume = volume.groupby(groups).cumsum().replace(0, np.nan)
+    line = (source * volume).groupby(groups).cumsum() / cumulative_volume
+    variance = (
+        (source.pow(2) * volume).groupby(groups).cumsum() / cumulative_volume - line.pow(2)
+    ).clip(lower=0)
+    active = groups.eq(groups.iloc[-1])
+    return line.where(active), np.sqrt(variance).where(active), label
+
+
 def calculate_indicators(data: pd.DataFrame, interval: str = "1d") -> pd.DataFrame:
     out = data.copy()
     window = rank_window(interval)
@@ -514,8 +543,11 @@ def calculate_indicators(data: pd.DataFrame, interval: str = "1d") -> pd.DataFra
     # TradingView "Commodity Channel Index" varsayılan yumuşatması 14 periyot SMA'dır.
     out["CCI_MA"] = out["CCI"].rolling(14).mean()
 
-    cumulative_volume = out["Volume"].cumsum().replace(0, np.nan)
-    out["VWAP"] = (typical * out["Volume"]).cumsum() / cumulative_volume
+    out["VWAP"], vwap_std, vwap_anchor = auto_anchored_vwap(out, interval)
+    out.attrs["vwap_anchor"] = vwap_anchor
+    for multiplier in (1, 2, 3):
+        out[f"VWAP_UPPER_{multiplier}"] = out["VWAP"] + multiplier * vwap_std
+        out[f"VWAP_LOWER_{multiplier}"] = out["VWAP"] - multiplier * vwap_std
     out["VOLUME_MA"] = out["Volume"].shift(1).rolling(20, min_periods=5).mean()
     out["VOLUME_RATIO"] = out["Volume"] / out["VOLUME_MA"].replace(0, np.nan)
     out["VOLUME_RANK"] = percentile_rank(out["Volume"], window)
@@ -760,7 +792,7 @@ def build_status(
     trend = [
         ["ADX/DMI", f"ADX {fmt(row['ADX'])} | +DI {fmt(row['PLUS_DI'])} | -DI {fmt(row['MINUS_DI'])}", f"{'+DI üstün' if row['PLUS_DI'] > row['MINUS_DI'] else '-DI üstün'} | ADX perc %{fmt(row['ADX_RANK'], 0)} | {diagnostic_text(data['ADX'])}", GREEN if row["PLUS_DI"] > row["MINUS_DI"] else RED],
         ["Supertrend", fmt(row["SUPERTREND"]), "Fiyat üstünde" if price > row["SUPERTREND"] else "Fiyat altında", GREEN if price > row["SUPERTREND"] else RED],
-        ["Dataset VWAP", fmt(row["VWAP"]), f"İndirme başlangıcına bağlı | Fiyat {'üstünde' if price > row['VWAP'] else 'altında'}", GREEN if price > row["VWAP"] else RED],
+        ["Auto AVWAP", f"{fmt(row['VWAP'])} | Çapa {data.attrs.get('vwap_anchor', '—')} | Bant1 {fmt(row['VWAP_LOWER_1'])}–{fmt(row['VWAP_UPPER_1'])} | Bant2 {fmt(row['VWAP_LOWER_2'])}–{fmt(row['VWAP_UPPER_2'])} | Bant3 {fmt(row['VWAP_LOWER_3'])}–{fmt(row['VWAP_UPPER_3'])}", f"TradingView Oto zaman aralığı kuralı | Fiyat {'üstünde' if price > row['VWAP'] else 'altında'}", GREEN if price > row["VWAP"] else RED],
         ["Ichimoku", f"Tenkan {fmt(row['TENKAN'])} | Kijun {fmt(row['KIJUN'])}", cloud_state, GREEN if cloud_state == "Bulut üstü" else RED if cloud_state == "Bulut altı" else YELLOW],
         ["Parabolic SAR", fmt(row["PSAR"]), "SAR fiyat altında" if row["PSAR"] < price else "SAR fiyat üzerinde", GREEN if row["PSAR"] < price else RED],
         ["Bollinger", f"Alt {fmt(row['BB_LOWER'])} | Orta {fmt(row['BB_MID'])} | Üst {fmt(row['BB_UPPER'])}", f"{bb_position} | {bb_state} / {bb_direction} | Perc %{fmt(bb_rank, 0)}", BLUE if bb_rank <= 20 else PURPLE if bb_rank >= 80 else GRAY],
@@ -773,8 +805,8 @@ def build_status(
     resolved_market = str(data.attrs.get("market", config.market if config.market != "AUTO" else "BIST"))
     bar_state = build_bar_state(data, resolved_market, config.interval)
     context = build_market_context(data, periods, config.anchor_date, bar_state=bar_state)
-    for momentum_row in momentum:
-        divergence = context["divergences"]["indicators"].get(momentum_row[0])
+    for indicator_row in [*momentum, *trend]:
+        divergence = context["divergences"]["indicators"].get(indicator_row[0])
         if not divergence:
             continue
         if divergence["detected"]:
@@ -784,9 +816,9 @@ def build_status(
                 f"{divergence['interpretation']} | Fiyat {fmt(divergence['price_first'])}→{fmt(divergence['price_second'])} | "
                 f"Osilatör {fmt(divergence['oscillator_first'])}→{fmt(divergence['oscillator_second'])}"
             )
-            momentum_row[2] += f"\nUyumsuzluk: {detail}"
+            indicator_row[2] += f"\nUyumsuzluk: {detail}"
         else:
-            momentum_row[2] += f"\nUyumsuzluk: {divergence['state']}"
+            indicator_row[2] += f"\nUyumsuzluk: {divergence['state']}"
     decision = build_decision_context(
         data,
         benchmark_data,
