@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+from src.candlestick_patterns import detect_candlestick_patterns
 from src.analyst_card import render_analyst_cards, standardize_pages
 from src.bar_state import build_bar_state
 from src.decision_context import build_decision_context
@@ -1122,12 +1123,12 @@ def _report_panels(data: pd.DataFrame, status: dict[str, Any], text_width: float
             str(item["period"]),
             ma_cell(item["sma"], item.get("sma_relation", "")),
             ma_cell(item["ema"], item.get("ema_relation", "")),
-            ma_cell(item["wma"], item.get("wma_relation", "")),
+            ma_cell(item.get("wma", math.nan), item.get("wma_relation", "Yetersiz veri")),
         ]
         for item in status["ma"]
     ]
     ma_colors = [
-        [HEADER, item["sma_color"], item["ema_color"], item["wma_color"]]
+        [HEADER, item["sma_color"], item["ema_color"], item.get("wma_color", GRAY)]
         for item in status["ma"]
     ]
     excluded = detail_profile(detail)["excluded"]
