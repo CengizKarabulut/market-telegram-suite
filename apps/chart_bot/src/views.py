@@ -1,9 +1,5 @@
 """Gorunumler: gostergeleri odakli karelere ayirir.
 
-On gostergeyi tek bir grafige yigmak yerine, her biri 2-4 katman tasiyan
-ayri kareler uretiriz. Boylece Bollinger'i incelerken MACD gurultusu,
-momentuma bakarken bulut karmasasi ekrani mesgul etmez.
-
 Her gorunum ayni sembol ve ayni bar araligindan cikar; tek veri cekimi ve
 tek hesaplama turuyla hepsi uretilir (bkz. pipeline.build_views).
 
@@ -25,6 +21,7 @@ class View:
     keys: tuple[str, ...]
     note: str
     price_height: float = 3.0
+    panel_scale: float = 1.0
 
     @property
     def compute_keys(self) -> tuple[str, ...]:
@@ -32,31 +29,98 @@ class View:
 
 
 VIEWS: tuple[View, ...] = (
+    # TradingView referans seti. Mum formasyonu etiketleri yalnizca kendine
+    # ait karede bulunur; diger fiyat panelleri temiz kalir.
+    View(
+        key="tv_macd_smi",
+        title="MACD · SMI",
+        keys=("macd", "smi"),
+        note="MACD 12/26/9 · SMI 10/3/3",
+        price_height=2.6,
+        panel_scale=1.45,
+    ),
+    View(
+        key="tv_fisher_rsi",
+        title="Fisher · RSI",
+        keys=("fisher", "rsi"),
+        note="Fisher 9 · RSI 14/SMA14 · teyitli uyumsuzluklar",
+        price_height=2.6,
+        panel_scale=1.45,
+    ),
+    View(
+        key="tv_candles_cci",
+        title="Mum Formasyonları · CCI",
+        keys=("candles", "cci"),
+        note="Trend filtreli mum formasyonları · CCI 20/SMA14",
+        price_height=3.0,
+        panel_scale=1.55,
+    ),
+    View(
+        key="tv_ichimoku_obv",
+        title="Ichimoku · OBV",
+        keys=("ichimoku", "obv"),
+        note="Ichimoku 9/26/52/26 · OBV SMA14+BB2",
+        price_height=3.0,
+        panel_scale=1.55,
+    ),
+    View(
+        key="tv_dmi_momentum",
+        title="DMI · Momentum",
+        keys=("adx", "momentum"),
+        note="ADX/DMI 14 · Momentum 10",
+        price_height=2.6,
+        panel_scale=1.45,
+    ),
+    View(
+        key="tv_vwap_stochrsi",
+        title="Auto AVWAP · Stoch RSI",
+        keys=("vwap", "stochrsi"),
+        note="Auto Anchored VWAP 1/2/3σ · Stoch RSI 14/14/3/3",
+        price_height=3.0,
+        panel_scale=1.55,
+    ),
+    View(
+        key="tv_sar_cmf",
+        title="Parabolic SAR · CMF",
+        keys=("sar", "cmf"),
+        note="Parabolic SAR 0.02/0.02/0.2 · CMF 20",
+        price_height=3.0,
+        panel_scale=1.55,
+    ),
+    View(
+        key="tv_atr",
+        title="ATR",
+        keys=("atr",),
+        note="ATR 14 · RMA yumuşatma",
+        price_height=3.0,
+        panel_scale=1.55,
+    ),
+    # Onceki dort kapsamli sema secilebilir gorunum olarak korunur.
     View(
         key="bollinger_macd",
         title="Bollinger · Momentum · Hacim",
-        keys=("bbands", "macd", "smi", "obv", "candles"),
+        keys=("bbands", "macd", "smi", "obv"),
         note="Bollinger 20/2 · MACD 12/26/9 · SMI 10/3/3 · OBV SMA14+BB2",
         price_height=3.4,
     ),
     View(
         key="ichimoku_rsi",
         title="Ichimoku · Momentum · Volatilite",
-        keys=("ichimoku", "rsi", "cci", "atr", "candles"),
+        keys=("ichimoku", "rsi", "cci", "atr"),
         note="Ichimoku 9/26/52/26 · RSI 14/SMA14 · CCI 20/SMA14 · ATR RMA14",
         price_height=3.4,
     ),
     View(
         key="sar_vwap",
         title="SAR · VWAP · Yön Gücü",
-        keys=("sar", "vwap", "stochrsi", "adx", "candles"),
+        keys=("sar", "vwap", "stochrsi", "adx"),
         note="Parabolic SAR · VWAP bantları · Stoch RSI · ADX/DMI 14",
         price_height=3.4,
     ),
     View(
         key="supertrend_fisher",
         title="Supertrend · Para Akışı · Momentum",
-        keys=("supertrend", "fisher", "cmf", "momentum", "candles"),
+        keys=("supertrend", "fisher", "cmf", "momentum"),
         note="Supertrend 10/3 · Fisher 9 · CMF 20 · Momentum 10",
         price_height=3.4,
     ),
@@ -105,14 +169,20 @@ VIEWS: tuple[View, ...] = (
     ),
 )
 
-#: Izgara olarak gonderilen dort kare
+# TradingView referanslarina gore Telegram'a ayri PNG olarak gonderilen seri.
 GRID_SET: tuple[str, ...] = (
-    "bollinger_macd", "ichimoku_rsi", "sar_vwap", "supertrend_fisher"
+    "tv_macd_smi",
+    "tv_fisher_rsi",
+    "tv_candles_cci",
+    "tv_ichimoku_obv",
+    "tv_dmi_momentum",
+    "tv_vwap_stochrsi",
+    "tv_sar_cmf",
+    "tv_atr",
 )
 
 VIEWS_BY_KEY: dict[str, View] = {v.key: v for v in VIEWS}
 
-#: Telegram'a gonderilen varsayilan set
 DEFAULT_SET: tuple[str, ...] = GRID_SET
 
 
