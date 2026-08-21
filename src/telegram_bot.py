@@ -27,6 +27,11 @@ HELP_TEXT = (
     "/rapor SEMBOL [aralık] — tek hisse teknik raporu (ör. /rapor THYAO 4h)\n"
     "/tara [aralık] — yeni tarama başlatır (boşsa saate göre seçilir)\n"
     "/liste — son taramanın tam listesi\n"
+    "/gecmis [no] — geçmiş taramalar (numarasız: liste)\n"
+    "/takip SEMBOL [aralık] — seviye uyarısı için takibe alır\n"
+    "/takip sil SEMBOL — takipten çıkarır\n"
+    "/esik [ad değer] — tarama eşikleri (ör. /esik rvol 2.0)\n"
+    "/durum — bot ve tarama durumu\n"
     "/yardim — bu mesaj\n\n"
     "Geçerli aralıklar: 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1wk, 1mo"
 )

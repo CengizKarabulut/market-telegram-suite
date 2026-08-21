@@ -42,6 +42,8 @@ jobs:
           path: |
             reports/telegram_offset.json
             reports/scan_schedule.json
+            reports/bot_settings.json
+            reports/watchlist.json
             reports/screener.json
             reports/bist_universe.json
           key: telegram-bot-${{ github.run_id }}
