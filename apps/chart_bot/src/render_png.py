@@ -532,7 +532,9 @@ def _draw_top_band(fig, spec: ChartSpec, theme: Theme, fig_h: float) -> None:
     band.set_ylim(0, 1)
     band.patch.set_alpha(0.0)
 
-    band.text(0.012, 0.68, spec.title, color=theme.c("text"), fontsize=16,
+    long_title = len(spec.title) > 46
+    title_size = 12.5 if long_title else 16
+    band.text(0.012, 0.68, spec.title, color=theme.c("text"), fontsize=title_size,
               fontweight="bold", va="center", ha="left")
     band.text(0.012, 0.26, spec.subtitle, color=theme.c("muted"), fontsize=8.5,
               va="center", ha="left")
@@ -541,7 +543,7 @@ def _draw_top_band(fig, spec: ChartSpec, theme: Theme, fig_h: float) -> None:
     if not chips:
         return
     right_edge = 0.918
-    block_start = max(0.42, right_edge - 0.068 * len(chips))
+    block_start = max(0.50 if long_title else 0.42, right_edge - 0.068 * len(chips))
     slot = (right_edge - block_start) / len(chips)
     for i, (label, value, role) in enumerate(chips):
         cx = block_start + slot * (i + 0.5)
