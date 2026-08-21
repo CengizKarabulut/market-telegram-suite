@@ -70,13 +70,13 @@ INTRADAY = {"1m", "5m", "15m", "30m", "1h", "2h", "4h"}
 def default_params(interval: str, params: dict[str, dict] | None = None) -> dict[str, dict]:
     """Araliga gore gosterge varsayilanlarini secer.
 
-    Kritik olan VWAP: gun ici barlarda seans basinda sifirlanan kumulatif VWAP
-    dogru olandir, ama gunluk barlarda her grup tek bardan olusacagi icin VWAP
-    fiyatin kendisine esitlenir ve gosterge anlamsizlasir. Gunluk ve ustu
-    periyotlarda 20 barlik hareketli VWAP kullanilir.
+    VWAP Auto Anchored, TradingView'in resmi zaman araligi kuralini izler:
+    gun icinde son seans, gunlukte son ay, haftalikta son ceyrek ve aylikta
+    son yil baslangicindan itibaren hesaplanir.
     """
-    merged: dict[str, dict] = {"vwap": {"anchor": "session" if interval in INTRADAY else "rolling",
-                                        "window": 20}}
+    merged: dict[str, dict] = {
+        "vwap": {"anchor": "auto", "interval": interval, "window": 14}
+    }
     for key, value in (params or {}).items():
         merged[key] = {**merged.get(key, {}), **value}
     return merged
