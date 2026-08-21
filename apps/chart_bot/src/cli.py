@@ -33,7 +33,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--symbol", "-s", required=True,
                         help="THYAO, AAPL, BTC-USD, bist:ASELS, crypto:ETH ...")
     parser.add_argument("--views", "-v", default="set",
-                        help="Gorunum secimi: 'set' (6 kare), 'all' (7 kare) veya "
+                        help="Gorunum secimi: 'set' (8 referans kare), 'all' veya "
                              "virgullu liste: " + ", ".join(VIEWS_BY_KEY))
     parser.add_argument("--indicators", default=None,
                         help="Gorunum yerine serbest gosterge listesi (tek kare uretir). "
@@ -44,13 +44,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              f"Gecerli: {', '.join(DEFAULT_PERIODS)}")
     parser.add_argument("--bars", "-b", type=int, default=None,
                         help="Grafikte gosterilecek bar sayisi. Verilmezse araliga "
-                             "gore secilir (gunluk 250, haftalik 180, aylik 96).")
+                             "gore secilir (gunluk 170, haftalik 180, aylik 96).")
     parser.add_argument("--period", default=None,
                         help="Cekilecek gecmis (1mo, 1y, 5y, max). Bos ise araliga gore secilir.")
     parser.add_argument("--scale", default="auto", choices=["auto", "log", "linear"],
                         help="Fiyat ekseni. auto: aralik 4 kati asarsa log")
     parser.add_argument("--theme", default="tv", choices=["tv", "ink", "paper"])
-    parser.add_argument("--grid", type=int, default=2, metavar="SUTUN",
+    parser.add_argument("--grid", type=int, default=0, metavar="SUTUN",
                         help="Kareleri tek gorselde birlestir (sutun sayisi). "
                              "0 = birlestirme, kareler ayri PNG kalir.")
     parser.add_argument("--outdir", "-o", default="out", help="Cikti klasoru")
