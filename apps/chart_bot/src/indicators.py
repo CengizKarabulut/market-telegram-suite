@@ -452,15 +452,18 @@ def adx_dmi(
     up = df["High"].diff()
     down = -df["Low"].diff()
     plus_dm = pd.Series(
-        np.where((up > down) & (up > 0), up, 0.0), index=df.index, dtype="float64"
+        np.where(up.isna(), np.nan, np.where((up > down) & (up > 0), up, 0.0)),
+        index=df.index, dtype="float64",
     )
     minus_dm = pd.Series(
-        np.where((down > up) & (down > 0), down, 0.0), index=df.index, dtype="float64"
+        np.where(down.isna(), np.nan, np.where((down > up) & (down > 0), down, 0.0)),
+        index=df.index, dtype="float64",
     )
     tr_rma = rma(true_range(df), di_length).replace(0, np.nan)
-    plus_di = 100.0 * rma(plus_dm, di_length) / tr_rma
-    minus_di = 100.0 * rma(minus_dm, di_length) / tr_rma
-    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    plus_di = (100.0 * rma(plus_dm, di_length) / tr_rma).ffill()
+    minus_di = (100.0 * rma(minus_dm, di_length) / tr_rma).ffill()
+    denominator = (plus_di + minus_di).where((plus_di + minus_di) != 0, 1.0)
+    dx = 100.0 * (plus_di - minus_di).abs() / denominator
     return {"ADX": rma(dx, adx_length), "DI_plus": plus_di, "DI_minus": minus_di}
 
 
