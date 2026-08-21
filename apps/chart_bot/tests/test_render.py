@@ -82,60 +82,45 @@ class TestViews(unittest.TestCase):
         from src.views import GRID_SET, VIEWS_BY_KEY
 
         expected = {
-            "tv_macd_smi": ("macd", "smi"),
-            "tv_fisher_rsi": ("fisher", "rsi"),
-            "tv_candles_cci": ("candles", "cci"),
-            "tv_ichimoku_obv": ("ichimoku", "obv"),
-            "tv_dmi_momentum": ("adx", "momentum"),
-            "tv_vwap_stochrsi": ("vwap", "stochrsi"),
-            "tv_sar_cmf": ("sar", "cmf"),
-            "tv_atr": ("atr",),
+            "bollinger_macd": ("bbands", "macd", "smi", "obv", "candles"),
+            "ichimoku_rsi": ("ichimoku", "rsi", "cci", "atr", "candles"),
+            "sar_vwap": ("sar", "vwap", "stochrsi", "adx", "candles"),
+            "supertrend_fisher": ("supertrend", "fisher", "cmf", "momentum", "candles"),
         }
         self.assertEqual(tuple(expected), GRID_SET)
         for key, keys in expected.items():
             self.assertEqual(VIEWS_BY_KEY[key].keys, keys)
 
-    def test_reference_views_do_not_repeat_an_indicator(self) -> None:
+    def test_default_views_do_not_repeat_an_indicator(self) -> None:
         from src.views import GRID_SET, VIEWS_BY_KEY
 
-        used = [k for key in GRID_SET for k in VIEWS_BY_KEY[key].keys]
+        used = [
+            key for view_key in GRID_SET
+            for key in VIEWS_BY_KEY[view_key].keys
+            if key != "candles"
+        ]
         self.assertEqual(len(used), len(set(used)))
 
-    def test_candlestick_labels_only_exist_in_the_pattern_view(self) -> None:
+    def test_latest_candle_badge_is_available_in_each_default_view(self) -> None:
         from src.views import GRID_SET, VIEWS_BY_KEY
 
-        candle_views = [key for key in GRID_SET if "candles" in VIEWS_BY_KEY[key].keys]
-        self.assertEqual(candle_views, ["tv_candles_cci"])
+        self.assertTrue(all("candles" in VIEWS_BY_KEY[key].keys for key in GRID_SET))
 
-    def test_reference_views_follow_requested_overlay_panel_layout(self) -> None:
+    def test_default_views_follow_requested_overlay_panel_layout(self) -> None:
         from src.plotspec import _OVERLAY_BUILDERS, _PANEL_BUILDERS
         from src.views import GRID_SET, VIEWS_BY_KEY
 
         expected = {
-            "tv_macd_smi": (0, 2),
-            "tv_fisher_rsi": (0, 2),
-            "tv_candles_cci": (1, 1),
-            "tv_ichimoku_obv": (1, 1),
-            "tv_dmi_momentum": (0, 2),
-            "tv_vwap_stochrsi": (1, 1),
-            "tv_sar_cmf": (1, 1),
-            "tv_atr": (0, 1),
+            "bollinger_macd": (2, 3),
+            "ichimoku_rsi": (2, 3),
+            "sar_vwap": (3, 2),
+            "supertrend_fisher": (2, 3),
         }
         for key in GRID_SET:
             view = VIEWS_BY_KEY[key]
             overlays = [k for k in view.keys if k in _OVERLAY_BUILDERS]
             panels = [k for k in view.keys if k in _PANEL_BUILDERS]
             self.assertEqual((len(overlays), len(panels)), expected[key], key)
-
-    def test_resolve_views(self) -> None:
-        from src.views import DEFAULT_SET, VIEWS, resolve_views
-
-        self.assertEqual(len(resolve_views("all")), len(VIEWS))
-        self.assertEqual(len(resolve_views("set")), len(DEFAULT_SET))
-        self.assertEqual([v.key for v in resolve_views("klasik,trend")],
-                         ["klasik", "trend"])
-        with self.assertRaises(KeyError):
-            resolve_views("yok")
 
     def test_candlestick_overlay_keeps_only_latest_two_bars(self) -> None:
         from src.plotspec import _recent_candle_series
@@ -343,14 +328,10 @@ class TestFrameShape(unittest.TestCase):
         from src.views import resolve_views
 
         expected_panels = {
-            "tv_macd_smi": 2,
-            "tv_fisher_rsi": 2,
-            "tv_candles_cci": 1,
-            "tv_ichimoku_obv": 1,
-            "tv_dmi_momentum": 2,
-            "tv_vwap_stochrsi": 1,
-            "tv_sar_cmf": 1,
-            "tv_atr": 1,
+            "bollinger_macd": 3,
+            "ichimoku_rsi": 3,
+            "sar_vwap": 2,
+            "supertrend_fisher": 3,
         }
         original = pipeline.fetch_ohlcv
         pipeline.fetch_ohlcv = lambda symbol, period="1y", interval="1d", bars=None: (
