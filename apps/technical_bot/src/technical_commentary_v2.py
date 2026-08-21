@@ -385,6 +385,59 @@ def _short_history_note(context: dict[str, Any]) -> str:
     )
 
 
+def _indicator_confirmation(data: pd.DataFrame) -> dict[str, str]:
+    """Gösterge ailelerini sade cümleye çevirir; ayrı oy veya puan üretmez."""
+    row = data.iloc[-1]
+    previous = data.iloc[-2]
+    momentum: list[str] = []
+    flow: list[str] = []
+
+    rsi_value = _number(row.get("RSI"))
+    momentum.append(
+        f"RSI {rsi_value:.1f} ile " + ("güçlü bölgede" if rsi_value >= 50 else "zayıf bölgede")
+    )
+    hist = _number(row.get("MACD_HIST"))
+    prev_hist = _number(previous.get("MACD_HIST"))
+    momentum.append(
+        "MACD yükseliş ivmesi " + ("artıyor" if hist > prev_hist else "azalıyor")
+        if hist >= 0
+        else "MACD düşüş baskısı " + ("azalıyor" if hist > prev_hist else "artıyor")
+    )
+    momentum.append(
+        "SMI sinyalinin üzerinde" if _number(row.get("SMI")) > _number(row.get("SMI_EMA"))
+        else "SMI sinyalinin altında"
+    )
+    momentum.append(
+        "Stokastik RSI kısa vadede yukarı dönük"
+        if _number(row.get("STOCH_K")) > _number(row.get("STOCH_D"))
+        else "Stokastik RSI kısa vadede aşağı dönük"
+    )
+    momentum.append(
+        "Fisher tetik çizgisinin üzerinde"
+        if _number(row.get("FISHER")) > _number(row.get("FISHER_TRIGGER"))
+        else "Fisher tetik çizgisinin altında"
+    )
+    momentum.append(
+        "10 barlık momentum pozitif"
+        if _number(row.get("MOMENTUM")) > 0
+        else "10 barlık momentum negatif"
+    )
+
+    flow.append(
+        "CMF para akışı pozitif" if _number(row.get("CMF")) > 0 else "CMF para akışı negatif"
+    )
+    flow.append(
+        "OBV kendi SMA14 çizgisinin üzerinde"
+        if _number(row.get("OBV")) > _number(row.get("OBV_SMA"))
+        else "OBV kendi SMA14 çizgisinin altında"
+    )
+    return {
+        "state": "Momentum ve para akışı birlikte okunur",
+        "summary": "; ".join(momentum) + ". Para akışı: " + "; ".join(flow) + ".",
+        "method": "Aynı ailedeki göstergeler bağımsız oy gibi toplanmaz; yön, ivme ve para akışı teyitleri olarak açıklanır.",
+    }
+
+
 def build_technical_commentary(
     data: pd.DataFrame,
     context: dict[str, Any],
@@ -401,6 +454,7 @@ def build_technical_commentary(
     scenario = _scenario_map(context, decision, direction_tone, levels)
     supporting, counter, clarity = _evidence_and_clarity(context, decision, direction_tone, bar_state)
     changes = _changes(data, context)
+    indicator_confirmation = _indicator_confirmation(data)
     reconciliation = reconcile(context.get("setup_context", {}).get("setup", {"name": direction}), supporting, counter)
     analyst_note = _analyst_note(opening, context, decision, scenario, reconciliation)
     rs_state, rs_tone, rs_meaning = _rs_text(decision)
@@ -411,6 +465,7 @@ def build_technical_commentary(
         ["Rejim", regime, f"ADX Δ {adx_delta:+.2f}", opening, context.get("regime", {}).get("tone", "warning")],
         ["Yapı / trend", f"{context.get('structure', {}).get('state', '—')} | {semantic.get('trend_quality', {}).get('state', '—')}", semantic.get("trend_quality", {}).get("spread_state", "—"), semantic.get("trend_quality", {}).get("summary", "—"), context.get("structure", {}).get("tone", "neutral")],
         ["Momentum", semantic.get("momentum_character", {}).get("state", "—"), semantic.get("momentum_character", {}).get("macd", {}).get("histogram_character", "—"), semantic.get("momentum_character", {}).get("summary", "—"), semantic.get("momentum_character", {}).get("tone", "warning")],
+        ["Gösterge teyitleri", indicator_confirmation["state"], "Aynı aile tek kanıt", indicator_confirmation["summary"], "neutral"],
         ["Katılım", setup_context.get("participation_reading", {}).get("state", semantic.get("participation", {}).get("state", "—")), f"RVOL {semantic.get('participation', {}).get('rvol_1', math.nan):.2f}x", setup_context.get("participation_reading", {}).get("meaning", semantic.get("participation", {}).get("summary", "—")), setup_context.get("participation_reading", {}).get("tone", "warning")],
         ["Konum", context.get("profile", {}).get("position", "—"), context.get("profile", {}).get("poc_migration", "—"), _location_text(context), context.get("profile", {}).get("tone", "neutral")],
         ["Göreceli güç", rs_state, f"Eğim5 %{_number(decision.get('relative_strength', {}).get('ratio_slope_5_pct')):+.2f}", rs_meaning, rs_tone],
@@ -434,6 +489,9 @@ def build_technical_commentary(
             "",
             "🧭 Analist Notu",
             analyst_note,
+            "",
+            "📐 Gösterge Teyitleri",
+            indicator_confirmation["summary"],
             "",
             "⚖️ Neden bu okuma?",
             reconciliation,
@@ -464,6 +522,7 @@ def build_technical_commentary(
         "tone": tone,
         "headline": headline,
         "analyst_note": analyst_note,
+        "indicator_confirmation": indicator_confirmation,
         "direction": direction,
         "regime": regime,
         "changes": changes,
