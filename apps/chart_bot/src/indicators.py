@@ -647,7 +647,7 @@ def cci(df: pd.DataFrame, length: int = 20) -> dict[str, pd.Series]:
         lambda w: np.abs(w - w.mean()).mean(), raw=True
     )
     value = (tp - ma) / (0.015 * mad.replace(0, np.nan))
-    result = {"CCI": value}
+    result = {"CCI": value, "CCI_ma": sma(value, 14)}
     result.update(confirmed_divergence_lines(df, value, "CCI"))
     return result
 
