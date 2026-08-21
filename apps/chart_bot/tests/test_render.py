@@ -1018,7 +1018,7 @@ class TestSelfRestart(unittest.TestCase):
             self.assertTrue(bot_runner.restart_self())
 
         self.assertIn("kisi/depo", captured["url"])
-        self.assertIn("telegram-bot.yml", captured["url"])
+        self.assertIn("chart-bot.yml", captured["url"])
         self.assertEqual(captured["json"], {"ref": "main"})
         self.assertIn("pat123", captured["headers"]["Authorization"])
 
