@@ -550,6 +550,8 @@ def calculate_indicators(data: pd.DataFrame, interval: str = "1d") -> pd.DataFra
         out[f"VWAP_LOWER_{multiplier}"] = out["VWAP"] - multiplier * vwap_std
     out["VOLUME_MA"] = out["Volume"].shift(1).rolling(20, min_periods=5).mean()
     out["VOLUME_RATIO"] = out["Volume"] / out["VOLUME_MA"].replace(0, np.nan)
+    for column, values in detect_candlestick_patterns(out).items():
+        out[column] = values
     out["VOLUME_RANK"] = percentile_rank(out["Volume"], window)
 
     out["TENKAN"] = (out["High"].rolling(9).max() + out["Low"].rolling(9).min()) / 2
@@ -800,6 +802,18 @@ def build_status(
         ["Hacim", f"{fmt(row['Volume'], 0)} | Ort. {fmt(row['VOLUME_MA'], 0)}", f"{fmt(row['VOLUME_RATIO'])}x | Perc %{fmt(row['VOLUME_RANK'], 0)}", PURPLE if row["VOLUME_RATIO"] >= 1.2 else GRAY],
         ["OBV", f"{fmt(row['OBV'], 0)} | SMA14 {fmt(row['OBV_SMA'], 0)} | BB {fmt(row['OBV_BB_LOWER'], 0)}–{fmt(row['OBV_BB_UPPER'], 0)}", f"{normalized_gap_state(data['OBV'], data['OBV_SMA'])} | {diagnostic_text(data['OBV'])}", GREEN if row["OBV"] > row["OBV_SMA"] else RED],
         ["CMF", f"CMF20 {fmt(cmf_value)}", "Pozitif para akışı" if cmf_value > 0 else "Negatif para akışı", GREEN if cmf_value > 0 else RED],
+        [
+            "Mum formasyonu",
+            " | ".join(
+                value for value in (
+                    str(row.get("CANDLE_BULL_NAMES", "")),
+                    str(row.get("CANDLE_BEAR_NAMES", "")),
+                    str(row.get("CANDLE_NEUTRAL_NAMES", "")),
+                ) if value and value != "nan"
+            ) or "Bu barda seçili formasyon yok",
+            "SMA50/SMA200 trend bağlamı; tek başına yön sinyali değildir",
+            GREEN if str(row.get("CANDLE_BULL_NAMES", "")) not in {"", "nan"} and str(row.get("CANDLE_BEAR_NAMES", "")) in {"", "nan"} else RED if str(row.get("CANDLE_BEAR_NAMES", "")) not in {"", "nan"} and str(row.get("CANDLE_BULL_NAMES", "")) in {"", "nan"} else YELLOW,
+        ],
     ]
 
     resolved_market = str(data.attrs.get("market", config.market if config.market != "AUTO" else "BIST"))
