@@ -38,7 +38,7 @@ INTERVAL_LABELS = {
 DEFAULT_BARS: dict[str, int] = {
     "1m": 180, "5m": 200, "15m": 220, "30m": 240,
     "1h": 250, "2h": 250, "3h": 250, "4h": 250,
-    "1d": 250, "1wk": 180, "1mo": 96,
+    "1d": 170, "1wk": 180, "1mo": 96,
 }
 
 
@@ -286,6 +286,7 @@ def build_views(
                     subtitle=subtitle,
                     note=view.note,
                     price_height=view.price_height,
+                    panel_scale=view.panel_scale,
                     last_bar_open=bar_open,
                     log_price=log_price,
                 ),
@@ -319,6 +320,7 @@ def build_chart(
         keys=keys,
         note=", ".join(keys),
         price_height=3.4,
+        panel_scale=1.0,
     )
     return build_views(
         symbol, (view,), interval=interval, bars=bars, period=period,
