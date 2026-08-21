@@ -42,9 +42,9 @@ on:
       interval:
         description: "Mum aralığı (virgülle birden fazla)"
         required: true
-        default: "1h,4h"
+        default: "auto"
         type: choice
-        options: ["1h,4h", "1d,1wk,1mo", "1h,4h,1d,1wk,1mo", "1h", "4h", "1d", "1wk", "1mo", "15m", "30m"]
+        options: [auto, "1h,4h", "1d,1wk,1mo", "1h,4h,1d,1wk,1mo", "1h", "4h", "1d", "1wk", "1mo", "15m", "30m"]
       report_top:
         description: "Kaç yeni eşleşme için tam rapor üretilsin (0 = yalnızca tarama kartı)"
         required: true
@@ -109,11 +109,10 @@ jobs:
           INPUT_RVOL_MIN: ${{ inputs.rvol_min || '1.5' }}
           INPUT_RVOL_SPIKE: ${{ inputs.rvol_spike || '3.0' }}
           INPUT_MIN_TURNOVER: ${{ inputs.min_turnover || '20000000' }}
-          # Kapanış koşusu günlük barla, seans içi koşular saatlik barla çalışır.
-          # Hızlı dilimler seans içinde, yavaş dilimler kapanışta taranır.
-          # Haftalık/aylık barlar gün içinde anlamlı değişmez; her koşuda taramak
-          # sağlayıcı yükünü gereksiz üçe katlar.
-          INPUT_INTERVAL: ${{ inputs.interval || (github.event.schedule == '30 16 * * 1-5' && '1d,1wk,1mo' || '1h,4h') }}
+          # 'auto' saate göre çözülür: seans içinde hızlı dilimler, kapanıştan
+          # sonra yavaş dilimler. Karar Python tarafında verilir; iş akışı
+          # ifadeleri test edilemediği için sessizce boş dönebiliyordu.
+          INPUT_INTERVAL: ${{ inputs.interval || 'auto' }}
           INPUT_REPORT_TOP: ${{ inputs.report_top || '3' }}
           SEND_TELEGRAM: ${{ github.event_name == 'schedule' || inputs.send_telegram }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

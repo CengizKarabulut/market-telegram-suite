@@ -77,3 +77,36 @@ class StateTests(unittest.TestCase):
             path = Path(directory) / "schedule.json"
             save_state({"a": "b"}, path)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"a": "b"})
+
+
+class IntervalResolutionTests(unittest.TestCase):
+    """Aralık seçimi iş akışı ifadesinden Python'a taşındı; burada sabitlenir."""
+
+    def test_auto_uses_fast_intervals_during_the_session(self) -> None:
+        from src.scan_scheduler import resolve_intervals
+
+        for hour in (10, 12, 14, 17):
+            self.assertEqual(resolve_intervals("auto", moment(17, hour, 30)), "1h,4h")
+
+    def test_auto_uses_slow_intervals_after_the_close(self) -> None:
+        from src.scan_scheduler import resolve_intervals
+
+        self.assertEqual(resolve_intervals("auto", moment(17, 19, 30)), "1d,1wk,1mo")
+        self.assertEqual(resolve_intervals("auto", moment(17, 22, 0)), "1d,1wk,1mo")
+
+    def test_explicit_value_is_respected(self) -> None:
+        from src.scan_scheduler import resolve_intervals
+
+        self.assertEqual(resolve_intervals("1h,1d", moment(17, 11, 0)), "1h,1d")
+
+    def test_empty_value_never_falls_back_to_daily(self) -> None:
+        """Boş değer sessizce '1d' olmamalı; hata bu yüzden fark edilmemişti."""
+        from src.scan_scheduler import resolve_intervals
+
+        self.assertEqual(resolve_intervals("", moment(17, 11, 0)), "1h,4h")
+        self.assertEqual(resolve_intervals(None, moment(17, 11, 0)), "1h,4h")
+
+    def test_case_insensitive_auto(self) -> None:
+        from src.scan_scheduler import resolve_intervals
+
+        self.assertEqual(resolve_intervals("AUTO", moment(17, 11, 0)), "1h,4h")

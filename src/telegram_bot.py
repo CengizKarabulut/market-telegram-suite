@@ -25,7 +25,7 @@ VALID_TICKER = re.compile(r"^[A-Z0-9]{4,6}$")
 HELP_TEXT = (
     "Kullanılabilir komutlar:\n"
     "/rapor SEMBOL [aralık] — tek hisse teknik raporu (ör. /rapor THYAO 4h)\n"
-    "/tara [aralık] — yeni tarama başlatır (ör. /tara 1h,1d)\n"
+    "/tara [aralık] — yeni tarama başlatır (boşsa saate göre seçilir)\n"
     "/liste — son taramanın tam listesi\n"
     "/yardim — bu mesaj\n\n"
     "Geçerli aralıklar: 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1wk, 1mo"
@@ -125,7 +125,8 @@ def validate_report_args(args: list[str], intervals: set[str]) -> tuple[str | No
 def validate_scan_args(args: list[str], intervals: set[str]) -> tuple[str, str | None]:
     """/tara argümanlarını doğrular; (aralık listesi, hata) döndürür."""
     if not args:
-        return "1h,1d", None
+        # Saate göre çözülür; sabit bir liste seans dışında yanlış aralık verir.
+        return "auto", None
     requested = [item.strip().lower() for item in args[0].split(",") if item.strip()]
     invalid = [item for item in requested if item not in intervals]
     if invalid:

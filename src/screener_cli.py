@@ -20,6 +20,7 @@ import pandas as pd
 from src.analyst_card import render_analyst_cards, standardize_pages
 from src.intervals import resolve
 from src.scan_card import render_scan_cards
+from src.scan_scheduler import resolve_intervals
 from src.scan_state import (
     MARKET_TIMEZONE,
     load_state,
@@ -189,7 +190,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--watchlist", default="watchlist.txt", help="Yerel sembol listesi (yedek kaynak)")
     parser.add_argument("--limit", type=int, default=0, help="En fazla kaç sembol taransın (0 = sınırsız)")
     parser.add_argument("--period", default="", help="Boşsa mum aralığının varsayılan dönemi kullanılır")
-    parser.add_argument("--interval", default="1d", help="Tek aralık veya virgülle birden fazla (ör. 1h,1d)")
+    parser.add_argument("--interval", default="auto", help="'auto', tek aralık veya virgülle birden fazla (ör. 1h,4h)")
     parser.add_argument("--batch-size", type=int, default=40)
     parser.add_argument("--screens", default="", help="Virgülle ayrılmış tarama adları; boşsa hepsi")
     parser.add_argument("--bb-rank-max", type=float, default=default_options()["bb_rank_max"])
@@ -220,7 +221,10 @@ def main() -> None:
         "rvol_spike": args.rvol_spike,
         "min_turnover": args.min_turnover,
     }
-    intervals = [item.strip() for item in args.interval.split(",") if item.strip()] or ["1d"]
+    selection = resolve_intervals(args.interval)
+    intervals = [item.strip() for item in selection.split(",") if item.strip()]
+    if not intervals:
+        raise SystemExit(f"Geçersiz aralık değeri: {args.interval!r}")
     started = time.perf_counter()
     payloads: dict[str, dict[str, Any]] = {}
     scan_frames: dict[str, Any] = {}

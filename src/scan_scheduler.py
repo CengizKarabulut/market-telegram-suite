@@ -87,3 +87,22 @@ def mark_done(slot: Slot, current: datetime, state: dict[str, str]) -> dict[str,
     updated = dict(state)
     updated[slot.key] = current.date().isoformat()
     return updated
+
+# Seans sonrası koşuların sınırı; bu saatten sonra yavaş dilimler taranır.
+CLOSE_HOUR = 18
+
+
+def resolve_intervals(value: str, current: datetime | None = None) -> str:
+    """'auto' değerini saate göre gerçek aralık listesine çevirir.
+
+    Aralık seçimi daha önce iş akışı dosyasındaki koşullu ifadeyle yapılıyordu;
+    orası test edilemediği için sessizce boş dönüp varsayılana düşebiliyordu.
+    Karar burada verilir ve testlerle sabitlenir.
+    """
+    cleaned = (value or "").strip()
+    if cleaned and cleaned.lower() != "auto":
+        return cleaned
+    moment = current or now_market()
+    if moment.hour >= CLOSE_HOUR:
+        return SLOTS[-1].intervals
+    return SLOTS[0].intervals

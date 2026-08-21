@@ -36,11 +36,14 @@ from src.telegram_bot import (
     validate_report_args,
     validate_scan_args,
 )
-from src.telegram_client import send_analyst_cards
+from src.telegram_client import send_analyst_cards, send_text
 
 REPORTS_DIR = Path("reports")
 SCREENER_JSON = REPORTS_DIR / "screener.json"
 MAX_COMMANDS_PER_RUN = 5
+# Başarısız tarama tetiklemeleri arasında beklenecek süre.
+DISPATCH_RETRY_SECONDS = 300.0
+_last_dispatch_attempt = 0.0
 
 
 def reply(chat_id: int, text: str) -> None:
@@ -140,11 +143,18 @@ def check_schedule() -> None:
     """
     if os.getenv("BOT_DRIVES_SCAN", "1").strip().lower() not in {"1", "true", "yes", "evet"}:
         return
+    global _last_dispatch_attempt
     state = load_state()
     current = now_market()
     slot = due_slot(current, state)
     if slot is None:
         return
+    # Tetikleme başarısız olursa döngü onu her turda (25 sn) yeniden denerdi;
+    # başarısız denemeler arasına bekleme konur.
+    now = time.perf_counter()
+    if now - _last_dispatch_attempt < DISPATCH_RETRY_SECONDS:
+        return
+    _last_dispatch_attempt = now
     print(f"Zamanlanmış tarama slotu: {slot.key} ({slot.intervals})")
     ok, message = dispatch_scan(slot.intervals)
     print(f"  {message}")
@@ -203,7 +213,16 @@ def restart_self() -> None:
         json={"ref": os.getenv("GITHUB_REF_NAME", "main")},
         timeout=30,
     )
-    print("Sonraki dinleme turu tetiklendi." if response.status_code == 204 else f"Tetikleme başarısız: HTTP {response.status_code}")
+    if response.status_code == 204:
+        print("Sonraki dinleme turu tetiklendi.")
+        return
+    # Zincir koptuğunda sessiz kalmak, botun çalıştığı sanılmasına yol açar.
+    message = f"⚠ Bot dinleme zinciri devam ettirilemedi (HTTP {response.status_code}). Komutlar bir sonraki saat başına kadar gecikebilir."
+    print(message)
+    try:
+        send_text(message)
+    except Exception as error:  # noqa: BLE001 -- bildirim hatası koşuyu bozmamalı
+        print(f"  bildirim gönderilemedi: {type(error).__name__}")
 
 
 def main() -> None:

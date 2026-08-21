@@ -94,8 +94,9 @@ class ValidationTests(unittest.TestCase):
     def test_report_requires_a_symbol(self) -> None:
         self.assertIn("Sembol belirtilmedi", validate_report_args([], INTERVAL_SET)[2])
 
-    def test_scan_defaults_to_combined_intervals(self) -> None:
-        self.assertEqual(validate_scan_args([], INTERVAL_SET), ("1h,1d", None))
+    def test_scan_defaults_to_clock_based_selection(self) -> None:
+        """Argümansız /tara saate göre çözülür; sabit liste seans dışında yanlış olur."""
+        self.assertEqual(validate_scan_args([], INTERVAL_SET), ("auto", None))
 
     def test_scan_accepts_multiple_intervals(self) -> None:
         self.assertEqual(validate_scan_args(["1h,4h"], INTERVAL_SET)[0], "1h,4h")
@@ -164,3 +165,9 @@ class LongPollingTests(unittest.TestCase):
         response = Mock(ok=False, status_code=401, text="unauthorized")
         with patch("src.telegram_bot.requests.get", return_value=response), self.assertRaises(RuntimeError):
             fetch_updates("token", 0)
+
+
+class ScanDefaultTests(unittest.TestCase):
+    def test_bare_scan_command_defers_to_the_clock(self) -> None:
+        """Sabit bir aralık listesi seans dışında yanlış olur."""
+        self.assertEqual(validate_scan_args([], INTERVAL_SET), ("auto", None))
