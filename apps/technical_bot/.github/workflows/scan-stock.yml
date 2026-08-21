@@ -1,0 +1,147 @@
+name: Hisse Teknik Tarama
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Hisse sembolü (ör. THYAO, ASELS veya AAPL)"
+        required: true
+        default: "THYAO"
+        type: string
+      market:
+        description: "Piyasa"
+        required: true
+        default: "BIST"
+        type: choice
+        options: [BIST, US, AUTO]
+      provider:
+        description: "Veri kaynağı (AUTO: BIST için TradingView, hatada yfinance)"
+        required: true
+        default: "AUTO"
+        type: choice
+        options: [AUTO, BORSAPY, YFINANCE]
+      anchor_date:
+        description: "Manuel AVWAP başlangıcı (YYYY-MM-DD, boşsa yıl başı)"
+        required: false
+        default: ""
+        type: string
+      period:
+        description: "Veri dönemi (boş bırakılırsa mum aralığına göre seçilir)"
+        required: false
+        default: ""
+        type: choice
+        options: ["", 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, max]
+      interval:
+        description: "Mum aralığı (2h ve 4h saatlik veriden türetilir)"
+        required: true
+        default: "1d"
+        type: choice
+        options: ["5m", "15m", "30m", "1h", "2h", "4h", "1d", "1wk", "1mo"]
+      report_detail:
+        description: "Ayrıntı seviyesi (kompakt: 4 görsel, dengeli: 6, tam: 7)"
+        required: true
+        default: "kompakt"
+        type: choice
+        options: [kompakt, dengeli, tam]
+      benchmark:
+        description: "Göreceli güç benchmarkı (BIST varsayılanı XU100)"
+        required: false
+        default: ""
+        type: string
+      account_size:
+        description: "Opsiyonel örnek risk hesabı portföy büyüklüğü (0=kapalı)"
+        required: true
+        default: "0"
+        type: string
+      risk_pct:
+        description: "Örnek risk bütçesi yüzdesi"
+        required: true
+        default: "1"
+        type: string
+      atr_multiple:
+        description: "ATR volatilite mesafesi çarpanı"
+        required: true
+        default: "1.5"
+        type: string
+      send_telegram:
+        description: "Görseli Telegram grubuna gönder"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stock-scan-${{ github.ref }}-${{ inputs.ticker }}-${{ inputs.interval }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v6
+
+      - name: Python kur
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Bağımlılıkları yükle
+        run: python -m pip install --requirement requirements.txt
+
+      - name: Testleri çalıştır
+        run: python -m unittest discover -s tests -v
+
+      - name: Teknik raporu üret
+        env:
+          INPUT_TICKER: ${{ inputs.ticker }}
+          INPUT_MARKET: ${{ inputs.market }}
+          INPUT_PROVIDER: ${{ inputs.provider }}
+          INPUT_ANCHOR_DATE: ${{ inputs.anchor_date }}
+          INPUT_PERIOD: ${{ inputs.period }}
+          INPUT_INTERVAL: ${{ inputs.interval }}
+          INPUT_REPORT_DETAIL: ${{ inputs.report_detail }}
+          INPUT_BENCHMARK: ${{ inputs.benchmark }}
+          INPUT_ACCOUNT_SIZE: ${{ inputs.account_size }}
+          INPUT_RISK_PCT: ${{ inputs.risk_pct }}
+          INPUT_ATR_MULTIPLE: ${{ inputs.atr_multiple }}
+        run: |
+          python -m src.stock_dashboard \
+            --ticker "$INPUT_TICKER" \
+            --market "$INPUT_MARKET" \
+            --provider "$INPUT_PROVIDER" \
+            --anchor-date "$INPUT_ANCHOR_DATE" \
+            --period "$INPUT_PERIOD" \
+            --warmup-period "" \
+            --interval "$INPUT_INTERVAL" \
+            --report-detail "$INPUT_REPORT_DETAIL" \
+            --benchmark "$INPUT_BENCHMARK" \
+            --account-size "$INPUT_ACCOUNT_SIZE" \
+            --risk-pct "$INPUT_RISK_PCT" \
+            --atr-multiple "$INPUT_ATR_MULTIPLE"
+
+      - name: Telegram grubunun 3982 konusuna gönder
+        if: ${{ inputs.send_telegram }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: "-1003502567927"
+          # Telegram forum konu kimliği (web bağlantısındaki son sayı).
+          TELEGRAM_MESSAGE_THREAD_ID: "3982"
+          # Görsel altı açıklama isteniyorsa: "1"
+          TELEGRAM_SEND_CAPTION: "0"
+          # Kart görseline ek olarak düz metin de isteniyorsa: "1"
+          TELEGRAM_SEND_TEXT_DETAIL: "0"
+        run: python -m src.send_telegram
+
+      - name: Raporu Actions artifact olarak sakla
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: teknik-rapor-${{ inputs.ticker }}-${{ inputs.interval }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 14
