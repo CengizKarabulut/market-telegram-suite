@@ -65,7 +65,8 @@ class AnalystCardTests(unittest.TestCase):
         texts = " ".join(block.text for block in _blocks(STATUS))
         self.assertIn("PİYASANIN HİKÂYESİ", texts)
         self.assertIn("Sıkışma / karar bölgesi", texts)
-        self.assertIn("NET SONUÇ", texts)\n        self.assertIn("SON İKİ MUM NE DİYOR?", texts)
+        self.assertIn("NET SONUÇ", texts)
+        self.assertIn("SON İKİ MUM NE DİYOR?", texts)
 
     def test_missing_sections_do_not_break_rendering(self) -> None:
         minimal = {"symbol": "X", "price": 1.0, "change_pct": 0.0, "technical_commentary": {}}
