@@ -321,9 +321,7 @@ def _paginate(blocks: list[_Block], text_width: float, budget: float) -> list[li
         linked_height = 0.0
         if index + 1 < len(blocks):
             next_block = blocks[index + 1]
-            if block.kind == "section" and next_block.kind != "gap":
-                linked_height = heights[index + 1]
-            elif (
+            if (block.kind == "section" and next_block.kind != "gap") or (
                 block.kind == "body"
                 and block.weight == "bold"
                 and next_block.kind == "body"
