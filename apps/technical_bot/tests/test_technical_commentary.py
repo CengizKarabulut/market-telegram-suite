@@ -113,8 +113,10 @@ class TechnicalCommentaryV2Tests(unittest.TestCase):
             self.assertTrue(item["plain"])
             self.assertIn("Teyit", item["confirmation"])
             self.assertTrue(item["risk"])
-        self.assertIn("Dört gösterge şeması", result["analyst_note"])
+        self.assertIn("Hikâye şöyle", result["market_story"])
+        self.assertIn("Net sonuç:", result["general_interpretation"])
         self.assertIn("Dört Gösterge Şeması", result["telegram_detail"])
+        self.assertIn("Genel Yorum", result["telegram_detail"])
 
     def test_literature_note_discloses_data_mining_and_cost_limits(self) -> None:
         result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
