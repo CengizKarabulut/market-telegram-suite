@@ -10,7 +10,6 @@ INDICATORS = {
     "RSI": "RSI",
     "MACD": "MACD",
     "SMI": "SMI",
-    "Stoch RSI": "STOCH_K",
     "CCI": "CCI",
     "Fisher": "FISHER",
     "OBV": "OBV",
@@ -159,7 +158,7 @@ def detect_divergences(
         "indicators": indicators,
         "events": events,
         "settings": settings,
-        "method": "TradingView RSI 5/5 pivot semantiği tüm uygun osilatörlere uygulanır; normal ve gizli uyumsuzluk aynı pivot barlarındaki fiyatla hesaplanır. Yalnız son 5 teyit barı aktif gösterilir.",
+        "method": "TradingView RSI 5/5 pivot semantiği uygun osilatörlere uygulanır; normal ve gizli uyumsuzluk aynı pivot barlarındaki fiyatla hesaplanır. Stoch RSI, çift yumuşatma ve sınır doygunluğu nedeniyle uyumsuzluk taramasına dahil edilmez. Yalnız son 5 teyit barı aktif gösterilir.",
     }
 
 
