@@ -242,6 +242,12 @@ class TestNewIndicators(unittest.TestCase):
         self.assertGreater(obv["OBV_ma"].notna().sum(), 300)
         self.assertTrue((obv["OBV_upper"].dropna() >= obv["OBV_lower"].dropna()).all())
 
+    def test_stoch_rsi_keeps_lines_but_excludes_divergence_series(self) -> None:
+        result = ind.stoch_rsi(self.df)
+        self.assertEqual(set(result), {"SRSI_k", "SRSI_d"})
+        self.assertGreater(result["SRSI_k"].notna().sum(), 300)
+        self.assertGreater(result["SRSI_d"].notna().sum(), 300)
+
     def test_candlestick_detector_marks_a_doji(self) -> None:
         frame = self.df.iloc[:80].copy()
         position = frame.index[-1]

@@ -543,9 +543,10 @@ def stoch_rsi(
     raw = 100.0 * (base - lowest) / (highest - lowest).replace(0, np.nan)
     k = sma(raw, k_smooth)
     d = sma(k, d_smooth)
-    result = {"SRSI_k": k, "SRSI_d": d}
-    result.update(confirmed_divergence_lines(df, k, "SRSI"))
-    return result
+    # Stoch RSI iki kez normalize/yumuşatılmış ve 0–100 sınırlarına sıkışan
+    # bir zamanlama göstergesidir. Pivot uyumsuzluğu burada yanıltıcı sonuç
+    # üretebildiği için yalnız K/D çizgileri ve 20/80 bölgeleri korunur.
+    return {"SRSI_k": k, "SRSI_d": d}
 
 
 # --------------------------------------------------------------------------
