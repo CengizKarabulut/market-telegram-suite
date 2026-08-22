@@ -31,6 +31,11 @@ def divergence_frame(kind: str, rows: int = 35) -> pd.DataFrame:
 
 
 class DivergenceTests(unittest.TestCase):
+    def test_stoch_rsi_is_excluded_from_divergence_scan(self) -> None:
+        result = detect_divergences(divergence_frame("regular_bullish"))
+        self.assertNotIn("Stoch RSI", result["indicators"])
+        self.assertIn("Stoch RSI", result["method"])
+
     def _assert_all(self, kind: str, state: str, relation: str, hidden: bool) -> None:
         result = detect_divergences(divergence_frame(kind))
         for name in ("RSI", "MACD", "SMI"):
