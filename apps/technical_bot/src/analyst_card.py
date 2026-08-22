@@ -48,6 +48,25 @@ def tone_colour(tone: str) -> str:
     }.get(tone, MUTED)
 
 
+def _evidence_caption(item: dict[str, Any]) -> str:
+    family = str(item.get("family", "Teknik gösterge"))
+    state = str(item.get("state", "karışık"))
+    lowered = family.casefold()
+    if "uyumsuzluk" in lowered:
+        indicator = family.partition("(")[2].partition(")")[0].upper() or "Momentum"
+        trust = "orta güven" if "orta" in state.casefold() else "erken uyarı"
+        return f"{indicator}: Fiyat düşerken göstergede toparlanma ihtimali ({trust})."
+    if "göreceli" in lowered:
+        return "Endekse göre performans: Hisse karşılaştırılan endeksten daha zayıf."
+    if "mtf" in lowered or "zaman" in lowered:
+        return "Zaman dilimleri: Günlük, haftalık ve aylık görünüm aynı yönde değil."
+    if "katılım" in lowered or "hacim" in lowered:
+        return "Hacim: İşlem hacmi fiyat hareketini yeterince desteklemiyor."
+    if "yapı" in lowered:
+        return "Fiyat yapısı: Son tepe ve dipler aşağı yönlü."
+    return f"{family}: {state}"
+
+
 def _wrap(text: str, font_size: int, width_inches: float, weight: str = "normal") -> list[str]:
     """Metni kart genişliğine göre satırlara böler; kalın yazı daha geniş sayılır."""
     character_width = font_size * (0.60 if weight == "bold" else 0.52)
@@ -125,9 +144,9 @@ def _note_blocks(commentary: dict[str, Any]) -> list[_Block]:
         blocks.append(_Block("gap", "", 12, WHITE))
         blocks.append(_Block("section", "KANIT DENGESİ", 23, ACCENT))
         for item in supporting:
-            blocks.append(_Block("body", f"▲  {item['family']}: {item['state']}", 18, LIGHT_GREEN))
+            blocks.append(_Block("body", f"▲  {_evidence_caption(item)}", 18, LIGHT_GREEN))
         for item in counter:
-            blocks.append(_Block("body", f"▼  {item['family']}: {item['state']}", 18, LIGHT_RED))
+            blocks.append(_Block("body", f"▼  {_evidence_caption(item)}", 18, LIGHT_RED))
     return blocks
 
 
@@ -184,9 +203,9 @@ def _overview_blocks(commentary: dict[str, Any], limit: int = 4) -> list[_Block]
         blocks.append(_Block("gap", "", 12, WHITE))
         blocks.append(_Block("section", "KANIT DENGESİ", 23, ACCENT))
         for item in supporting:
-            blocks.append(_Block("body", f"▲  {item['family']}: {item['state']}", 18, LIGHT_GREEN))
+            blocks.append(_Block("body", f"▲  {_evidence_caption(item)}", 18, LIGHT_GREEN))
         for item in counter:
-            blocks.append(_Block("body", f"▼  {item['family']}: {item['state']}", 18, LIGHT_RED))
+            blocks.append(_Block("body", f"▼  {_evidence_caption(item)}", 18, LIGHT_RED))
     return blocks
 
 
