@@ -21,7 +21,7 @@ import yfinance as yf
 
 from src.analyst_card import render_analyst_cards, standardize_pages
 from src.bar_state import build_bar_state
-from src.candlestick_patterns import detect_candlestick_patterns
+from src.candlestick_patterns import detect_candlestick_patterns, summarize_recent_candles
 from src.decision_context import build_decision_context
 from src.intervals import (
     ABSOLUTE_MINIMUM_BARS,
@@ -792,6 +792,9 @@ def build_status(
     cloud_top = max(float(row["VISIBLE_SPAN_A"]), float(row["VISIBLE_SPAN_B"]))
     cloud_bottom = min(float(row["VISIBLE_SPAN_A"]), float(row["VISIBLE_SPAN_B"]))
     cloud_state = "Bulut üstü" if price > cloud_top else "Bulut altı" if price < cloud_bottom else "Bulut içi"
+    candle_summary = summarize_recent_candles(data)
+    candle_current = candle_summary["current"]
+    candle_previous = candle_summary["previous"]
     trend = [
         ["ADX/DMI", f"ADX {fmt(row['ADX'])} | +DI {fmt(row['PLUS_DI'])} | -DI {fmt(row['MINUS_DI'])}", f"{'+DI üstün' if row['PLUS_DI'] > row['MINUS_DI'] else '-DI üstün'} | ADX perc %{fmt(row['ADX_RANK'], 0)} | {diagnostic_text(data['ADX'])}", GREEN if row["PLUS_DI"] > row["MINUS_DI"] else RED],
         ["Supertrend", fmt(row["SUPERTREND"]), "Fiyat üstünde" if price > row["SUPERTREND"] else "Fiyat altında", GREEN if price > row["SUPERTREND"] else RED],
@@ -804,16 +807,10 @@ def build_status(
         ["OBV", f"{fmt(row['OBV'], 0)} | SMA14 {fmt(row['OBV_SMA'], 0)} | BB {fmt(row['OBV_BB_LOWER'], 0)}–{fmt(row['OBV_BB_UPPER'], 0)}", f"{normalized_gap_state(data['OBV'], data['OBV_SMA'])} | {diagnostic_text(data['OBV'])}", GREEN if row["OBV"] > row["OBV_SMA"] else RED],
         ["CMF", f"CMF20 {fmt(cmf_value)}", "Pozitif para akışı" if cmf_value > 0 else "Negatif para akışı", GREEN if cmf_value > 0 else RED],
         [
-            "Mum formasyonu",
-            " | ".join(
-                value for value in (
-                    str(row.get("CANDLE_BULL_NAMES", "")),
-                    str(row.get("CANDLE_BEAR_NAMES", "")),
-                    str(row.get("CANDLE_NEUTRAL_NAMES", "")),
-                ) if value and value != "nan"
-            ) or "Bu barda seçili formasyon yok",
-            "SMA50/SMA200 trend bağlamı; tek başına yön sinyali değildir",
-            GREEN if str(row.get("CANDLE_BULL_NAMES", "")) not in {"", "nan"} and str(row.get("CANDLE_BEAR_NAMES", "")) in {"", "nan"} else RED if str(row.get("CANDLE_BEAR_NAMES", "")) not in {"", "nan"} and str(row.get("CANDLE_BULL_NAMES", "")) in {"", "nan"} else YELLOW,
+            "Son 2 mumun hikâyesi",
+            f"Son mum: {candle_current['text']}\nBir önceki mum: {candle_previous['text']}",
+            str(candle_summary["story"]),
+            tone_color(str(candle_summary["tone"])),
         ],
     ]
 
@@ -852,6 +849,7 @@ def build_status(
     context["symbol"] = symbol
     context["last_price"] = price
     context["change_pct"] = (price / float(previous["Close"]) - 1) * 100
+    context["candlestick_summary"] = candle_summary
     context["previous_state"] = previous_state_snapshot(data, config, benchmark_data, benchmark_symbol, resolved_market, free_float_pct)
     commentary = build_technical_commentary(data, context, decision, bar_state)
     executive = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["families"]]
@@ -904,6 +902,7 @@ def build_status(
         "resolved_market": resolved_market,
         "price_adjustment": data.attrs.get("price_adjustment", "Sağlayıcı bilgisi yok"),
         "bar_state": bar_state,
+        "candlestick_summary": candle_summary,
         "anchor_date": config.anchor_date,
         "equality_tolerance_pct": config.equality_tolerance_pct,
         "ma": ma_rows,
