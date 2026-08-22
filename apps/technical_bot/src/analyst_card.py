@@ -318,15 +318,18 @@ def _paginate(blocks: list[_Block], text_width: float, budget: float) -> list[li
     for index, (block, height) in enumerate(zip(blocks, heights, strict=True)):
         remaining = page_count - len(pages)
         # Kalın grup başlığı, hemen ardından gelen açıklamadan ayrılmaz.
-        linked_height = (
-            heights[index + 1]
-            if block.kind == "body"
-            and block.weight == "bold"
-            and index + 1 < len(blocks)
-            and blocks[index + 1].kind == "body"
-            and blocks[index + 1].weight != "bold"
-            else 0.0
-        )
+        linked_height = 0.0
+        if index + 1 < len(blocks):
+            next_block = blocks[index + 1]
+            if block.kind == "section" and next_block.kind != "gap":
+                linked_height = heights[index + 1]
+            elif (
+                block.kind == "body"
+                and block.weight == "bold"
+                and next_block.kind == "body"
+                and next_block.weight != "bold"
+            ):
+                linked_height = heights[index + 1]
         projected = used + height + linked_height
         exceeds_budget = current and projected > budget
         balanced_break = current and remaining > 1 and projected - height / 2 > target and len(blocks) - index >= remaining - 1
@@ -345,7 +348,7 @@ def _paginate(blocks: list[_Block], text_width: float, budget: float) -> list[li
 DETAIL_SETTINGS = {
     "kompakt": {"ratio": 2.7, "limit": 3},
     "dengeli": {"ratio": 2.2, "limit": 4},
-    "tam": {"ratio": 2.0, "limit": 4},
+    "tam": {"ratio": 2.2, "limit": 4},
 }
 
 
