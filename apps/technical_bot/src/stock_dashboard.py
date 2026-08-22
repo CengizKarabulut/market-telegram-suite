@@ -993,7 +993,7 @@ def _draw_page_header(figure: plt.Figure, grid, status: dict[str, Any], subtitle
     header.set_facecolor(BG)
     header.axis("off")
     change_color = LIGHT_GREEN if status["change_pct"] >= 0 else LIGHT_RED
-    header.text(0.0, 0.92, f"{status['symbol']} — Technical Market State", color=WHITE, fontsize=20, fontweight="bold", va="top")
+    header.text(0.0, 0.92, f"{status['symbol']} — Teknik Piyasa Durumu", color=WHITE, fontsize=20, fontweight="bold", va="top")
     header.text(1.0, 0.93, subtitle, color=MUTED, fontsize=11, fontweight="bold", ha="right", va="top")
     header.text(0.0, 0.56, f"Fiyat: {fmt(status['price'])}", color=WHITE, fontsize=16, fontweight="bold", va="top")
     header.text(0.22, 0.56, f"Değişim: {status['change_pct']:+.2f}%", color=change_color, fontsize=15, fontweight="bold", va="top")
@@ -1039,7 +1039,7 @@ def _draw_header(figure: plt.Figure, grid, status: dict[str, Any], subtitle: str
     header.set_facecolor(BG)
     header.axis("off")
     change_color = LIGHT_GREEN if status["change_pct"] >= 0 else LIGHT_RED
-    header.text(0.0, 0.72, f"{status['symbol']} — Technical Market State", color=WHITE, fontsize=27, fontweight="bold")
+    header.text(0.0, 0.72, f"{status['symbol']} — Teknik Piyasa Durumu", color=WHITE, fontsize=27, fontweight="bold")
     header.text(0.0, 0.25, f"Fiyat: {fmt(status['price'])}", color=WHITE, fontsize=20, fontweight="bold")
     header.text(0.20, 0.25, f"Değişim: {status['change_pct']:+.2f}%", color=change_color, fontsize=18, fontweight="bold")
     bar_color = YELLOW if status["bar_state"]["is_live"] else LIGHT_GREEN
