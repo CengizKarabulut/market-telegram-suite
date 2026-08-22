@@ -727,6 +727,38 @@ def _plain_consensus(schemas: list[dict[str, str]]) -> str:
     return "Gösterge grupları birlikte okunduğunda belirgin bir üstünlük yok; sonuç karışık ve teyit bekliyor."
 
 
+def _evidence_phrase(item: dict[str, Any]) -> str:
+    family = str(item.get("family", "teknik gösterge"))
+    lowered = family.casefold()
+    if "uyumsuzluk" in lowered:
+        match = re.search(r"\(([^)]+)\)", family)
+        indicator = match.group(1).upper() if match else "Momentum göstergesi"
+        return f"{indicator} fiyat düşerken toparlanma ihtimaline işaret ediyor"
+    if "göreceli" in lowered:
+        return "hisse, karşılaştırılan endeksten daha zayıf ilerliyor"
+    if "mtf" in lowered or "zaman" in lowered:
+        return "günlük, haftalık ve aylık görünüm aynı yönde değil"
+    if "katılım" in lowered or "hacim" in lowered:
+        return "işlem hacmi fiyat hareketini yeterince desteklemiyor"
+    if "yapı" in lowered:
+        return "son tepe ve dipler aşağı yönlü bir fiyat yapısı gösteriyor"
+    return f"{family}: {item.get('state', 'karışık')}"
+
+
+def _plain_reconciliation(setup: dict[str, Any], supporting: list[dict[str, Any]], counter: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    if supporting:
+        parts.append("Kurulumu destekleyen işaretler: " + "; ".join(_evidence_phrase(item) for item in supporting))
+    if counter:
+        parts.append("Karşı taraftaki riskler: " + "; ".join(_evidence_phrase(item) for item in counter))
+    setup_name = str(setup.get("name", "mevcut görünüm"))
+    parts.append(
+        f"Bu nedenle {setup_name} için tek bir yöne güvenmek henüz erken. "
+        "Yön ancak belirtilen fiyat eşiği kapanışla geçildiğinde ve işlem hacmi bunu desteklediğinde daha güvenilir hale gelir."
+    )
+    return ". ".join(part.rstrip(".") for part in parts) + "."
+
+
 def build_technical_commentary(
     data: pd.DataFrame,
     context: dict[str, Any],
@@ -755,7 +787,8 @@ def build_technical_commentary(
         ]
         for item in indicator_schemas
     ]
-    reconciliation = reconcile(context.get("setup_context", {}).get("setup", {"name": direction}), supporting, counter)
+    setup_for_reconciliation = context.get("setup_context", {}).get("setup", {"name": direction})
+    reconciliation = _plain_reconciliation(setup_for_reconciliation, supporting, counter)
     market_story = _market_story(context, indicator_schemas)
     candle_story = str(context.get("candlestick_summary", {}).get("story", "Son iki mum için formasyon özeti üretilemedi."))
     divergence_story = _divergence_plain(context)
@@ -807,12 +840,13 @@ def build_technical_commentary(
     plain["text"] = " ".join(item for item in plain["sentences"] if item)
     schema_telegram_lines: list[str] = []
     for item in indicator_schemas:
+        confirmation = re.sub(r"^Teyit için\\s*", "", item["confirmation"], flags=re.IGNORECASE)
         schema_telegram_lines.extend(
             [
                 item["name"],
                 item["plain"],
                 f"Şu anda: {item['reading']}",
-                f"Yönün doğrulanması için: {item['confirmation']}",
+                f"Yönün doğrulanması için: {confirmation}",
                 f"Dikkat edilmesi gereken: {item['risk']}",
                 "",
             ]
