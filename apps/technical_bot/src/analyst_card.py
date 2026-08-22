@@ -317,8 +317,19 @@ def _paginate(blocks: list[_Block], text_width: float, budget: float) -> list[li
     used = 0.0
     for index, (block, height) in enumerate(zip(blocks, heights, strict=True)):
         remaining = page_count - len(pages)
-        exceeds_budget = current and used + height > budget
-        balanced_break = current and remaining > 1 and used + height / 2 > target and len(blocks) - index >= remaining - 1
+        # Kalın grup başlığı, hemen ardından gelen açıklamadan ayrılmaz.
+        linked_height = (
+            heights[index + 1]
+            if block.kind == "body"
+            and block.weight == "bold"
+            and index + 1 < len(blocks)
+            and blocks[index + 1].kind == "body"
+            and blocks[index + 1].weight != "bold"
+            else 0.0
+        )
+        projected = used + height + linked_height
+        exceeds_budget = current and projected > budget
+        balanced_break = current and remaining > 1 and projected - height / 2 > target and len(blocks) - index >= remaining - 1
         if exceeds_budget or balanced_break:
             pages.append(current)
             current, used = [], 0.0
