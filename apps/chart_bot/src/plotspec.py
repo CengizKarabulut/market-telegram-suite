@@ -343,7 +343,6 @@ def _stochrsi_panel(s: dict[str, pd.Series]) -> Panel:
                   color="accent3", width=0, fill_alpha=0.08, legend=False, zorder=0),
             Trace(name="%K", y=s["SRSI_k"], color="accent3", width=1.4),
             Trace(name="%D", y=s["SRSI_d"], color="accent1", width=1.1),
-            *_divergence_traces(s, "SRSI"),
         ],
         hlines=[HLine(80, "down", "dash", "80"), HLine(20, "up", "dash", "20")],
         yrange=(0, 100),
