@@ -674,7 +674,7 @@ def _market_story(context: dict[str, Any], schemas: list[dict[str, str]]) -> str
         volume_text = "İşlem hacmi zayıf; görülen hareketin arkasında güçlü bir katılım yok."
     else:
         volume_text = "İşlem hacmi henüz yönü doğrulayacak kadar belirgin değil."
-    return " ".join((opening, trend_text, momentum_text, volume_text))
+    return f"{opening} {trend_text} {momentum_text} {volume_text}"
 
 
 def _divergence_plain(context: dict[str, Any]) -> str:
@@ -682,7 +682,7 @@ def _divergence_plain(context: dict[str, Any]) -> str:
     if not items:
         return ""
     readable = "; ".join(
-        f"{item.get('indicator', 'gösterge')} {str(item.get('state', 'uyumsuzluk'))} "
+        f"{item.get('indicator', 'gösterge')} {item.get('state', 'uyumsuzluk')!s} "
         f"({item.get('quality', '—')} kalite)"
         for item in items[:2]
     )
