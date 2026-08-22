@@ -105,6 +105,9 @@ class IndicatorTests(unittest.TestCase):
         self.assertTrue(all("wma" in item for item in status["ma"]))
         self.assertIn("technical_commentary", status)
         self.assertEqual(len(status["technical_commentary"]["visual_rows"]), 12)
+        self.assertEqual(status["candlestick_summary"]["window"], 2)
+        self.assertTrue(status["candlestick_summary"]["story"])
+        self.assertIn("Son 2 mumun hikâyesi", [item[0] for item in status["trend_volatility_volume"]])
 
     def test_core_indicators_are_finite(self) -> None:
         row = calculate_indicators(synthetic_prices()).iloc[-1]
