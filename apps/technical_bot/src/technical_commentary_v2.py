@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 
 from src.plain_language import build_plain_summary
-from src.setup_recognition import evidence_weight, reconcile
+from src.setup_recognition import evidence_weight
 from src.state_change import compare_states
 
 
@@ -385,6 +385,380 @@ def _short_history_note(context: dict[str, Any]) -> str:
     )
 
 
+LITERATURE_BASIS = [
+    {
+        "source": "Wilder (1978), New Concepts in Technical Trading Systems",
+        "role": "RSI, ATR, ADX/DMI ve Parabolic SAR farklı soruları ölçer; tek puana indirgenmez.",
+    },
+    {
+        "source": "Brock, Lakonishok & LeBaron (1992), Journal of Finance",
+        "role": "Trend ve kırılım kuralları tarihsel örneklerde bilgi taşıyabilir; sonuç piyasa ve döneme bağlıdır.",
+    },
+    {
+        "source": "Blume, Easley & O'Hara (1994), Journal of Finance",
+        "role": "Hacim, fiyatın tek başına göstermediği katılım ve bilgi kalitesi bağlamını sağlayabilir.",
+    },
+    {
+        "source": "Lo, Mamaysky & Wang (2000), Journal of Finance",
+        "role": "Grafik örüntüleri ölçülebilir hale getirilebilir; yine de istatistiksel ve koşullu okunmalıdır.",
+    },
+    {
+        "source": "Bajgrowicz & Scaillet (2012), Journal of Financial Economics",
+        "role": "Veri madenciliği, kural seçimi ve işlem maliyetleri görünen teknik başarıyı ortadan kaldırabilir.",
+    },
+]
+
+
+def _side(up: bool, down: bool) -> str:
+    if up and not down:
+        return "up"
+    if down and not up:
+        return "down"
+    return "mixed"
+
+
+def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
+    """Dört kullanıcı şemasını durum, anlam, teyit ve risk cümlelerine çevirir.
+
+    Aynı ailedeki göstergeler oy gibi sayılmaz. Her şemada fiyat/trend ana
+    bağlamdır; ivme, volatilite ve hacim o bağlamı teyit eder veya sınırlar.
+    """
+    row = data.iloc[-1]
+    previous = data.iloc[-2]
+    price = _number(row.get("Close"))
+
+    bb_mid = _number(row.get("BB_MID"))
+    bb_upper = _number(row.get("BB_UPPER"))
+    bb_lower = _number(row.get("BB_LOWER"))
+    bb_width = _number(row.get("BB_WIDTH"))
+    prev_width = _number(previous.get("BB_WIDTH"))
+    macd_hist = _number(row.get("MACD_HIST"))
+    prev_hist = _number(previous.get("MACD_HIST"))
+    smi = _number(row.get("SMI"))
+    smi_signal = _number(row.get("SMI_EMA"))
+    obv = _number(row.get("OBV"))
+    obv_ma = _number(row.get("OBV_SMA"))
+    bb_side = _side(price > bb_mid, price < bb_mid)
+    impulse_side = _side(macd_hist > 0 and smi > smi_signal, macd_hist < 0 and smi < smi_signal)
+    flow_side = _side(obv > obv_ma, obv < obv_ma)
+    schema1_side = bb_side if bb_side == impulse_side == flow_side else "mixed"
+    schema1_tone = {"up": "positive", "down": "negative"}.get(schema1_side, "warning")
+    band_position = (
+        "üst bandın üzerinde" if price > bb_upper
+        else "alt bandın altında" if price < bb_lower
+        else "orta çizginin üzerinde" if price > bb_mid
+        else "orta çizginin altında"
+    )
+    width_state = "genişliyor" if bb_width > prev_width else "daralıyor"
+    macd_state = (
+        "pozitif bölgede ve güçleniyor" if macd_hist >= 0 and macd_hist > prev_hist
+        else "pozitif ama ivme kaybediyor" if macd_hist >= 0
+        else "negatif bölgede fakat baskı azalıyor" if macd_hist > prev_hist
+        else "negatif bölgede ve baskı artıyor"
+    )
+    schema1 = {
+        "name": "1 · Bollinger / MACD / SMI / OBV",
+        "state": {
+            "up": "Fiyat, ivme ve hacim yukarı yönde uyumlu",
+            "down": "Fiyat, ivme ve hacim aşağı yönde uyumlu",
+        }.get(schema1_side, "Fiyat, ivme ve hacim aynı şeyi söylemiyor"),
+        "tone": schema1_tone,
+        "reading": (
+            f"Fiyat {_fmt(price)} ile Bollinger {band_position}; bant alanı {width_state}. "
+            f"MACD histogramı {_fmt(macd_hist)} ve {macd_state}. "
+            f"SMI {_fmt(smi)}, sinyal çizgisi {_fmt(smi_signal)}; "
+            f"OBV {_fmt(obv, 0)}, SMA14 {_fmt(obv_ma, 0)}."
+        ),
+        "plain": (
+            "Bu grup hareketin yalnız yönüne değil, hareketin hız kazanıp kazanmadığına "
+            "ve işlem hacminin fiyatı destekleyip desteklemediğine bakar. "
+            + (
+                "Üç katman şu an birbirini destekliyor."
+                if schema1_side != "mixed"
+                else "Katmanlar ayrıştığı için tek başına güvenilir bir yön mesajı yok."
+            )
+        ),
+        "confirmation": (
+            "Teyit için fiyatın Bollinger orta çizgisinin aynı tarafında kapanması, "
+            "MACD/SMI ivmesinin o yönde sürmesi ve OBV'nin kendi ortalamasınca desteklenmesi gerekir."
+        ),
+        "risk": (
+            "Fiyat ilerlerken OBV geriler veya MACD histogramı ters yönde daralırsa hareketin "
+            "katılımı zayıf olabilir; bant dışına kısa süreli taşma tek başına kırılım sayılmaz."
+        ),
+    }
+
+    span_a = _number(row.get("VISIBLE_SPAN_A"))
+    span_b = _number(row.get("VISIBLE_SPAN_B"))
+    cloud_top, cloud_bottom = max(span_a, span_b), min(span_a, span_b)
+    rsi = _number(row.get("RSI"))
+    rsi_ma = _number(row.get("RSI_MA"))
+    cci = _number(row.get("CCI"))
+    cci_ma = _number(row.get("CCI_MA"))
+    atr_pct = _number(row.get("ATR_PCT"))
+    cloud_side = _side(price > cloud_top, price < cloud_bottom)
+    oscillator_side = _side(rsi > 50 and cci > 0, rsi < 50 and cci < 0)
+    schema2_side = cloud_side if cloud_side == oscillator_side else "mixed"
+    schema2_tone = {"up": "positive", "down": "negative"}.get(schema2_side, "warning")
+    cloud_state = "bulutun üzerinde" if price > cloud_top else "bulutun altında" if price < cloud_bottom else "bulutun içinde"
+    schema2 = {
+        "name": "2 · Ichimoku / RSI / CCI / ATR",
+        "state": {
+            "up": "Ana yön ve momentum yukarı yönde uyumlu",
+            "down": "Ana yön ve momentum aşağı yönde uyumlu",
+        }.get(schema2_side, "Ana yön ile momentum arasında ayrışma var"),
+        "tone": schema2_tone,
+        "reading": (
+            f"Fiyat {cloud_state}. RSI {_fmt(rsi)} (SMA14 {_fmt(rsi_ma)}), "
+            f"CCI {_fmt(cci)} (SMA14 {_fmt(cci_ma)}), ATR% {_fmt(atr_pct)}."
+        ),
+        "plain": (
+            "Ichimoku büyük resmi, RSI ve CCI hareketin itiş gücünü, ATR ise fiyatın ne kadar "
+            "oynak olduğunu anlatır. ATR yön söylemez; beklenebilecek dalga boyunu gösterir. "
+            + (
+                "Yön ile itiş gücü aynı tarafta."
+                if schema2_side != "mixed"
+                else "Büyük resim ile kısa vadeli güç aynı tarafta olmadığı için acele yorum yapılmamalı."
+            )
+        ),
+        "confirmation": (
+            "Teyit için fiyatın bulut dışında kapanışlarını koruması, RSI'ın 50'nin ve CCI'ın "
+            "sıfırın aynı tarafında kalması gerekir."
+        ),
+        "risk": (
+            "Fiyat bulut içine dönerse yön avantajı zayıflar. ATR yükselirken seviyeler korunamıyorsa "
+            "bu güçten çok belirsizlik ve daha geniş fiyat salınımı anlamına gelebilir."
+        ),
+    }
+
+    psar = _number(row.get("PSAR"))
+    stoch_k = _number(row.get("STOCH_K"))
+    stoch_d = _number(row.get("STOCH_D"))
+    vwap = _number(row.get("VWAP"))
+    adx = _number(row.get("ADX"))
+    plus_di = _number(row.get("PLUS_DI"))
+    minus_di = _number(row.get("MINUS_DI"))
+    base_side = _side(price > psar and price > vwap, price < psar and price < vwap)
+    timing_side = _side(stoch_k > stoch_d and plus_di > minus_di, stoch_k < stoch_d and minus_di > plus_di)
+    schema3_side = base_side if base_side == timing_side else "mixed"
+    strong_trend = adx >= 25
+    schema3_tone = {"up": "positive", "down": "negative"}.get(schema3_side, "warning")
+    if schema3_side != "mixed" and not strong_trend:
+        schema3_tone = "neutral"
+    schema3 = {
+        "name": "3 · Parabolic SAR / Stoch RSI / Auto AVWAP / ADX-DMI",
+        "state": {
+            "up": "Yukarı yönlü takip koşulları uyumlu" if strong_trend else "Yukarı eğilim var, yön gücü henüz sınırlı",
+            "down": "Aşağı yönlü takip koşulları uyumlu" if strong_trend else "Aşağı eğilim var, yön gücü henüz sınırlı",
+        }.get(schema3_side, "Takip yönü ve kısa vadeli zamanlama ayrışıyor"),
+        "tone": schema3_tone,
+        "reading": (
+            f"Fiyat {_fmt(price)}; SAR {_fmt(psar)}, Auto AVWAP {_fmt(vwap)}. "
+            f"Stoch RSI K/D {_fmt(stoch_k)}/{_fmt(stoch_d)}; "
+            f"ADX {_fmt(adx)}, +DI {_fmt(plus_di)}, -DI {_fmt(minus_di)}."
+        ),
+        "plain": (
+            "SAR ve hacim ağırlıklı ortalama fiyatın hangi tarafında kalındığını, Stoch RSI kısa "
+            "vadeli dönüş zamanlamasını, ADX/DMI ise ortada gerçekten güçlü bir yön olup olmadığını anlatır. "
+            + (
+                "Yön bileşenleri uyumlu ve ADX yönün belirgin olduğunu gösteriyor."
+                if schema3_side != "mixed" and strong_trend
+                else "Bu nedenle mevcut hareket henüz tam bir trend teyidi sayılmıyor."
+            )
+        ),
+        "confirmation": (
+            "Teyit için fiyatın SAR ve Auto AVWAP'ın aynı tarafında kapanması, ilgili DI çizgisinin "
+            "üstün kalması ve ADX'in tercihen 25 üzerinde yükselmesi gerekir."
+        ),
+        "risk": (
+            "Stoch RSI aşırı bölgedeyken tek kesişim yanıltıcı olabilir. ADX düşükse SAR sık yön "
+            "değiştirir; AVWAP'ın çevresindeki gidip gelmeler trend yerine dengeye işaret edebilir."
+        ),
+    }
+
+    supertrend = _number(row.get("SUPERTREND"))
+    fisher = _number(row.get("FISHER"))
+    fisher_trigger = _number(row.get("FISHER_TRIGGER"))
+    cmf = _number(row.get("CMF"))
+    momentum = _number(row.get("MOMENTUM"))
+    trend_side = _side(price > supertrend, price < supertrend)
+    internal_side = _side(fisher > fisher_trigger and cmf > 0 and momentum > 0, fisher < fisher_trigger and cmf < 0 and momentum < 0)
+    schema4_side = trend_side if trend_side == internal_side else "mixed"
+    schema4_tone = {"up": "positive", "down": "negative"}.get(schema4_side, "warning")
+    schema4 = {
+        "name": "4 · Supertrend / Fisher / CMF / Momentum",
+        "state": {
+            "up": "Trend, dönüş ölçümü ve para akışı yukarı yönde uyumlu",
+            "down": "Trend, dönüş ölçümü ve para akışı aşağı yönde uyumlu",
+        }.get(schema4_side, "Trend ile dönüş/para akışı teyitleri ayrışıyor"),
+        "tone": schema4_tone,
+        "reading": (
+            f"Fiyat {_fmt(price)}, Supertrend {_fmt(supertrend)}. Fisher/Trigger "
+            f"{_fmt(fisher)}/{_fmt(fisher_trigger)}, CMF {_fmt(cmf)}, Momentum10 {_fmt(momentum)}."
+        ),
+        "plain": (
+            "Supertrend izlenen ana yönü, Fisher olası dönüş hızını, CMF para giriş-çıkış dengesini, "
+            "Momentum ise fiyatın 10 bar öncesine göre ilerleyip ilerlemediğini gösterir. "
+            + (
+                "Dört bileşen aynı yönü destekliyor."
+                if schema4_side != "mixed"
+                else "Ana yön ile iç güç aynı şeyi söylemediği için hareketin devamı henüz net değil."
+            )
+        ),
+        "confirmation": (
+            "Teyit için fiyatın Supertrend'in aynı tarafında kalması, Fisher'ın tetik çizgisiyle, "
+            "CMF'nin sıfır çizgisiyle ve Momentum'un yönüyle uyumunu koruması gerekir."
+        ),
+        "risk": (
+            "Fisher hızlı dönebilir ve tek başına erken sinyal üretebilir. CMF veya Momentum ana "
+            "trendi desteklemiyorsa fiyat hareketi katılımsız ya da yorulmaya açık olabilir."
+        ),
+    }
+    return [schema1, schema2, schema3, schema4]
+
+
+def _indicator_confirmation(data: pd.DataFrame) -> dict[str, Any]:
+    """Dört şemanın açıklamasını korur; ayrı oy veya birleşik puan üretmez."""
+    schemas = _indicator_schemas(data)
+    summary = " ".join(
+        f"{item['name'].split(' · ', 1)[0]}. grup: {item['state']}." for item in schemas
+    )
+    return {
+        "state": "Dört gösterge grubu koşullu olarak birlikte okunur",
+        "summary": summary,
+        "schemas": schemas,
+        "method": (
+            "Her grupta fiyat/trend ana bağlamdır; ivme, volatilite ve hacim teyit veya risk "
+            "olarak kullanılır. Gruplar AL/SAT oyu gibi toplanmaz."
+        ),
+    }
+
+
+
+def _market_story(context: dict[str, Any], schemas: list[dict[str, str]]) -> str:
+    """Teknik katmanları jargon kullanmadan kısa bir piyasa hikâyesine çevirir."""
+    regime = str(context.get("regime", {}).get("state", "")).casefold()
+    semantic = context.get("semantic", {})
+    trend_tone = str(semantic.get("trend_quality", {}).get("tone", "neutral"))
+    momentum_tone = str(semantic.get("momentum_character", {}).get("tone", "neutral"))
+    participation = semantic.get("participation", {})
+    participation_tone = str(participation.get("tone", "neutral"))
+    positive = sum(item.get("tone") == "positive" for item in schemas)
+    negative = sum(item.get("tone") == "negative" for item in schemas)
+
+    if "sıkışma" in regime or "denge" in regime:
+        opening = "Hikâye şöyle: Fiyat bir karar alanında sıkışmış; piyasa yeni yönünü henüz seçmiş değil."
+    elif positive > negative:
+        opening = "Hikâye şöyle: Alıcılar önde, ancak hareketin kalıcı olup olmadığını teyit edecek işaretler hâlâ izlenmeli."
+    elif negative > positive:
+        opening = "Hikâye şöyle: Satıcı baskısı daha belirgin, ancak bunun yeni bir düşüş dalgasına dönüşüp dönüşmediği henüz kesin değil."
+    else:
+        opening = "Hikâye şöyle: Alıcılarla satıcılar arasında net üstünlük yok; göstergeler farklı yönlere bakıyor."
+
+    trend_text = {
+        "positive": "Ana fiyat yönü alıcıları destekliyor.",
+        "negative": "Ana fiyat yönü satıcıları destekliyor.",
+        "warning": "Ana fiyat yönü karışık.",
+        "neutral": "Ana fiyat yönü belirgin değil.",
+    }.get(trend_tone, "Ana fiyat yönü belirgin değil.")
+    momentum_text = {
+        "positive": "Kısa vadeli hız yukarı tarafta.",
+        "negative": "Kısa vadeli hız aşağı tarafta.",
+        "warning": "Kısa vadeli hız yön konusunda kararsız.",
+        "neutral": "Kısa vadeli hız nötr.",
+    }.get(momentum_tone, "Kısa vadeli hız nötr.")
+    rvol = _number(participation.get("rvol_1"))
+    if participation_tone == "positive":
+        volume_text = "İşlem hacmi bu hareketi destekliyor."
+    elif math.isfinite(rvol) and rvol < 0.8:
+        volume_text = "İşlem hacmi zayıf; görülen hareketin arkasında güçlü bir katılım yok."
+    else:
+        volume_text = "İşlem hacmi henüz yönü doğrulayacak kadar belirgin değil."
+    return f"{opening} {trend_text} {momentum_text} {volume_text}"
+
+
+def _divergence_plain(context: dict[str, Any]) -> str:
+    items = context.get("semantic", {}).get("momentum_character", {}).get("active_divergences", [])
+    if not items:
+        return ""
+    readable = "; ".join(
+        f"{item.get('indicator', 'gösterge')} {item.get('state', 'uyumsuzluk')!s} "
+        f"({item.get('quality', '—')} kalite)"
+        for item in items[:2]
+    )
+    return (
+        f"Ek erken uyarı: {readable}. Bu işaret tek başına dönüş kanıtı değildir; "
+        "fiyatın önemli seviyeyi geçmesi ve hacmin eşlik etmesi gerekir."
+    )
+
+
+def _general_interpretation(context: dict[str, Any], scenario: dict[str, list[str]], clarity: dict[str, Any]) -> str:
+    """Raporun sonunda kullanılacak, açık ve koşullu genel sonucu üretir."""
+    setup = context.get("setup_context", {}).get("setup", {})
+    bias = str(setup.get("bias", ""))
+    structure = context.get("structure", {})
+    high, low = _number(structure.get("high")), _number(structure.get("low"))
+    if bias == "iki yönlü" and math.isfinite(high) and math.isfinite(low):
+        result = (
+            f"Net sonuç: {_fmt(high)} üzerinde kapanış gelirse yukarı hareket ciddiye alınır; "
+            f"{_fmt(low)} altında kapanış gelirse satış baskısı güçlenmiş sayılır. "
+            "Fiyat bu iki seviye arasında kaldığı sürece en dürüst yorum, kararın henüz verilmediğidir."
+        )
+    elif bias == "yukarı":
+        condition = scenario.get("strengthen", ["fiyatın yakın direnci aşması"])[0].rstrip(". ")
+        risk = scenario.get("weaken", ["yakın desteğin kaybedilmesi"])[0].rstrip(". ")
+        result = f"Net sonuç: Görünüm yukarı eğilimli. Bunu güçlendirecek ilk gelişme {condition.casefold()}; bu yorumu bozacak ilk gelişme {risk.casefold()}."
+    elif bias == "aşağı":
+        condition = scenario.get("strengthen", ["fiyatın yakın desteği kaybetmesi"])[0].rstrip(". ")
+        risk = scenario.get("weaken", ["yakın direncin aşılması"])[0].rstrip(". ")
+        result = f"Net sonuç: Görünüm aşağı eğilimli. Bunu güçlendirecek ilk gelişme {condition.casefold()}; bu yorumu bozacak ilk gelişme {risk.casefold()}."
+    else:
+        result = "Net sonuç: Şu anda güçlü ve tek yönlü bir teknik sonuç yok; yeni bir kapanış teyidi beklemek gerekiyor."
+    return f"{result} Okumanın güven düzeyi {str(clarity.get('state', 'düşük')).casefold()}."
+
+
+def _plain_consensus(schemas: list[dict[str, str]]) -> str:
+    positive = sum(item.get("tone") == "positive" for item in schemas)
+    negative = sum(item.get("tone") == "negative" for item in schemas)
+    if positive > negative:
+        return "Gösterge grupları birlikte okunduğunda alıcı tarafı biraz daha ağır basıyor; yine de bütün gruplar aynı yönde değil."
+    if negative > positive:
+        return "Gösterge grupları birlikte okunduğunda satıcı tarafı biraz daha ağır basıyor; yine de bütün gruplar aynı yönde değil."
+    return "Gösterge grupları birlikte okunduğunda belirgin bir üstünlük yok; sonuç karışık ve teyit bekliyor."
+
+
+def _evidence_phrase(item: dict[str, Any]) -> str:
+    family = str(item.get("family", "teknik gösterge"))
+    lowered = family.casefold()
+    if "uyumsuzluk" in lowered:
+        match = re.search(r"\(([^)]+)\)", family)
+        indicator = match.group(1).upper() if match else "Momentum göstergesi"
+        return f"{indicator} fiyat düşerken toparlanma ihtimaline işaret ediyor"
+    if "göreceli" in lowered:
+        return "hisse, karşılaştırılan endeksten daha zayıf ilerliyor"
+    if "mtf" in lowered or "zaman" in lowered:
+        return "günlük, haftalık ve aylık görünüm aynı yönde değil"
+    if "katılım" in lowered or "hacim" in lowered:
+        return "işlem hacmi fiyat hareketini yeterince desteklemiyor"
+    if "yapı" in lowered:
+        return "son tepe ve dipler aşağı yönlü bir fiyat yapısı gösteriyor"
+    return f"{family}: {item.get('state', 'karışık')}"
+
+
+def _plain_reconciliation(setup: dict[str, Any], supporting: list[dict[str, Any]], counter: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    if supporting:
+        parts.append("Kurulumu destekleyen işaretler: " + "; ".join(_evidence_phrase(item) for item in supporting))
+    if counter:
+        parts.append("Karşı taraftaki riskler: " + "; ".join(_evidence_phrase(item) for item in counter))
+    setup_name = str(setup.get("name", "mevcut görünüm"))
+    parts.append(
+        f"Bu nedenle {setup_name} için tek bir yöne güvenmek henüz erken. "
+        "Yön ancak belirtilen fiyat eşiği kapanışla geçildiğinde ve işlem hacmi bunu desteklediğinde daha güvenilir hale gelir."
+    )
+    return ". ".join(part.rstrip(".") for part in parts) + "."
+
+
 def build_technical_commentary(
     data: pd.DataFrame,
     context: dict[str, Any],
@@ -401,8 +775,34 @@ def build_technical_commentary(
     scenario = _scenario_map(context, decision, direction_tone, levels)
     supporting, counter, clarity = _evidence_and_clarity(context, decision, direction_tone, bar_state)
     changes = _changes(data, context)
-    reconciliation = reconcile(context.get("setup_context", {}).get("setup", {"name": direction}), supporting, counter)
-    analyst_note = _analyst_note(opening, context, decision, scenario, reconciliation)
+    indicator_confirmation = _indicator_confirmation(data)
+    indicator_schemas = indicator_confirmation["schemas"]
+    schema_rows = [
+        [
+            item["name"],
+            item["state"],
+            "Durum · anlam · teyit · risk",
+            " ".join([item["reading"], item["plain"], item["confirmation"], item["risk"]]),
+            item["tone"],
+        ]
+        for item in indicator_schemas
+    ]
+    setup_for_reconciliation = context.get("setup_context", {}).get("setup", {"name": direction})
+    reconciliation = _plain_reconciliation(setup_for_reconciliation, supporting, counter)
+    market_story = _market_story(context, indicator_schemas)
+    candle_story = str(context.get("candlestick_summary", {}).get("story", "Son iki mum için formasyon özeti üretilemedi."))
+    divergence_story = _divergence_plain(context)
+    general_interpretation = _general_interpretation(context, scenario, clarity)
+    analyst_note = divergence_story or (
+        "Erken uyarı niteliğinde belirgin bir uyumsuzluk görülmedi. "
+        "Ana karar, kapanış seviyeleri ve hacim teyidiyle verilir."
+    )
+    literature_note = (
+        "Araştırmalar teknik örüntülerin bazı dönemlerde bilgi taşıyabildiğini, ancak sonucun "
+        "piyasa rejimine, örnekleme, işlem maliyetlerine ve kural seçimine duyarlı olduğunu gösterir. "
+        "Bu nedenle rapor tahmin veya mekanik AL/SAT puanı değil; kapanış, bağımsız teyit ve "
+        "geçersizlik koşulları üretir."
+    )
     rs_state, rs_tone, rs_meaning = _rs_text(decision)
     setup_context = context.get("setup_context", {})
     setup = setup_context.get("setup", {})
@@ -411,6 +811,7 @@ def build_technical_commentary(
         ["Rejim", regime, f"ADX Δ {adx_delta:+.2f}", opening, context.get("regime", {}).get("tone", "warning")],
         ["Yapı / trend", f"{context.get('structure', {}).get('state', '—')} | {semantic.get('trend_quality', {}).get('state', '—')}", semantic.get("trend_quality", {}).get("spread_state", "—"), semantic.get("trend_quality", {}).get("summary", "—"), context.get("structure", {}).get("tone", "neutral")],
         ["Momentum", semantic.get("momentum_character", {}).get("state", "—"), semantic.get("momentum_character", {}).get("macd", {}).get("histogram_character", "—"), semantic.get("momentum_character", {}).get("summary", "—"), semantic.get("momentum_character", {}).get("tone", "warning")],
+        *schema_rows,
         ["Katılım", setup_context.get("participation_reading", {}).get("state", semantic.get("participation", {}).get("state", "—")), f"RVOL {semantic.get('participation', {}).get('rvol_1', math.nan):.2f}x", setup_context.get("participation_reading", {}).get("meaning", semantic.get("participation", {}).get("summary", "—")), setup_context.get("participation_reading", {}).get("tone", "warning")],
         ["Konum", context.get("profile", {}).get("position", "—"), context.get("profile", {}).get("poc_migration", "—"), _location_text(context), context.get("profile", {}).get("tone", "neutral")],
         ["Göreceli güç", rs_state, f"Eğim5 %{_number(decision.get('relative_strength', {}).get('ratio_slope_5_pct')):+.2f}", rs_meaning, rs_tone],
@@ -426,14 +827,40 @@ def build_technical_commentary(
         bar_state,
         bool(context.get("short_history")),
     )
+    original_plain_sentences = list(plain.get("sentences", []))
+    disclaimer = original_plain_sentences[-1] if original_plain_sentences else "Bu bir teknik durum yorumudur; yatırım tavsiyesi değildir."
+    history_notes = [item for item in original_plain_sentences if "işlem geçmişi kısa" in item.casefold()]
+    plain["sentences"] = [
+        market_story,
+        _plain_consensus(indicator_schemas),
+        candle_story,
+        *history_notes,
+        disclaimer,
+    ]
+    plain["text"] = " ".join(item for item in plain["sentences"] if item)
+    schema_telegram_lines: list[str] = []
+    for item in indicator_schemas:
+        confirmation = re.sub(r"^Teyit için\\s*", "", item["confirmation"], flags=re.IGNORECASE)
+        schema_telegram_lines.extend(
+            [
+                item["name"],
+                item["plain"],
+                f"Şu anda: {item['reading']}",
+                f"Yönün doğrulanması için: {confirmation}",
+                f"Dikkat edilmesi gereken: {item['risk']}",
+                "",
+            ]
+        )
     headline = f"{stance}. {opening} Teknik okuma netliği: {clarity['state'].casefold()}."
     telegram_detail = "\n".join(
         [
             "🗣️ Sade Özet",
             plain["text"],
             "",
-            "🧭 Analist Notu",
-            analyst_note,
+            "📐 Dört Gösterge Şeması",
+            *schema_telegram_lines,
+            "📚 Yöntem ve Literatür Notu",
+            literature_note,
             "",
             "⚖️ Neden bu okuma?",
             reconciliation,
@@ -451,11 +878,15 @@ def build_technical_commentary(
             *[f"• {item}" for item in scenario["neutral"]],
             "",
             f"Okuma netliği: {clarity['state']} — {clarity['reason']}",
+            "",
+            "🧾 Genel Yorum",
+            general_interpretation,
+            "",
             "Teknik durum yorumudur; yatırım tavsiyesi veya otomatik AL/SAT sinyali değildir.",
         ]
     )
     return {
-        "version": "2.1",
+        "version": "2.3",
         "setup": setup,
         "duration": setup_context.get("duration", {}),
         "reconciliation": reconciliation,
@@ -464,6 +895,13 @@ def build_technical_commentary(
         "tone": tone,
         "headline": headline,
         "analyst_note": analyst_note,
+        "market_story": market_story,
+        "candle_story": candle_story,
+        "general_interpretation": general_interpretation,
+        "indicator_confirmation": indicator_confirmation,
+        "indicator_schemas": indicator_schemas,
+        "literature_basis": LITERATURE_BASIS,
+        "literature_note": literature_note,
         "direction": direction,
         "regime": regime,
         "changes": changes,
@@ -481,7 +919,10 @@ def build_technical_commentary(
         "telegram_summary": headline,
         "telegram_detail": telegram_detail,
         "framework": ["Regime", "Direction", "Location", "Setup", "Trigger", "Confirmation", "Risk", "Exit"],
-        "method": "Deterministik, rejim-duyarlı teknik yorum; bağımsız kanıt aileleri kullanır ve birleşik AL/SAT puanı üretmez.",
+        "method": (
+            "Deterministik, rejim-duyarlı teknik yorum; dört kullanıcı şemasını bağımsız kanıt "
+            "aileleri olarak okur, kapanış/teyit/geçersizlik koşulları verir ve birleşik AL/SAT puanı üretmez."
+        ),
         "limitations": [
             *(
                 [
@@ -499,6 +940,7 @@ def build_technical_commentary(
             "Yorum yalnız OHLCV ve türetilmiş teknik bağlama dayanır; haber/KAP/temel veri içermez.",
             "Volume Profile ve delta alanları yaklaşık OHLCV proxy'dir; gerçek footprint değildir.",
             "Göreceli güç fon akışı değildir; RVOL kurumsal katılımı kanıtlamaz.",
-            "CANLI mum kapanışa kadar değişebilir; uyumsuzluk ve swingler sağ pivot barları tamamlanınca teyit edilir.",
+            "CANLI mum kapanışa kadar değişebilir; Stoch RSI uyumsuzluk taramasına dahil değildir, diğer uyumsuzluklar ve swingler sağ pivot barları tamamlanınca teyit edilir.",
+            "Teknik kuralların geçmiş başarısı geleceğe taşınmayabilir; veri madenciliği ve işlem maliyetleri sonucu zayıflatabilir.",
         ],
     }

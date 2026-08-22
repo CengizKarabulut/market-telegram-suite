@@ -6,7 +6,16 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-INDICATORS = {"RSI": "RSI", "MACD": "MACD", "SMI": "SMI"}
+INDICATORS = {
+    "RSI": "RSI",
+    "MACD": "MACD",
+    "SMI": "SMI",
+    "CCI": "CCI",
+    "Fisher": "FISHER",
+    "OBV": "OBV",
+    "CMF": "CMF",
+    "Momentum": "MOMENTUM",
+}
 
 
 def _pivot_positions(series: pd.Series, left: int, right: int, low: bool) -> list[int]:
@@ -76,7 +85,7 @@ def detect_divergences(
     range_upper: int = 60,
     max_event_age: int = 5,
 ) -> dict[str, Any]:
-    """RSI, MACD ve SMI için teyitli normal/gizli uyumsuzlukları bulur.
+    """Yön/momentum osilatörleri için teyitli normal/gizli uyumsuzlukları bulur.
 
     Pivotlar osilatörde bulunur ve fiyat aynı pivot barlarından karşılaştırılır.
     ``range_lower/range_upper`` iki pivotun mesafesidir; ``max_event_age`` ise
@@ -85,7 +94,7 @@ def detect_divergences(
     indicators: dict[str, dict[str, Any]] = {}
     events: list[dict[str, Any]] = []
     settings = _settings(left, right, range_lower, range_upper, max_event_age)
-    required = {"Low", "High", *INDICATORS.values()}
+    required = {"Low", "High"}
     if len(data) < left + right + range_lower + 1 or not required.issubset(data.columns):
         for name in INDICATORS:
             indicators[name] = {
@@ -97,6 +106,14 @@ def detect_divergences(
         return {"indicators": indicators, "events": events, "settings": settings}
 
     for name, column in INDICATORS.items():
+        if column not in data:
+            indicators[name] = {
+                "detected": False,
+                "state": "Gösterge verisi yok",
+                "tone": "neutral",
+                "event_age": None,
+            }
+            continue
         oscillator = data[column]
         candidates: list[dict[str, Any]] = []
         low_pivots = _pivot_positions(oscillator, left, right, low=True)
@@ -141,7 +158,7 @@ def detect_divergences(
         "indicators": indicators,
         "events": events,
         "settings": settings,
-        "method": "TradingView RSI pivot semantiği; normal ve gizli uyumsuzluk, osilatör 5/5 pivotlarında ve aynı barlardaki fiyatla hesaplanır. Yalnız son 5 teyit barı aktif gösterilir.",
+        "method": "TradingView RSI 5/5 pivot semantiği uygun osilatörlere uygulanır; normal ve gizli uyumsuzluk aynı pivot barlarındaki fiyatla hesaplanır. Stoch RSI, çift yumuşatma ve sınır doygunluğu nedeniyle uyumsuzluk taramasına dahil edilmez. Yalnız son 5 teyit barı aktif gösterilir.",
     }
 
 

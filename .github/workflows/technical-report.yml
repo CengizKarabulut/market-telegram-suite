@@ -58,7 +58,12 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - name: Raporu üret
         run: |
-          python -m src.stock_dashboard +            --ticker "${{ inputs.ticker }}" +            --market "${{ inputs.market }}" +            --provider "${{ inputs.provider }}" +            --interval "${{ inputs.interval }}" +            --report-detail "${{ inputs.report_detail }}"
+          python -m src.stock_dashboard \
+            --ticker "${{ inputs.ticker }}" \
+            --market "${{ inputs.market }}" \
+            --provider "${{ inputs.provider }}" \
+            --interval "${{ inputs.interval }}" \
+            --report-detail "${{ inputs.report_detail }}"
       - name: Telegram'a gönder
         if: inputs.send_telegram
         env:
@@ -66,7 +71,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TECHNICAL_TOPIC_ID }}
           TELEGRAM_SEND_CAPTION: "0"
-          TELEGRAM_SEND_TEXT_DETAIL: "0"
+          TELEGRAM_SEND_TEXT_DETAIL: "1"
         run: python -m src.send_telegram
       - name: Raporu sakla
         if: always()

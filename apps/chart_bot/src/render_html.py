@@ -81,9 +81,13 @@ def _add_trace(fig, trace: Trace, theme: Theme, x: list[str], row: int) -> None:
         fig.add_trace(
             go.Scatter(
                 x=x, y=trace.y.to_numpy(dtype="float64"), name=trace.name,
-                mode="markers", marker=dict(color=point_colors, size=2.6),
+                mode="markers+text" if trace.labels is not None else "markers",
+                text=trace.labels.astype(str).tolist() if trace.labels is not None else None,
+                textposition="bottom center" if trace.text_position == "bottom" else "top center",
+                textfont=dict(color=color, size=9),
+                marker=dict(color=point_colors, size=5),
                 showlegend=trace.legend,
-                hovertemplate="%{fullData.name}: %{y:.4g}<extra></extra>",
+                hovertemplate="%{fullData.name}: %{text}<br>%{y:.4g}<extra></extra>",
             ),
             row=row, col=1,
         )

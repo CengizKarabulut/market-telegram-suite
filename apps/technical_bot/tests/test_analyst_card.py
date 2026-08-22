@@ -15,6 +15,13 @@ STATUS = {
         "setup": {"name": "Sıkışma / karar bölgesi", "bias": "iki yönlü", "tone": "neutral", "description": "Dar aralıkta denge."},
         "duration": {"summary": "7 bardır dar bant bölgesinde"},
         "analyst_note": "Birinci paragraf.\n\nİkinci paragraf.",
+        "market_story": "Hikâye şöyle: Fiyat karar alanında ve yön henüz seçilmedi.",
+        "candle_story": "Son mumda Doji görüldü; tek başına yön kanıtı değildir.",
+        "general_interpretation": "Net sonuç: 325,50 üstü yukarı, 295,25 altı aşağı teyittir.",
+        "indicator_schemas": [
+            {"name": "1 · Bollinger / MACD / SMI / OBV", "state": "Karışık", "plain": "Hız ve hacim aynı yönde değil.", "tone": "warning"},
+            {"name": "2 · Ichimoku / RSI / CCI / ATR", "state": "Aşağı baskı", "plain": "Ana yön satıcıları destekliyor.", "tone": "negative"},
+        ],
         "reconciliation": "Kanıtlar iki yöne dağılmış.",
         "plain_summary": {"text": "THYAO 300,50 seviyesinde. Fiyat dar bir aralıkta."},
         "supporting_evidence": [{"family": "Yapı", "state": "HH / HL"}],
@@ -41,7 +48,7 @@ class AnalystCardTests(unittest.TestCase):
 
     def test_longer_note_produces_taller_card(self) -> None:
         long_status = {**STATUS, "technical_commentary": {**STATUS["technical_commentary"]}}
-        long_status["technical_commentary"]["analyst_note"] = "Uzun paragraf. " * 200
+        long_status["technical_commentary"]["market_story"] = "Uzun paragraf. " * 200
         with tempfile.TemporaryDirectory() as directory:
             short = render_analyst_card(STATUS, Path(directory) / "short.png")
             tall = render_analyst_card(long_status, Path(directory) / "tall.png")
@@ -56,9 +63,10 @@ class AnalystCardTests(unittest.TestCase):
 
     def test_card_includes_plain_summary_and_setup(self) -> None:
         texts = " ".join(block.text for block in _blocks(STATUS))
-        self.assertIn("SADE ÖZET", texts)
+        self.assertIn("PİYASANIN HİKÂYESİ", texts)
         self.assertIn("Sıkışma / karar bölgesi", texts)
-        self.assertIn("Kanıtlar iki yöne dağılmış.", texts)
+        self.assertIn("NET SONUÇ", texts)
+        self.assertIn("SON İKİ MUM NE DİYOR?", texts)
 
     def test_missing_sections_do_not_break_rendering(self) -> None:
         minimal = {"symbol": "X", "price": 1.0, "change_pct": 0.0, "technical_commentary": {}}
@@ -80,11 +88,10 @@ class CardWrappingTests(unittest.TestCase):
         bold = _wrap(text, 18, 9.0, "bold")
         self.assertGreaterEqual(len(bold), len(regular))
 
-    def test_analyst_note_first_paragraph_is_not_duplicated(self) -> None:
-        blocks = _blocks(STATUS)
-        texts = [block.text for block in blocks]
+    def test_raw_analyst_note_is_replaced_by_structured_sections(self) -> None:
+        texts = [block.text for block in _blocks(STATUS)]
         self.assertNotIn("Birinci paragraf.", texts)
-        self.assertIn("İkinci paragraf.", texts)
+        self.assertIn("DÖRT GÖSTERGE GRUBU", texts)
 
 
 class CardPagingTests(unittest.TestCase):
@@ -128,7 +135,7 @@ class CardBalanceTests(unittest.TestCase):
 
 
 class StandardizeTests(unittest.TestCase):
-    def test_all_pages_end_up_with_identical_dimensions(self) -> None:
+    def test_pages_keep_content_driven_heights(self) -> None:
         from PIL import Image
 
         from src.analyst_card import standardize_pages
@@ -140,10 +147,10 @@ class StandardizeTests(unittest.TestCase):
                 Image.new("RGB", (1200, height), "#0f172a").save(path)
                 paths.append(path)
             standardize_pages(paths)
-            sizes = {Image.open(path).size for path in paths}
-            self.assertEqual(sizes, {(1200, 1500)})
+            sizes = [Image.open(path).size for path in paths]
+            self.assertEqual(sizes, [(1200, 900), (1200, 1500), (1200, 1200)])
 
-    def test_content_is_preserved_at_the_top_after_padding(self) -> None:
+    def test_content_is_preserved_without_height_padding(self) -> None:
         from PIL import Image
 
         from src.analyst_card import standardize_pages
@@ -156,7 +163,7 @@ class StandardizeTests(unittest.TestCase):
             Image.new("RGB", (1200, 1400), "#0f172a").save(tall)
             standardize_pages([short, tall])
             padded = Image.open(short)
-            self.assertEqual(padded.size, (1200, 1400))
+            self.assertEqual(padded.size, (1200, 600))
             self.assertEqual(padded.getpixel((10, 10)), (255, 255, 255))
 
     def test_empty_input_is_handled(self) -> None:

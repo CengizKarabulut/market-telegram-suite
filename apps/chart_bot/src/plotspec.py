@@ -28,6 +28,8 @@ class Trace:
     dash: str | None = None  # None | dash | dot
     fill_alpha: float = 0.0
     colors: pd.Series | None = None  # bar/segment basina rol adi
+    labels: pd.Series | None = None  # nokta yaninda kisa formasyon etiketi
+    text_position: str = "top"
     legend: bool = True
     zorder: int = 2
     tag: bool = False  # sag eksende renkli deger etiketi cizilsin mi
@@ -77,6 +79,40 @@ class ChartSpec:
 #: Ortalamalar amber -> camgobegi -> mor sirasiyla; VWAP ve Ichimoku
 #: cizgileri baska belirtec kullanir, boylece hicbir ikisi ayni renk olmaz.
 _MA_COLORS = ("accent1", "accent3", "accent2", "accent4")
+
+
+def _recent_candle_series(series: pd.Series, bars: int = 2) -> pd.Series:
+    """Formasyon rozetlerini yalnizca son tamamlanma bolgesinde tutar."""
+    out = series.copy()
+    if len(out) > bars:
+        if pd.api.types.is_object_dtype(out.dtype):
+            out.iloc[:-bars] = ""
+        else:
+            out.iloc[:-bars] = np.nan
+    return out
+
+
+def _candlestick_overlays(s: dict[str, pd.Series]) -> list[Trace]:
+    return [
+        Trace(
+            name="Bullish mum", kind="dots",
+            y=_recent_candle_series(s["CANDLE_BULL_Y"]), color="up",
+            labels=_recent_candle_series(s["CANDLE_BULL_LABEL"]),
+            text_position="bottom", width=10, legend=False, zorder=7,
+        ),
+        Trace(
+            name="Bearish mum", kind="dots",
+            y=_recent_candle_series(s["CANDLE_BEAR_Y"]), color="down",
+            labels=_recent_candle_series(s["CANDLE_BEAR_LABEL"]),
+            text_position="top", width=10, legend=False, zorder=7,
+        ),
+        Trace(
+            name="Nötr mum", kind="dots",
+            y=_recent_candle_series(s["CANDLE_NEUTRAL_Y"]), color="muted",
+            labels=_recent_candle_series(s["CANDLE_NEUTRAL_LABEL"]),
+            text_position="bottom", width=8, legend=False, zorder=6,
+        ),
+    ]
 
 
 def _ma_overlays(s: dict[str, pd.Series]) -> list[Trace]:
@@ -144,28 +180,32 @@ def _ichimoku_overlays(s: dict[str, pd.Series]) -> list[Trace]:
             width=0.7,
             zorder=0,
         ),
-        Trace(name="Tenkan 9", y=s["ICH_tenkan"], color="mint", width=1.0),
-        Trace(name="Kijun 26", y=s["ICH_kijun"], color="accent4", width=1.2, tag=True),
+        Trace(name="Tenkan 9", y=s["ICH_tenkan"], color="#2962FF", width=1.0),
+        Trace(name="Kijun 26", y=s["ICH_kijun"], color="#B71C1C", width=1.2, tag=True),
+        Trace(name="Chikou 26", y=s["ICH_chikou"], color="#43A047",
+              width=0.9, legend=False),
     ]
 
 
 def _vwap_overlays(s: dict[str, pd.Series]) -> list[Trace]:
-    return [
-        Trace(
-            name="VWAP bandi",
-            kind="band",
-            y=s["VWAP_upper"],
-            y2=s["VWAP_lower"],
-            color="vwap",
-            width=0.7,
-            dash="dot",
-            fill_alpha=0.05,
-            legend=False,
-            zorder=1,
-        ),
-        Trace(name="VWAP", y=s["VWAP"], color="vwap", width=1.3, zorder=3, tag=True),
-    ]
-
+    traces: list[Trace] = []
+    for multiplier, role, alpha in ((3, "accent3", 0.03), (2, "up", 0.05), (1, "accent1", 0.07)):
+        traces.append(
+            Trace(
+                name=f"VWAP ±{multiplier}σ",
+                kind="band",
+                y=s[f"VWAP_upper_{multiplier}"],
+                y2=s[f"VWAP_lower_{multiplier}"],
+                color=role,
+                width=0.7,
+                dash="dot",
+                fill_alpha=alpha,
+                legend=multiplier == 1,
+                zorder=1,
+            )
+        )
+    traces.append(Trace(name="Auto AVWAP", y=s["VWAP"], color="vwap", width=1.5, zorder=3, tag=True))
+    return traces
 
 def clip_outliers(series: pd.Series, quantile: float = 0.95,
                   headroom: float = 1.25) -> tuple[float, int]:
@@ -216,6 +256,20 @@ def _volume_panel(df: pd.DataFrame, s: dict[str, pd.Series]) -> Panel:
     )
 
 
+def _divergence_traces(s: dict[str, pd.Series], prefix: str) -> list[Trace]:
+    """Teyitli normal uyumsuzlukları osilatör panelinde gösterir."""
+    bull = s.get(f"{prefix}_div_bull")
+    bear = s.get(f"{prefix}_div_bear")
+    if bull is None or bear is None:
+        return []
+    return [
+        Trace(name="Bull uyumsuzluk", y=bull, color="up", width=2.0, legend=False, zorder=5),
+        Trace(name="Bear uyumsuzluk", y=bear, color="down", width=2.0, legend=False, zorder=5),
+        Trace(name="Bull", kind="dots", y=s.get(f"{prefix}_div_bull_points"), color="up", width=3.0, legend=False, zorder=6),
+        Trace(name="Bear", kind="dots", y=s.get(f"{prefix}_div_bear_points"), color="down", width=3.0, legend=False, zorder=6),
+    ]
+
+
 def _rsi_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
         key="rsi",
@@ -223,8 +277,9 @@ def _rsi_panel(s: dict[str, pd.Series]) -> Panel:
         params="14",
         height=0.8,
         traces=[
-            Trace(name="RSI", y=s["RSI"], color="accent3", width=1.5),
-            Trace(name="RSI MA 14", y=s["RSI_ma"], color="muted", width=1.0, dash="dash"),
+            Trace(name="RSI", y=s["RSI"], color="accent2", width=1.5),
+            Trace(name="RSI MA 14", y=s["RSI_ma"], color="#FDD835", width=1.0),
+            *_divergence_traces(s, "RSI"),
         ],
         hlines=[
             HLine(70, "down", "dash", "70"),
@@ -251,20 +306,44 @@ def _macd_panel(s: dict[str, pd.Series]) -> Panel:
             Trace(name="Histogram", kind="hist", y=hist, colors=roles, legend=False),
             Trace(name="MACD", y=s["MACD"], color="accent3", width=1.4),
             Trace(name="Sinyal", y=s["MACD_signal"], color="accent1", width=1.2),
+            *_divergence_traces(s, "MACD"),
         ],
         zero_line=True,
     )
 
 
+def _smi_panel(s: dict[str, pd.Series]) -> Panel:
+    upper = pd.Series(40.0, index=s["SMI"].index)
+    lower = pd.Series(-40.0, index=s["SMI"].index)
+    return Panel(
+        key="smi", title="SMI", params="10, 3, 3", height=0.75,
+        traces=[
+            Trace(name="Nötr bölge", kind="band", y=upper, y2=lower,
+                  color="accent3", width=0, fill_alpha=0.08, legend=False, zorder=0),
+            Trace(name="SMI", y=s["SMI"], color="accent3", width=1.5),
+            Trace(name="SMI EMA", y=s["SMI_signal"], color="accent1", width=1.2),
+            *_divergence_traces(s, "SMI"),
+        ],
+        hlines=[HLine(40, "down", "dash", "40"), HLine(-40, "up", "dash", "-40")],
+        zero_line=True,
+        yrange=(-120, 120),
+    )
+
+
 def _stochrsi_panel(s: dict[str, pd.Series]) -> Panel:
+    upper = pd.Series(80.0, index=s["SRSI_k"].index)
+    lower = pd.Series(20.0, index=s["SRSI_k"].index)
     return Panel(
         key="stochrsi",
         title="Stoch RSI",
         params="14, 14, 3, 3",
         height=0.7,
         traces=[
-            Trace(name="%K", y=s["SRSI_k"], color="accent2", width=1.4),
-            Trace(name="%D", y=s["SRSI_d"], color="accent1", width=1.1, dash="dash"),
+            Trace(name="20–80 bölgesi", kind="band", y=upper, y2=lower,
+                  color="accent3", width=0, fill_alpha=0.08, legend=False, zorder=0),
+            Trace(name="%K", y=s["SRSI_k"], color="accent3", width=1.4),
+            Trace(name="%D", y=s["SRSI_d"], color="accent1", width=1.1),
+            *_divergence_traces(s, "SRSI"),
         ],
         hlines=[HLine(80, "down", "dash", "80"), HLine(20, "up", "dash", "20")],
         yrange=(0, 100),
@@ -278,9 +357,9 @@ def _adx_panel(s: dict[str, pd.Series]) -> Panel:
         params="14",
         height=0.75,
         traces=[
-            Trace(name="+DI", y=s["DI_plus"], color="up", width=1.1),
-            Trace(name="-DI", y=s["DI_minus"], color="down", width=1.1),
-            Trace(name="ADX", y=s["ADX"], color="accent1", width=1.6),
+            Trace(name="+DI", y=s["DI_plus"], color="accent3", width=1.1),
+            Trace(name="-DI", y=s["DI_minus"], color="accent1", width=1.1),
+            Trace(name="ADX", y=s["ADX"], color="accent4", width=1.6),
         ],
         hlines=[HLine(25, "muted", "dash", "25")],
     )
@@ -336,9 +415,8 @@ def _rvol_panel(s: dict[str, pd.Series]) -> Panel:
 
 
 def _sar_overlays(s: dict[str, pd.Series]) -> list[Trace]:
-    roles = s["SAR_dir"].map({1.0: "up", -1.0: "down"})
     return [
-        Trace(name="Parabolic SAR", kind="dots", y=s["SAR"], colors=roles,
+        Trace(name="Parabolic SAR", kind="dots", y=s["SAR"], color="#FDD835",
               width=2.4, zorder=4, tag=True)
     ]
 
@@ -370,9 +448,17 @@ def _vprofile_overlays(s: dict[str, pd.Series]) -> list[Trace]:
 
 
 def _cci_panel(s: dict[str, pd.Series]) -> Panel:
+    upper = pd.Series(100.0, index=s["CCI"].index)
+    lower = pd.Series(-100.0, index=s["CCI"].index)
     return Panel(
         key="cci", title="CCI", params="20", height=0.75,
-        traces=[Trace(name="CCI", y=s["CCI"], color="accent3", width=1.4)],
+        traces=[
+            Trace(name="-100–100 bölgesi", kind="band", y=upper, y2=lower,
+                  color="accent3", width=0, fill_alpha=0.08, legend=False, zorder=0),
+            Trace(name="CCI", y=s["CCI"], color="accent3", width=1.4),
+            Trace(name="CCI SMA 14", y=s["CCI_ma"], color="#FDD835", width=1.0),
+            *_divergence_traces(s, "CCI"),
+        ],
         hlines=[HLine(100, "down", "dash", "100"), HLine(-100, "up", "dash", "-100")],
         zero_line=True,
     )
@@ -397,23 +483,57 @@ def _ao_panel(s: dict[str, pd.Series]) -> Panel:
     )
 
 
+def _fisher_panel(s: dict[str, pd.Series]) -> Panel:
+    return Panel(
+        key="fisher", title="Fisher Dönüşümü", params="9", height=0.75,
+        traces=[
+            Trace(name="Fisher", y=s["FISHER"], color="accent3", width=1.5),
+            Trace(name="Trigger", y=s["FISHER_trigger"], color="accent1", width=1.2),
+            *_divergence_traces(s, "FISHER"),
+        ],
+        hlines=[
+            HLine(1.5, "down", "dash", "1.5"), HLine(0.75, "muted", "dot", "0.75"),
+            HLine(-0.75, "muted", "dot", "-0.75"), HLine(-1.5, "up", "dash", "-1.5"),
+        ],
+        zero_line=True,
+    )
+
+
+def _cmf_panel(s: dict[str, pd.Series]) -> Panel:
+    return Panel(
+        key="cmf", title="Chaikin Para Akışı", params="20", height=0.7,
+        traces=[Trace(name="CMF", y=s["CMF"], color="#43A047", width=1.5), *_divergence_traces(s, "CMF")],
+        zero_line=True,
+        yrange=(-1, 1),
+    )
+
+
+def _momentum_panel(s: dict[str, pd.Series]) -> Panel:
+    return Panel(
+        key="momentum", title="Momentum", params="10", height=0.7,
+        traces=[Trace(name="MOM", y=s["MOM"], color="accent3", width=1.5), *_divergence_traces(s, "MOM")],
+        zero_line=True,
+    )
+
+
 def _atr_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
         key="atr", title="ATR", params="14", height=0.65,
-        traces=[
-            Trace(name="ATR", y=s["ATR"], color="accent1", width=1.4),
-            Trace(name="ATR %", y=s["ATR_pct"], color="muted", width=0.9, dash="dot",
-                  legend=False),
-        ],
+        traces=[Trace(name="ATR", y=s["ATR"], color="#B71C1C", width=1.4)],
     )
 
 
 def _obv_panel(s: dict[str, pd.Series]) -> Panel:
     return Panel(
-        key="obv", title="OBV", params="EMA 20", height=0.75,
+        key="obv", title="OBV", params="SMA 14 + BB 2", height=0.75,
         traces=[
-            Trace(name="OBV", y=s["OBV"], color="accent2", width=1.4),
-            Trace(name="OBV EMA", y=s["OBV_ma"], color="accent1", width=1.0, dash="dash"),
+            Trace(
+                name="OBV bandı", kind="band", y=s["OBV_upper"], y2=s["OBV_lower"],
+                color="#4CAF50", width=0.7, fill_alpha=0.08, legend=False,
+            ),
+            Trace(name="OBV", y=s["OBV"], color="accent3", width=1.4),
+            Trace(name="OBV SMA", y=s["OBV_ma"], color="#FDD835", width=1.0),
+            *_divergence_traces(s, "OBV"),
         ],
     )
 
@@ -476,6 +596,7 @@ def _bbands_panel(df: pd.DataFrame, s: dict[str, pd.Series]) -> Panel:
 
 
 _OVERLAY_BUILDERS = {
+    "candles": lambda df, s: _candlestick_overlays(s),
     "ma": lambda df, s: _ma_overlays(s),
     "bbands": lambda df, s: _bb_overlays(s),
     "supertrend": lambda df, s: _supertrend_overlays(s),
@@ -491,6 +612,7 @@ _PANEL_BUILDERS = {
     "volume": lambda df, s: _volume_panel(df, s),
     "rsi": lambda df, s: _rsi_panel(s),
     "macd": lambda df, s: _macd_panel(s),
+    "smi": lambda df, s: _smi_panel(s),
     "stochrsi": lambda df, s: _stochrsi_panel(s),
     "adx": lambda df, s: _adx_panel(s),
     "bbstate": lambda df, s: _bbstate_panel(s),
@@ -499,6 +621,9 @@ _PANEL_BUILDERS = {
     "cci": lambda df, s: _cci_panel(s),
     "willr": lambda df, s: _willr_panel(s),
     "ao": lambda df, s: _ao_panel(s),
+    "fisher": lambda df, s: _fisher_panel(s),
+    "cmf": lambda df, s: _cmf_panel(s),
+    "momentum": lambda df, s: _momentum_panel(s),
     "atr": lambda df, s: _atr_panel(s),
     "obv": lambda df, s: _obv_panel(s),
     "kcpos": lambda df, s: _kcpos_panel(df, s),
@@ -510,6 +635,7 @@ _PANEL_BUILDERS = {
 #: Cizim anahtari -> ihtiyac duydugu hesap anahtari.
 #: Bir gorunum yalnizca kullandigi gostergeleri hesaplatsin diye gerekli.
 REQUIRES: dict[str, tuple[str, ...]] = {
+    "candles": ("candles",),
     "ma": ("ma",),
     "bbands": ("bbands",),
     "supertrend": ("supertrend",),
@@ -518,6 +644,7 @@ REQUIRES: dict[str, tuple[str, ...]] = {
     "volume": ("volume",),
     "rsi": ("rsi",),
     "macd": ("macd",),
+    "smi": ("smi",),
     "stochrsi": ("stochrsi",),
     "adx": ("adx",),
     "bbstate": ("bbands",),
@@ -530,6 +657,9 @@ REQUIRES: dict[str, tuple[str, ...]] = {
     "cci": ("cci",),
     "willr": ("willr",),
     "ao": ("ao",),
+    "fisher": ("fisher",),
+    "cmf": ("cmf",),
+    "momentum": ("momentum",),
     "atr": ("atr",),
     "obv": ("obv",),
     "kcpos": ("keltner",),
@@ -627,6 +757,7 @@ def build_spec(
     title: str,
     subtitle: str,
     price_height: float = 3.4,
+    panel_scale: float = 1.0,
     note: str = "",
     last_bar_open: bool = False,
     log_price: bool | None = None,
@@ -637,7 +768,9 @@ def build_spec(
         if key in _OVERLAY_BUILDERS:
             overlays.extend(_OVERLAY_BUILDERS[key](df, series))
         elif key in _PANEL_BUILDERS:
-            panels.append(_PANEL_BUILDERS[key](df, series))
+            panel = _PANEL_BUILDERS[key](df, series)
+            panel.height *= panel_scale
+            panels.append(panel)
     return ChartSpec(
         df=df,
         overlays=overlays,

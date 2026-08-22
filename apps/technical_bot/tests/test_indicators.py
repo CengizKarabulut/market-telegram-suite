@@ -6,6 +6,7 @@ import pandas as pd
 
 from src.stock_dashboard import (
     MA_PERIODS,
+    MA_TABLE_PERIODS,
     ScanConfig,
     build_status,
     calculate_indicators,
@@ -96,13 +97,17 @@ class IndicatorTests(unittest.TestCase):
             self.assertTrue(np.isfinite(result[f"SMA_{length}"].iloc[-1]))
             self.assertTrue(np.isfinite(result[f"EMA_{length}"].iloc[-1]))
 
-    def test_status_contains_fifteen_ma_rows(self) -> None:
+    def test_status_contains_thirteen_sma_ema_wma_rows(self) -> None:
         result = calculate_indicators(synthetic_prices())
         status = build_status(result, ScanConfig("TEST", "US"), "TEST")
-        self.assertEqual(len(status["ma"]), 15)
-        self.assertEqual([item["period"] for item in status["ma"]], MA_PERIODS)
+        self.assertEqual(len(status["ma"]), 13)
+        self.assertEqual([item["period"] for item in status["ma"]], MA_TABLE_PERIODS)
+        self.assertTrue(all("wma" in item for item in status["ma"]))
         self.assertIn("technical_commentary", status)
-        self.assertEqual(len(status["technical_commentary"]["visual_rows"]), 8)
+        self.assertEqual(len(status["technical_commentary"]["visual_rows"]), 12)
+        self.assertEqual(status["candlestick_summary"]["window"], 2)
+        self.assertTrue(status["candlestick_summary"]["story"])
+        self.assertIn("Son 2 mumun hikâyesi", [item[0] for item in status["trend_volatility_volume"]])
 
     def test_core_indicators_are_finite(self) -> None:
         row = calculate_indicators(synthetic_prices()).iloc[-1]
@@ -185,9 +190,9 @@ class ShortHistoryTests(unittest.TestCase):
         status = build_status(calculate_indicators(validated, "1d"), ScanConfig(ticker="ZGYO"), "ZGYO")
         self.assertTrue(status["short_history"])
         self.assertEqual(status["bar_count"], bars)
-        self.assertEqual(len(status["ma"]), 15, "tüm periyotlar tabloda kalmalı")
+        self.assertEqual(len(status["ma"]), 13, "kullanıcının 13 periyodu tabloda kalmalı")
         unavailable = [item for item in status["ma"] if not item.get("available")]
-        self.assertEqual([item["period"] for item in unavailable], [144, 200, 233, 377])
+        self.assertEqual([item["period"] for item in unavailable], [144, 200, 233])
         self.assertIn("Yetersiz veri", unavailable[0]["sma_relation"])
         self.assertIn("238 bar gerekir", next(item["sma_relation"] for item in unavailable if item["period"] == 233))
 

@@ -38,7 +38,7 @@ INTERVAL_LABELS = {
 DEFAULT_BARS: dict[str, int] = {
     "1m": 180, "5m": 200, "15m": 220, "30m": 240,
     "1h": 250, "2h": 250, "3h": 250, "4h": 250,
-    "1d": 250, "1wk": 180, "1mo": 96,
+    "1d": 170, "1wk": 130, "1mo": 96,
 }
 
 
@@ -70,13 +70,13 @@ INTRADAY = {"1m", "5m", "15m", "30m", "1h", "2h", "4h"}
 def default_params(interval: str, params: dict[str, dict] | None = None) -> dict[str, dict]:
     """Araliga gore gosterge varsayilanlarini secer.
 
-    Kritik olan VWAP: gun ici barlarda seans basinda sifirlanan kumulatif VWAP
-    dogru olandir, ama gunluk barlarda her grup tek bardan olusacagi icin VWAP
-    fiyatin kendisine esitlenir ve gosterge anlamsizlasir. Gunluk ve ustu
-    periyotlarda 20 barlik hareketli VWAP kullanilir.
+    VWAP Auto Anchored, TradingView'in resmi zaman araligi kuralini izler:
+    gun icinde son seans, gunlukte son ay, haftalikta son ceyrek ve aylikta
+    son yil baslangicindan itibaren hesaplanir.
     """
-    merged: dict[str, dict] = {"vwap": {"anchor": "session" if interval in INTRADAY else "rolling",
-                                        "window": 20}}
+    merged: dict[str, dict] = {
+        "vwap": {"anchor": "auto", "interval": interval, "window": 14}
+    }
     for key, value in (params or {}).items():
         merged[key] = {**merged.get(key, {}), **value}
     return merged
@@ -286,6 +286,7 @@ def build_views(
                     subtitle=subtitle,
                     note=view.note,
                     price_height=view.price_height,
+                    panel_scale=view.panel_scale,
                     last_bar_open=bar_open,
                     log_price=log_price,
                 ),
@@ -319,6 +320,7 @@ def build_chart(
         keys=keys,
         note=", ".join(keys),
         price_height=3.4,
+        panel_scale=1.0,
     )
     return build_views(
         symbol, (view,), interval=interval, bars=bars, period=period,

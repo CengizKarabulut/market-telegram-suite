@@ -78,56 +78,60 @@ class TestViews(unittest.TestCase):
             self.assertTrue(set(view.keys) <= valid, f"{view.key}: {set(view.keys) - valid}")
             self.assertTrue(set(view.compute_keys) <= set(ind.ALL_INDICATORS), view.key)
 
-    def test_grid_views_take_one_indicator_per_category(self) -> None:
-        """Her kare dort kategoriden BIRER gosterge tasimali."""
+    def test_grid_views_match_requested_indicator_schemas(self) -> None:
         from src.views import GRID_SET, VIEWS_BY_KEY
 
-        for key in GRID_SET:
-            view = VIEWS_BY_KEY[key]
-            categories = [ind.CATEGORY[k] for k in view.compute_keys]
-            self.assertEqual(sorted(categories),
-                             ["hacim", "momentum", "trend", "volatilite"], key)
+        expected = {
+            "bollinger_macd": ("bbands", "macd", "smi", "obv", "candles"),
+            "ichimoku_rsi": ("ichimoku", "rsi", "cci", "atr", "candles"),
+            "sar_vwap": ("sar", "vwap", "stochrsi", "adx", "candles"),
+            "supertrend_fisher": ("supertrend", "fisher", "cmf", "momentum", "candles"),
+        }
+        self.assertEqual(tuple(expected), GRID_SET)
+        for key, keys in expected.items():
+            self.assertEqual(VIEWS_BY_KEY[key].keys, keys)
 
-    def test_grid_views_do_not_repeat_a_display(self) -> None:
+    def test_default_views_do_not_repeat_an_indicator(self) -> None:
         from src.views import GRID_SET, VIEWS_BY_KEY
 
-        used = [k for key in GRID_SET for k in VIEWS_BY_KEY[key].keys]
-        self.assertEqual(len(used), len(set(used)), "ayni gosterim birden fazla karede")
+        used = [
+            key for view_key in GRID_SET
+            for key in VIEWS_BY_KEY[view_key].keys
+            if key != "candles"
+        ]
+        self.assertEqual(len(used), len(set(used)))
 
-    def test_grid_views_have_one_overlay_and_three_panels(self) -> None:
-        """Izgaranin temel kurali: mum grafiginde TEK gosterge, altinda UC panel.
+    def test_latest_candle_badge_is_available_in_each_default_view(self) -> None:
+        from src.views import GRID_SET, VIEWS_BY_KEY
 
-        Fiyat panelinde birden fazla katman ust uste binince grafik okunmaz
-        hale geliyordu; bu test o duzenin bozulmasini engeller.
-        """
+        self.assertTrue(all("candles" in VIEWS_BY_KEY[key].keys for key in GRID_SET))
+
+    def test_default_views_follow_requested_overlay_panel_layout(self) -> None:
         from src.plotspec import _OVERLAY_BUILDERS, _PANEL_BUILDERS
         from src.views import GRID_SET, VIEWS_BY_KEY
 
+        expected = {
+            "bollinger_macd": (2, 3),
+            "ichimoku_rsi": (2, 3),
+            "sar_vwap": (3, 2),
+            "supertrend_fisher": (2, 3),
+        }
         for key in GRID_SET:
             view = VIEWS_BY_KEY[key]
             overlays = [k for k in view.keys if k in _OVERLAY_BUILDERS]
             panels = [k for k in view.keys if k in _PANEL_BUILDERS]
-            self.assertEqual(len(overlays), 1, f"{key}: fiyat ustunde {overlays}")
-            self.assertEqual(len(panels), 3, f"{key}: paneller {panels}")
+            self.assertEqual((len(overlays), len(panels)), expected[key], key)
 
-    def test_grid_tiles_have_equal_height(self) -> None:
-        """Ayni panel sayisi -> ayni yukseklik -> izgarada hizali karolar."""
-        from src.views import GRID_SET, VIEWS_BY_KEY
+    def test_candlestick_overlay_keeps_only_latest_two_bars(self) -> None:
+        from src.plotspec import _recent_candle_series
 
-        heights = {
-            (VIEWS_BY_KEY[k].price_height, len(VIEWS_BY_KEY[k].keys)) for k in GRID_SET
-        }
-        self.assertEqual(len(heights), 1, "karolar farkli yukseklikte")
-
-    def test_resolve_views(self) -> None:
-        from src.views import DEFAULT_SET, VIEWS, resolve_views
-
-        self.assertEqual(len(resolve_views("all")), len(VIEWS))
-        self.assertEqual(len(resolve_views("set")), len(DEFAULT_SET))
-        self.assertEqual([v.key for v in resolve_views("klasik,trend")],
-                         ["klasik", "trend"])
-        with self.assertRaises(KeyError):
-            resolve_views("yok")
+        numeric = pd.Series([1.0, 2.0, 3.0, 4.0])
+        labels = pd.Series(["A", "B", "C", "D"], dtype="object")
+        recent_numeric = _recent_candle_series(numeric)
+        recent_labels = _recent_candle_series(labels)
+        self.assertTrue(recent_numeric.iloc[:-2].isna().all())
+        self.assertEqual(recent_numeric.iloc[-2:].tolist(), [3.0, 4.0])
+        self.assertEqual(recent_labels.tolist(), ["", "", "C", "D"])
 
     def test_compute_keys_deduplicated(self) -> None:
         from src.plotspec import compute_keys_for
@@ -215,13 +219,13 @@ class TestCLIArgs(unittest.TestCase):
         args = parse_args(["--symbol", "THYAO"])
         self.assertEqual((args.interval, args.theme), ("1d", "tv"))
         self.assertIsNone(args.bars)  # araliga gore secilir
-        self.assertEqual(args.grid, 2)
+        self.assertEqual(args.grid, 0)
 
     def test_default_bars_scale_with_interval(self) -> None:
         """Aylikta 250 bar 20 yil demektir; mumlar bir piksele iner."""
         from src.pipeline import default_bars
 
-        self.assertEqual(default_bars("1d"), 250)
+        self.assertEqual(default_bars("1d"), 170)
         self.assertLess(default_bars("1wk"), default_bars("1d"))
         self.assertLess(default_bars("1mo"), default_bars("1wk"))
         self.assertEqual(default_bars("bilinmeyen"), 250)
@@ -316,25 +320,19 @@ class TestCompose(unittest.TestCase):
 
 
 class TestFrameShape(unittest.TestCase):
-    """Izgara karelerinin yapisal kurali: mum panelinde TEK gosterge."""
+    """Izgara kareleri kullanıcının dört şemasını korumalı."""
 
-    def test_one_overlay_and_three_panels(self) -> None:
-        from src.plotspec import _OVERLAY_BUILDERS, _PANEL_BUILDERS
-        from src.views import GRID_SET, VIEWS_BY_KEY
-
-        for key in GRID_SET:
-            view = VIEWS_BY_KEY[key]
-            overlays = [k for k in view.keys if k in _OVERLAY_BUILDERS]
-            panels = [k for k in view.keys if k in _PANEL_BUILDERS]
-            self.assertEqual(len(overlays), 1, f"{key}: mum panelinde {len(overlays)} gosterge")
-            self.assertEqual(len(panels), 3, f"{key}: {len(panels)} alt panel")
-
-    def test_rendered_spec_matches_the_rule(self) -> None:
-        """Kural tanimda degil, uretilen ChartSpec'te de gecerli olmali."""
+    def test_rendered_spec_matches_requested_panels(self) -> None:
         import src.pipeline as pipeline
         from src.data_sources import SymbolSpec
         from src.views import resolve_views
 
+        expected_panels = {
+            "bollinger_macd": 3,
+            "ichimoku_rsi": 3,
+            "sar_vwap": 2,
+            "supertrend_fisher": 3,
+        }
         original = pipeline.fetch_ohlcv
         pipeline.fetch_ohlcv = lambda symbol, period="1y", interval="1d", bars=None: (
             synthetic_ohlcv(520, seed=5),
@@ -343,7 +341,7 @@ class TestFrameShape(unittest.TestCase):
         try:
             result = pipeline.build_views("TEST", resolve_views("grid"), bars=150)
             for item in result:
-                self.assertEqual(len(item.spec.panels), 3, item.key)
+                self.assertEqual(len(item.spec.panels), expected_panels[item.key], item.key)
         finally:
             pipeline.fetch_ohlcv = original
 

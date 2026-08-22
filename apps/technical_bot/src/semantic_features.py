@@ -76,6 +76,12 @@ def price_action_context(data: pd.DataFrame) -> dict[str, Any]:
     nr4 = bool(len(ranges.dropna()) >= 4 and bar_range <= ranges.dropna().tail(4).min())
     nr7 = bool(len(ranges.dropna()) >= 7 and bar_range <= ranges.dropna().tail(7).min())
     patterns: list[str] = []
+    candle_patterns = [
+        str(row.get(column, ""))
+        for column in ("CANDLE_BULL_NAMES", "CANDLE_BEAR_NAMES", "CANDLE_NEUTRAL_NAMES")
+        if str(row.get(column, "")) not in {"", "nan"}
+    ]
+    patterns.extend(candle_patterns)
     if inside:
         patterns.append("Inside bar")
     if outside:
@@ -121,8 +127,9 @@ def price_action_context(data: pd.DataFrame) -> dict[str, Any]:
         "summary": (
             f"{state}; kapanış bar aralığının %{close_location:.0f} seviyesinde, gövde %{body_pct:.0f}, "
             f"range son 60 barın %{range_percentile:.0f} yüzdeliğinde ({_fmt(range_atr)} ATR). {meaning}"
+            + (f" Teyitli mum kalıbı: {'; '.join(candle_patterns)}." if candle_patterns else "")
         ),
-        "method": "Yalnız OHLC bar morfolojisi; mum formasyonu tek başına yön teyidi değildir.",
+        "method": "TradingView All Patterns morfolojisi ve SMA50/SMA200 trend bağlamı; mum formasyonu tek başına yön teyidi değildir.",
     }
 
 

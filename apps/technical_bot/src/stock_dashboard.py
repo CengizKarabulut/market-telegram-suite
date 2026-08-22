@@ -21,6 +21,10 @@ import yfinance as yf
 
 from src.analyst_card import render_analyst_cards, standardize_pages
 from src.bar_state import build_bar_state
+from src.candlestick_patterns import (
+    detect_candlestick_patterns,
+    summarize_recent_candles,
+)
 from src.decision_context import build_decision_context
 from src.intervals import (
     ABSOLUTE_MINIMUM_BARS,
@@ -50,6 +54,7 @@ from src.telegram_client import (
 PAGE_WIDTH_INCHES = 12.0
 PAGE_DPI = 100
 MA_PERIODS = [5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100, 144, 200, 233, 377]
+MA_TABLE_PERIODS = [5, 8, 10, 13, 20, 21, 34, 55, 89, 100, 144, 200, 233]
 # Grafikte ve trend analizinde öne çıkarılan Fibonacci üçlüsü.
 KEY_EMA_PERIODS = (21, 55, 233)
 BG = "#0f172a"
@@ -274,8 +279,34 @@ def ema(series: pd.Series, length: int) -> pd.Series:
     return series.ewm(span=length, adjust=False, min_periods=length).mean()
 
 
+def wma(series: pd.Series, length: int) -> pd.Series:
+    weights = np.arange(1.0, length + 1.0)
+    return series.rolling(length, min_periods=length).apply(
+        lambda values: float(np.dot(values, weights) / weights.sum()), raw=True
+    )
+
+
 def rma(series: pd.Series, length: int) -> pd.Series:
     return series.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
+
+
+def fisher_transform(data: pd.DataFrame, length: int = 9) -> tuple[pd.Series, pd.Series]:
+    source = (data["High"] + data["Low"]) / 2.0
+    highest = source.rolling(length, min_periods=length).max()
+    lowest = source.rolling(length, min_periods=length).min()
+    normalized = (source - lowest) / (highest - lowest).replace(0, np.nan) - 0.5
+    values = np.full(len(data), np.nan)
+    fisher = np.full(len(data), np.nan)
+    for i in range(len(data)):
+        if not np.isfinite(normalized.iloc[i]):
+            continue
+        previous_value = values[i - 1] if i and np.isfinite(values[i - 1]) else 0.0
+        value = min(max(0.66 * float(normalized.iloc[i]) + 0.67 * previous_value, -0.999), 0.999)
+        values[i] = value
+        previous_fisher = fisher[i - 1] if i and np.isfinite(fisher[i - 1]) else 0.0
+        fisher[i] = 0.5 * np.log((1.0 + value) / (1.0 - value)) + 0.5 * previous_fisher
+    line = pd.Series(fisher, index=data.index, dtype="float64")
+    return line, line.shift(1)
 
 
 def rsi(series: pd.Series, length: int = 14) -> pd.Series:
@@ -306,12 +337,19 @@ def true_range(data: pd.DataFrame) -> pd.Series:
 def adx_dmi(data: pd.DataFrame, length: int = 14) -> tuple[pd.Series, pd.Series, pd.Series]:
     up_move = data["High"].diff()
     down_move = -data["Low"].diff()
-    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=data.index)
-    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=data.index)
+    plus_dm = pd.Series(
+        np.where(up_move.isna(), np.nan, np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)),
+        index=data.index,
+    )
+    minus_dm = pd.Series(
+        np.where(down_move.isna(), np.nan, np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)),
+        index=data.index,
+    )
     atr_value = rma(true_range(data), length)
-    plus_di = 100 * rma(plus_dm, length) / atr_value.replace(0, np.nan)
-    minus_di = 100 * rma(minus_dm, length) / atr_value.replace(0, np.nan)
-    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    plus_di = (100 * rma(plus_dm, length) / atr_value.replace(0, np.nan)).ffill()
+    minus_di = (100 * rma(minus_dm, length) / atr_value.replace(0, np.nan)).ffill()
+    denominator = (plus_di + minus_di).where((plus_di + minus_di) != 0, 1.0)
+    dx = 100 * (plus_di - minus_di).abs() / denominator
     return plus_di, minus_di, rma(dx, length)
 
 
@@ -392,6 +430,35 @@ def percentile_rank(series: pd.Series, length: int) -> pd.Series:
     return series.rolling(length, min_periods=max(10, length // 3)).apply(rank, raw=True)
 
 
+def auto_anchored_vwap(data: pd.DataFrame, interval: str) -> tuple[pd.Series, pd.Series, str]:
+    """TradingView Auto Anchored VWAP: hlc3, aktif son dönem ve ağırlıklı std."""
+    source = (data["High"] + data["Low"] + data["Close"]) / 3.0
+    volume = data["Volume"].astype(float).fillna(0.0)
+    index = pd.DatetimeIndex(data.index)
+    if interval in {"1m", "5m", "15m", "30m", "1h", "2h", "3h", "4h"}:
+        groups = pd.Series(index.normalize(), index=data.index)
+        label = "Seans"
+    elif interval == "1d":
+        groups = pd.Series(index.to_period("M").astype(str), index=data.index)
+        label = "Ay"
+    elif interval == "1wk":
+        groups = pd.Series(index.to_period("Q").astype(str), index=data.index)
+        label = "Çeyrek"
+    elif interval == "1mo":
+        groups = pd.Series(index.to_period("Y").astype(str), index=data.index)
+        label = "Yıl"
+    else:
+        groups = pd.Series((index.year // 10) * 10, index=data.index)
+        label = "10 yıl"
+    cumulative_volume = volume.groupby(groups).cumsum().replace(0, np.nan)
+    line = (source * volume).groupby(groups).cumsum() / cumulative_volume
+    variance = (
+        (source.pow(2) * volume).groupby(groups).cumsum() / cumulative_volume - line.pow(2)
+    ).clip(lower=0)
+    active = groups.eq(groups.iloc[-1])
+    return line.where(active), np.sqrt(variance).where(active), label
+
+
 def calculate_indicators(data: pd.DataFrame, interval: str = "1d") -> pd.DataFrame:
     out = data.copy()
     window = rank_window(interval)
@@ -402,6 +469,8 @@ def calculate_indicators(data: pd.DataFrame, interval: str = "1d") -> pd.DataFra
     for length in periods:
         out[f"SMA_{length}"] = close.rolling(length).mean()
         out[f"EMA_{length}"] = ema(close, length)
+        if length in MA_TABLE_PERIODS:
+            out[f"WMA_{length}"] = wma(close, length)
     ema_columns = [f"EMA_{length}" for length in periods]
     out["MA_SPREAD_PCT"] = 100 * (out[ema_columns].max(axis=1) - out[ema_columns].min(axis=1)) / close
     out["MA_SPREAD_RANK"] = percentile_rank(out["MA_SPREAD_PCT"], window)
@@ -429,6 +498,8 @@ def calculate_indicators(data: pd.DataFrame, interval: str = "1d") -> pd.DataFra
     double_range = ema(ema(price_range, 3), 3)
     out["SMI"] = 200 * double_relative / double_range.replace(0, np.nan)
     out["SMI_EMA"] = ema(out["SMI"], 3)
+    out["FISHER"], out["FISHER_TRIGGER"] = fisher_transform(out, 9)
+    out["MOMENTUM"] = close - close.shift(10)
 
     out["BB_MID"] = close.rolling(20).mean()
     bb_std = close.rolling(20).std(ddof=0)
@@ -456,18 +527,35 @@ def calculate_indicators(data: pd.DataFrame, interval: str = "1d") -> pd.DataFra
     out["MFI"] = mfi_value.where(~((positive_money == 0) & (negative_money > 0)), 0.0)
     out["MFI_MA"] = out["MFI"].rolling(14).mean()
 
-    out["OBV"] = (np.sign(close.diff()).fillna(0) * out["Volume"]).cumsum()
+    if float(out["Volume"].fillna(0.0).sum()) == 0.0:
+        raise ValueError("Veri sağlayıcı hacim verisi sunmuyor; OBV hesaplanamaz.")
+    out["OBV"] = (np.sign(close.diff()) * out["Volume"].fillna(0.0)).cumsum()
+    out["OBV_SMA"] = out["OBV"].rolling(14).mean()
+    obv_std = out["OBV"].rolling(14).std(ddof=0)
+    out["OBV_BB_UPPER"] = out["OBV_SMA"] + 2 * obv_std
+    out["OBV_BB_LOWER"] = out["OBV_SMA"] - 2 * obv_std
+    # Eski semantik özellikler için geriye uyumlu seri.
     out["OBV_EMA"] = ema(out["OBV"], 20)
+    money_flow_multiplier = (
+        (close - out["Low"]) - (out["High"] - close)
+    ) / (out["High"] - out["Low"]).replace(0, np.nan)
+    money_flow_volume = money_flow_multiplier.fillna(0.0) * out["Volume"].fillna(0.0)
+    out["CMF"] = money_flow_volume.rolling(20).sum() / out["Volume"].rolling(20).sum().replace(0, np.nan)
     mean_typical = typical.rolling(20).mean()
     mean_deviation = typical.rolling(20).apply(lambda values: np.mean(np.abs(values - values.mean())), raw=True)
     out["CCI"] = (typical - mean_typical) / (0.015 * mean_deviation.replace(0, np.nan))
     # TradingView "Commodity Channel Index" varsayılan yumuşatması 14 periyot SMA'dır.
     out["CCI_MA"] = out["CCI"].rolling(14).mean()
 
-    cumulative_volume = out["Volume"].cumsum().replace(0, np.nan)
-    out["VWAP"] = (typical * out["Volume"]).cumsum() / cumulative_volume
+    out["VWAP"], vwap_std, vwap_anchor = auto_anchored_vwap(out, interval)
+    out.attrs["vwap_anchor"] = vwap_anchor
+    for multiplier in (1, 2, 3):
+        out[f"VWAP_UPPER_{multiplier}"] = out["VWAP"] + multiplier * vwap_std
+        out[f"VWAP_LOWER_{multiplier}"] = out["VWAP"] - multiplier * vwap_std
     out["VOLUME_MA"] = out["Volume"].shift(1).rolling(20, min_periods=5).mean()
     out["VOLUME_RATIO"] = out["Volume"] / out["VOLUME_MA"].replace(0, np.nan)
+    for column, values in detect_candlestick_patterns(out).items():
+        out[column] = values
     out["VOLUME_RANK"] = percentile_rank(out["Volume"], window)
 
     out["TENKAN"] = (out["High"].rolling(9).max() + out["Low"].rolling(9).min()) / 2
@@ -621,8 +709,8 @@ def build_status(
     ma_rows = []
     periods = data.attrs.get("ma_periods", MA_PERIODS)
     current_atr = float(row["ATR"]) if "ATR" in row and math.isfinite(float(row["ATR"])) else math.nan
-    for length in MA_PERIODS:
-        # Hesaplanamayan periyot gizlenmez; periyot listesi bozulmadan eksik olduğu yazılır.
+    for length in MA_TABLE_PERIODS:
+        # Hesaplanamayan periyot gizlenmez; kullanıcının 13 periyotluk tablosu korunur.
         if length not in periods:
             note = f"Yetersiz veri ({length + 5} bar gerekir)"
             ma_rows.append(
@@ -635,13 +723,18 @@ def build_status(
                     "ema": math.nan,
                     "ema_relation": note,
                     "ema_color": GRAY,
+                    "wma": math.nan,
+                    "wma_relation": note,
+                    "wma_color": GRAY,
                 }
             )
             continue
         sma_value = float(row[f"SMA_{length}"])
         ema_value = float(row[f"EMA_{length}"])
+        wma_value = float(row[f"WMA_{length}"])
         sma_relation, sma_color = relation_color(price, sma_value, config.equality_tolerance_pct, current_atr)
         ema_relation, ema_color = relation_color(price, ema_value, config.equality_tolerance_pct, current_atr)
+        wma_relation, wma_color = relation_color(price, wma_value, config.equality_tolerance_pct, current_atr)
         ma_rows.append(
             {
                 "period": length,
@@ -652,6 +745,9 @@ def build_status(
                 "ema": ema_value,
                 "ema_relation": ema_relation,
                 "ema_color": ema_color,
+                "wma": wma_value,
+                "wma_relation": wma_relation,
+                "wma_color": wma_color,
             }
         )
 
@@ -675,6 +771,9 @@ def build_status(
     smi_zone = "+40 üzeri" if smi_value > 40 else "-40 altı" if smi_value < -40 else "0 üzeri" if smi_value > 0 else "0 altı"
     mfi_value = float(row["MFI"])
     cci_value = float(row["CCI"])
+    fisher_value = float(row["FISHER"])
+    cmf_value = float(row["CMF"])
+    momentum_value = float(row["MOMENTUM"])
 
     macd_relation = "MACD > Signal" if row["MACD"] > row["MACD_SIGNAL"] else "MACD < Signal"
     macd_zero = "MACD > 0" if row["MACD"] > 0 else "MACD < 0"
@@ -684,7 +783,9 @@ def build_status(
         ["Stoch RSI", f"K {fmt(row['STOCH_K'])} | D {fmt(row['STOCH_D'])}\n{diagnostic_text(data['STOCH_K'])}", f"{cross_text(data['STOCH_K'], data['STOCH_D'], stoch_zone)}\n{normalized_gap_state(data['STOCH_K'], data['STOCH_D'])}", GREEN if row["STOCH_K"] > row["STOCH_D"] else RED],
         ["SMI", f"SMI {fmt(smi_value)} | EMA3 {fmt(row['SMI_EMA'])}\n{diagnostic_text(data['SMI'])}", f"{cross_text(data['SMI'], data['SMI_EMA'], smi_zone)}\n{normalized_gap_state(data['SMI'], data['SMI_EMA'])}", GREEN if smi_value > row["SMI_EMA"] else RED],
         ["MFI", f"MFI {fmt(mfi_value)} | MA14 {fmt(row['MFI_MA'])}\n{diagnostic_text(data['MFI'])}", f"{cross_text(data['MFI'], data['MFI_MA'], '20/50/80')}\n{normalized_gap_state(data['MFI'], data['MFI_MA'])}", GREEN if mfi_value > row["MFI_MA"] else RED],
-        ["CCI", f"CCI {fmt(cci_value)} | MA14 {fmt(row['CCI_MA'])}\n{diagnostic_text(data['CCI'])}", f"{cross_text(data['CCI'], data['CCI_MA'], '-100/0/+100')}\n{normalized_gap_state(data['CCI'], data['CCI_MA'])}", GREEN if cci_value > row["CCI_MA"] else RED],
+        ["CCI", f"CCI {fmt(cci_value)} | SMA14 {fmt(row['CCI_MA'])}\n{diagnostic_text(data['CCI'])}", f"{cross_text(data['CCI'], data['CCI_MA'], '-100/0/+100')}\n{normalized_gap_state(data['CCI'], data['CCI_MA'])}", GREEN if cci_value > row["CCI_MA"] else RED],
+        ["Fisher", f"Fisher {fmt(fisher_value)} | Trigger {fmt(row['FISHER_TRIGGER'])}\n{diagnostic_text(data['FISHER'])}", f"{cross_text(data['FISHER'], data['FISHER_TRIGGER'], '-1.5/0/+1.5')}", GREEN if fisher_value > row["FISHER_TRIGGER"] else RED],
+        ["Momentum", f"MOM10 {fmt(momentum_value)}\n{diagnostic_text(data['MOMENTUM'])}", "Sıfır üstü: 10 barlık fiyat değişimi pozitif" if momentum_value > 0 else "Sıfır altı: 10 barlık fiyat değişimi negatif", GREEN if momentum_value > 0 else RED],
     ]
 
     bb_rank = float(row["BB_WIDTH_RANK"])
@@ -694,23 +795,33 @@ def build_status(
     cloud_top = max(float(row["VISIBLE_SPAN_A"]), float(row["VISIBLE_SPAN_B"]))
     cloud_bottom = min(float(row["VISIBLE_SPAN_A"]), float(row["VISIBLE_SPAN_B"]))
     cloud_state = "Bulut üstü" if price > cloud_top else "Bulut altı" if price < cloud_bottom else "Bulut içi"
+    candle_summary = summarize_recent_candles(data)
+    candle_current = candle_summary["current"]
+    candle_previous = candle_summary["previous"]
     trend = [
         ["ADX/DMI", f"ADX {fmt(row['ADX'])} | +DI {fmt(row['PLUS_DI'])} | -DI {fmt(row['MINUS_DI'])}", f"{'+DI üstün' if row['PLUS_DI'] > row['MINUS_DI'] else '-DI üstün'} | ADX perc %{fmt(row['ADX_RANK'], 0)} | {diagnostic_text(data['ADX'])}", GREEN if row["PLUS_DI"] > row["MINUS_DI"] else RED],
         ["Supertrend", fmt(row["SUPERTREND"]), "Fiyat üstünde" if price > row["SUPERTREND"] else "Fiyat altında", GREEN if price > row["SUPERTREND"] else RED],
-        ["Dataset VWAP", fmt(row["VWAP"]), f"İndirme başlangıcına bağlı | Fiyat {'üstünde' if price > row['VWAP'] else 'altında'}", GREEN if price > row["VWAP"] else RED],
+        ["Auto AVWAP", f"{fmt(row['VWAP'])} | Çapa {data.attrs.get('vwap_anchor', '—')} | Bant1 {fmt(row['VWAP_LOWER_1'])}–{fmt(row['VWAP_UPPER_1'])} | Bant2 {fmt(row['VWAP_LOWER_2'])}–{fmt(row['VWAP_UPPER_2'])} | Bant3 {fmt(row['VWAP_LOWER_3'])}–{fmt(row['VWAP_UPPER_3'])}", f"TradingView Oto zaman aralığı kuralı | Fiyat {'üstünde' if price > row['VWAP'] else 'altında'}", GREEN if price > row["VWAP"] else RED],
         ["Ichimoku", f"Tenkan {fmt(row['TENKAN'])} | Kijun {fmt(row['KIJUN'])}", cloud_state, GREEN if cloud_state == "Bulut üstü" else RED if cloud_state == "Bulut altı" else YELLOW],
         ["Parabolic SAR", fmt(row["PSAR"]), "SAR fiyat altında" if row["PSAR"] < price else "SAR fiyat üzerinde", GREEN if row["PSAR"] < price else RED],
         ["Bollinger", f"Alt {fmt(row['BB_LOWER'])} | Orta {fmt(row['BB_MID'])} | Üst {fmt(row['BB_UPPER'])}", f"{bb_position} | {bb_state} / {bb_direction} | Perc %{fmt(bb_rank, 0)}", BLUE if bb_rank <= 20 else PURPLE if bb_rank >= 80 else GRAY],
         ["ATR", f"ATR {fmt(row['ATR'])} | ATR% {fmt(row['ATR_PCT'])}", f"Percentile %{fmt(row['ATR_RANK'], 0)} | {diagnostic_text(data['ATR_PCT'])}", PURPLE],
         ["Hacim", f"{fmt(row['Volume'], 0)} | Ort. {fmt(row['VOLUME_MA'], 0)}", f"{fmt(row['VOLUME_RATIO'])}x | Perc %{fmt(row['VOLUME_RANK'], 0)}", PURPLE if row["VOLUME_RATIO"] >= 1.2 else GRAY],
-        ["OBV", f"{fmt(row['OBV'], 0)} | EMA20 {fmt(row['OBV_EMA'], 0)}", f"{normalized_gap_state(data['OBV'], data['OBV_EMA'])} | {diagnostic_text(data['OBV'])}", GREEN if row["OBV"] > row["OBV_EMA"] else RED],
+        ["OBV", f"{fmt(row['OBV'], 0)} | SMA14 {fmt(row['OBV_SMA'], 0)} | BB {fmt(row['OBV_BB_LOWER'], 0)}–{fmt(row['OBV_BB_UPPER'], 0)}", f"{normalized_gap_state(data['OBV'], data['OBV_SMA'])} | {diagnostic_text(data['OBV'])}", GREEN if row["OBV"] > row["OBV_SMA"] else RED],
+        ["CMF", f"CMF20 {fmt(cmf_value)}", "Pozitif para akışı" if cmf_value > 0 else "Negatif para akışı", GREEN if cmf_value > 0 else RED],
+        [
+            "Son 2 mumun hikâyesi",
+            f"Son mum: {candle_current['text']}\nBir önceki mum: {candle_previous['text']}",
+            str(candle_summary["story"]),
+            tone_color(str(candle_summary["tone"])),
+        ],
     ]
 
     resolved_market = str(data.attrs.get("market", config.market if config.market != "AUTO" else "BIST"))
     bar_state = build_bar_state(data, resolved_market, config.interval)
     context = build_market_context(data, periods, config.anchor_date, bar_state=bar_state)
-    for momentum_row in momentum:
-        divergence = context["divergences"]["indicators"].get(momentum_row[0])
+    for indicator_row in [*momentum, *trend]:
+        divergence = context["divergences"]["indicators"].get(indicator_row[0])
         if not divergence:
             continue
         if divergence["detected"]:
@@ -720,9 +831,9 @@ def build_status(
                 f"{divergence['interpretation']} | Fiyat {fmt(divergence['price_first'])}→{fmt(divergence['price_second'])} | "
                 f"Osilatör {fmt(divergence['oscillator_first'])}→{fmt(divergence['oscillator_second'])}"
             )
-            momentum_row[2] += f"\nUyumsuzluk: {detail}"
+            indicator_row[2] += f"\nUyumsuzluk: {detail}"
         else:
-            momentum_row[2] += f"\nUyumsuzluk: {divergence['state']}"
+            indicator_row[2] += f"\nUyumsuzluk: {divergence['state']}"
     decision = build_decision_context(
         data,
         benchmark_data,
@@ -741,6 +852,7 @@ def build_status(
     context["symbol"] = symbol
     context["last_price"] = price
     context["change_pct"] = (price / float(previous["Close"]) - 1) * 100
+    context["candlestick_summary"] = candle_summary
     context["previous_state"] = previous_state_snapshot(data, config, benchmark_data, benchmark_symbol, resolved_market, free_float_pct)
     commentary = build_technical_commentary(data, context, decision, bar_state)
     executive = [[item[0], item[1], item[2], tone_color(item[3])] for item in context["families"]]
@@ -781,7 +893,7 @@ def build_status(
         "corporate_action": data.attrs.get("corporate_action", {"suspect": False}),
         "bar_count": len(data),
         "missing_periods": missing_ma_periods(len(data), MA_PERIODS),
-        "missing_periods_text": ", ".join(f"EMA/SMA {period}" for period in missing_ma_periods(len(data), MA_PERIODS)) or "—",
+        "missing_periods_text": ", ".join(f"SMA/EMA/WMA {period}" for period in missing_ma_periods(len(data), MA_TABLE_PERIODS)) or "—",
         "requested_ticker": config.ticker,
         "timestamp": data.index[-1].isoformat(),
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -793,6 +905,7 @@ def build_status(
         "resolved_market": resolved_market,
         "price_adjustment": data.attrs.get("price_adjustment", "Sağlayıcı bilgisi yok"),
         "bar_state": bar_state,
+        "candlestick_summary": candle_summary,
         "anchor_date": config.anchor_date,
         "equality_tolerance_pct": config.equality_tolerance_pct,
         "ma": ma_rows,
@@ -883,7 +996,7 @@ def _draw_page_header(figure: plt.Figure, grid, status: dict[str, Any], subtitle
     header.set_facecolor(BG)
     header.axis("off")
     change_color = LIGHT_GREEN if status["change_pct"] >= 0 else LIGHT_RED
-    header.text(0.0, 0.92, f"{status['symbol']} — Technical Market State", color=WHITE, fontsize=20, fontweight="bold", va="top")
+    header.text(0.0, 0.92, f"{status['symbol']} — Teknik Piyasa Durumu", color=WHITE, fontsize=20, fontweight="bold", va="top")
     header.text(1.0, 0.93, subtitle, color=MUTED, fontsize=11, fontweight="bold", ha="right", va="top")
     header.text(0.0, 0.56, f"Fiyat: {fmt(status['price'])}", color=WHITE, fontsize=16, fontweight="bold", va="top")
     header.text(0.22, 0.56, f"Değişim: {status['change_pct']:+.2f}%", color=change_color, fontsize=15, fontweight="bold", va="top")
@@ -929,7 +1042,7 @@ def _draw_header(figure: plt.Figure, grid, status: dict[str, Any], subtitle: str
     header.set_facecolor(BG)
     header.axis("off")
     change_color = LIGHT_GREEN if status["change_pct"] >= 0 else LIGHT_RED
-    header.text(0.0, 0.72, f"{status['symbol']} — Technical Market State", color=WHITE, fontsize=27, fontweight="bold")
+    header.text(0.0, 0.72, f"{status['symbol']} — Teknik Piyasa Durumu", color=WHITE, fontsize=27, fontweight="bold")
     header.text(0.0, 0.25, f"Fiyat: {fmt(status['price'])}", color=WHITE, fontsize=20, fontweight="bold")
     header.text(0.20, 0.25, f"Değişim: {status['change_pct']:+.2f}%", color=change_color, fontsize=18, fontweight="bold")
     bar_color = YELLOW if status["bar_state"]["is_live"] else LIGHT_GREEN
@@ -1008,17 +1121,25 @@ def _report_panels(data: pd.DataFrame, status: dict[str, Any], text_width: float
         return [[item[0], item[1], item[2]] for item in status[key]]
 
     ma_rows = [
-        [str(item["period"]), ma_cell(item["sma"], item.get("sma_relation", "")), ma_cell(item["ema"], item.get("ema_relation", ""))]
+        [
+            str(item["period"]),
+            ma_cell(item["sma"], item.get("sma_relation", "")),
+            ma_cell(item["ema"], item.get("ema_relation", "")),
+            ma_cell(item.get("wma", math.nan), item.get("wma_relation", "Yetersiz veri")),
+        ]
         for item in status["ma"]
     ]
-    ma_colors = [[HEADER, item["sma_color"], item["ema_color"]] for item in status["ma"]]
+    ma_colors = [
+        [HEADER, item["sma_color"], item["ema_color"], item.get("wma_color", GRAY)]
+        for item in status["ma"]
+    ]
     excluded = detail_profile(detail)["excluded"]
     panels = [
         table_panel("Piyasa Durum Haritası", rows_of("executive"), [[HEADER, tone_color(item[3]), PANEL] for item in status["executive"]], ["Aile", "Durum", "Bağlam"], 13, [0.16, 0.38, 0.46]),
         table_panel("Karar Bağlamı • RS • MTF • Likidite • Risk", rows_of("decision_rows"), [[HEADER, PANEL, tone_color(item[3])] for item in status["decision_rows"]], ["Alan", "Değerler", "Durum"], 12, [0.16, 0.46, 0.38]),
         table_panel("Katmanlı Teknik Yorum • Kanıt • Karşı Kanıt • Teyit", [[item[0], item[1], item[2]] for item in status["technical_commentary"]["visual_rows"]], [[HEADER, tone_color(item[3]), PANEL] for item in status["technical_commentary"]["visual_rows"]], ["Katman", "Durum", "Yorum"], 12, [0.15, 0.22, 0.63]),
         chart_panel(),
-        table_panel("SMA / EMA Değerleri", ma_rows, ma_colors, ["Periyot", "SMA", "EMA"], 13, [0.20, 0.40, 0.40], f"▲ yeşil: fiyat ortalamanın üstünde | sarı: ±%{status['equality_tolerance_pct']:.2f} yakın | ▼ kırmızı: altında. Ton koyuluğu ATR cinsinden mesafeyle artar."),
+        table_panel("SMA / EMA / WMA Değerleri", ma_rows, ma_colors, ["Periyot", "SMA", "EMA", "WMA"], 12, [0.14, 0.286, 0.287, 0.287], f"▲ yeşil: fiyat ortalamanın üstünde | sarı: ±%{status['equality_tolerance_pct']:.2f} yakın | ▼ kırmızı: altında. Ton koyuluğu ATR cinsinden mesafeyle artar."),
         table_panel("Momentum • Kesişim • Eğim", rows_of("momentum"), [[HEADER, PANEL, tone_color(item[3])] for item in status["momentum"]], ["Gösterge", "Değerler", "Durum"], 11, [0.12, 0.38, 0.50]),
         table_panel("Trend • Volatilite • Hacim", rows_of("trend_volatility_volume"), [[HEADER, PANEL, tone_color(item[3])] for item in status["trend_volatility_volume"]], ["Gösterge", "Değerler", "Durum"], 11, [0.14, 0.31, 0.55]),
         table_panel("Konum • AVWAP • POC/VA • Yapı Seviyeleri", rows_of("location"), [[HEADER, PANEL, tone_color(item[3])] for item in status["location"]], ["Alan", "Değerler", "Durum"], 11, [0.14, 0.52, 0.34]),
@@ -1065,7 +1186,7 @@ def render_report_pages(data: pd.DataFrame, status: dict[str, Any], directory: P
     for index, page in enumerate(pages, start=1):
         heights = [1.5, *[panel["height"] for panel in page]]
         figure = plt.figure(figsize=(PAGE_WIDTH_INCHES, sum(heights) + 1.2), dpi=PAGE_DPI, facecolor=BG)
-        grid = figure.add_gridspec(len(heights), 1, height_ratios=heights, hspace=0.30, top=0.985, bottom=0.012, left=0.035, right=0.972)
+        grid = figure.add_gridspec(len(heights), 1, height_ratios=heights, hspace=0.08, top=0.985, bottom=0.012, left=0.035, right=0.972)
         _draw_page_header(figure, grid, status, f"Sayfa {index}/{total} — Teknik Rapor")
         for position, panel in enumerate(page, start=1):
             panel["draw"](figure.add_subplot(grid[position, :]))

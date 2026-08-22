@@ -78,7 +78,7 @@ def decision() -> dict:
 class TechnicalCommentaryV2Tests(unittest.TestCase):
     def test_squeeze_requires_expansion_and_acceptance(self) -> None:
         result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
-        self.assertEqual(result["version"], "2.1")
+        self.assertEqual(result["version"], "2.3")
         self.assertIn("Denge / teyit bekliyor", result["stance"])
         self.assertIn("bant genişlemesi", result["headline"])
         self.assertTrue(any("Bantlar genişlemeden" in item for item in result["scenario_map"]["neutral"]))
@@ -93,9 +93,36 @@ class TechnicalCommentaryV2Tests(unittest.TestCase):
     def test_method_uses_independent_families_without_vote_score(self) -> None:
         result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
         self.assertIn("birleşik AL/SAT puanı üretmez", result["method"])
-        self.assertEqual(len(result["state_map"]), 8)
+        self.assertEqual(len(result["state_map"]), 12)
         self.assertNotIn("/4", result["analyst_note"])
         self.assertIn(result["clarity"]["state"], {"Yüksek", "Orta", "Düşük"})
+
+    def test_four_user_schemas_are_explained_with_confirmation_and_risk(self) -> None:
+        result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
+        schemas = result["indicator_schemas"]
+        self.assertEqual(
+            [item["name"] for item in schemas],
+            [
+                "1 · Bollinger / MACD / SMI / OBV",
+                "2 · Ichimoku / RSI / CCI / ATR",
+                "3 · Parabolic SAR / Stoch RSI / Auto AVWAP / ADX-DMI",
+                "4 · Supertrend / Fisher / CMF / Momentum",
+            ],
+        )
+        for item in schemas:
+            self.assertTrue(item["plain"])
+            self.assertIn("Teyit", item["confirmation"])
+            self.assertTrue(item["risk"])
+        self.assertIn("Hikâye şöyle", result["market_story"])
+        self.assertIn("Net sonuç:", result["general_interpretation"])
+        self.assertIn("Dört Gösterge Şeması", result["telegram_detail"])
+        self.assertIn("Genel Yorum", result["telegram_detail"])
+
+    def test_literature_note_discloses_data_mining_and_cost_limits(self) -> None:
+        result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
+        self.assertGreaterEqual(len(result["literature_basis"]), 5)
+        self.assertIn("işlem maliyet", result["literature_note"])
+        self.assertTrue(any("veri madenciliği" in item for item in result["limitations"]))
 
     def test_changes_and_scenario_invalidation_are_explicit(self) -> None:
         result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})

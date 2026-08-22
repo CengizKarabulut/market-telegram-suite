@@ -48,6 +48,25 @@ def tone_colour(tone: str) -> str:
     }.get(tone, MUTED)
 
 
+def _evidence_caption(item: dict[str, Any]) -> str:
+    family = str(item.get("family", "Teknik gösterge"))
+    state = str(item.get("state", "karışık"))
+    lowered = family.casefold()
+    if "uyumsuzluk" in lowered:
+        indicator = family.partition("(")[2].partition(")")[0].upper() or "Momentum"
+        trust = "orta güven" if "orta" in state.casefold() else "erken uyarı"
+        return f"{indicator}: Fiyat düşerken göstergede toparlanma ihtimali ({trust})."
+    if "göreceli" in lowered:
+        return "Endekse göre performans: Hisse karşılaştırılan endeksten daha zayıf."
+    if "mtf" in lowered or "zaman" in lowered:
+        return "Zaman dilimleri: Günlük, haftalık ve aylık görünüm aynı yönde değil."
+    if "katılım" in lowered or "hacim" in lowered:
+        return "Hacim: İşlem hacmi fiyat hareketini yeterince desteklemiyor."
+    if "yapı" in lowered:
+        return "Fiyat yapısı: Son tepe ve dipler aşağı yönlü."
+    return f"{family}: {state}"
+
+
 def _wrap(text: str, font_size: int, width_inches: float, weight: str = "normal") -> list[str]:
     """Metni kart genişliğine göre satırlara böler; kalın yazı daha geniş sayılır."""
     character_width = font_size * (0.60 if weight == "bold" else 0.52)
@@ -78,29 +97,32 @@ class _Block:
 
 
 def _summary_blocks(commentary: dict[str, Any]) -> list[_Block]:
-    """1. kart: sade özet, kurulum ve okuma netliği."""
+    """1. kart: hikâye, son iki mum ve açık sonuç."""
     setup = commentary.get("setup", {})
-    plain = commentary.get("plain_summary", {})
     clarity = commentary.get("clarity", {})
-    duration = commentary.get("duration", {}).get("summary", "")
+    story = commentary.get("market_story") or commentary.get("plain_summary", {}).get("text", "—")
+    candle_story = commentary.get("candle_story", "Son iki mum için formasyon özeti üretilemedi.")
+    conclusion = commentary.get("general_interpretation", "Net bir genel sonuç üretilemedi.")
     blocks = [
-        _Block("section", "SADE ÖZET", 23, ACCENT),
-        _Block("body", plain.get("text", "—"), 20, WHITE),
+        _Block("section", "PİYASANIN HİKÂYESİ", 23, ACCENT),
+        _Block("body", story, 20, WHITE),
+        _Block("gap", "", 12, WHITE),
+        _Block("section", "SON İKİ MUM NE DİYOR?", 23, ACCENT),
+        _Block("body", candle_story, 18, MUTED),
+        _Block("gap", "", 12, WHITE),
+        _Block("section", "NET SONUÇ", 23, ACCENT),
+        _Block("body", conclusion, 20, tone_colour(commentary.get("tone", "neutral")), "bold"),
         _Block("gap", "", 12, WHITE),
         _Block("section", "KURULUM", 23, ACCENT),
-        _Block("body", f"{setup.get('name', '—')}  •  eğilim: {setup.get('bias', '—')}", 22, tone_colour(setup.get("tone", "neutral")), "bold"),
+        _Block("body", f"{setup.get('name', '—')}  •  eğilim: {setup.get('bias', '—')}", 20, tone_colour(setup.get("tone", "neutral")), "bold"),
     ]
     if setup.get("description"):
-        blocks.append(_Block("body", setup["description"], 18, MUTED))
-    if duration and duration != "Belirgin bir süre birikimi yok":
-        blocks.append(_Block("gap", "", 12, WHITE))
-        blocks.append(_Block("body", f"Süre bağlamı: {duration}.", 18, MUTED))
+        blocks.append(_Block("body", setup["description"], 17, MUTED))
     blocks.append(_Block("gap", "", 12, WHITE))
     blocks.append(
-        _Block("body", f"Okuma netliği: {clarity.get('state', '—')} — {clarity.get('reason', '')}", 18, tone_colour(clarity.get("tone", "neutral")))
+        _Block("body", f"Okuma netliği: {clarity.get('state', '—')} — {clarity.get('reason', '')}", 17, tone_colour(clarity.get("tone", "neutral")))
     )
     return blocks
-
 
 def _note_blocks(commentary: dict[str, Any]) -> list[_Block]:
     """2. kart: analist notu, gerekçe ve kanıt dengesi."""
@@ -122,9 +144,9 @@ def _note_blocks(commentary: dict[str, Any]) -> list[_Block]:
         blocks.append(_Block("gap", "", 12, WHITE))
         blocks.append(_Block("section", "KANIT DENGESİ", 23, ACCENT))
         for item in supporting:
-            blocks.append(_Block("body", f"▲  {item['family']}: {item['state']}", 18, LIGHT_GREEN))
+            blocks.append(_Block("body", f"▲  {_evidence_caption(item)}", 18, LIGHT_GREEN))
         for item in counter:
-            blocks.append(_Block("body", f"▼  {item['family']}: {item['state']}", 18, LIGHT_RED))
+            blocks.append(_Block("body", f"▼  {_evidence_caption(item)}", 18, LIGHT_RED))
     return blocks
 
 
@@ -181,25 +203,24 @@ def _overview_blocks(commentary: dict[str, Any], limit: int = 4) -> list[_Block]
         blocks.append(_Block("gap", "", 12, WHITE))
         blocks.append(_Block("section", "KANIT DENGESİ", 23, ACCENT))
         for item in supporting:
-            blocks.append(_Block("body", f"▲  {item['family']}: {item['state']}", 18, LIGHT_GREEN))
+            blocks.append(_Block("body", f"▲  {_evidence_caption(item)}", 18, LIGHT_GREEN))
         for item in counter:
-            blocks.append(_Block("body", f"▼  {item['family']}: {item['state']}", 18, LIGHT_RED))
+            blocks.append(_Block("body", f"▼  {_evidence_caption(item)}", 18, LIGHT_RED))
     return blocks
 
 
 def _detail_blocks(commentary: dict[str, Any], limit: int = 4) -> list[_Block]:
-    """2. kart: analist notu, gerekçe, seviyeler ve senaryolar."""
-    trimmed = [
-        block
-        for block in _note_blocks(commentary)
-        if block.text != "KANIT DENGESİ" and not block.text.startswith(("▲  ", "▼  "))
-    ]
-    while trimmed and trimmed[-1].kind == "gap":
-        trimmed.pop()
-    trimmed.append(_Block("gap", "", 12, WHITE))
-    trimmed.extend(_level_blocks(commentary, limit))
-    return trimmed
-
+    """2. kart: dört grubun kısa anlamı, gerekçe, seviyeler ve senaryolar."""
+    blocks: list[_Block] = [_Block("section", "DÖRT GÖSTERGE GRUBU", 23, ACCENT)]
+    for item in commentary.get("indicator_schemas", []):
+        blocks.append(_Block("body", f"{item.get('name', 'Grup')} — {item.get('state', '—')}", 18, tone_colour(item.get("tone", "neutral")), "bold"))
+        blocks.append(_Block("body", item.get("plain", ""), 16, MUTED))
+        blocks.append(_Block("gap", "", 10, WHITE))
+    blocks.append(_Block("section", "NEDEN BU OKUMA?", 23, ACCENT))
+    blocks.append(_Block("body", commentary.get("reconciliation", "—"), 17, MUTED))
+    blocks.append(_Block("gap", "", 12, WHITE))
+    blocks.extend(_level_blocks(commentary, limit))
+    return blocks
 
 CARD_PAGES = (
     ("Özet", _overview_blocks),
@@ -315,8 +336,20 @@ def _paginate(blocks: list[_Block], text_width: float, budget: float) -> list[li
     used = 0.0
     for index, (block, height) in enumerate(zip(blocks, heights, strict=True)):
         remaining = page_count - len(pages)
-        exceeds_budget = current and used + height > budget
-        balanced_break = current and remaining > 1 and used + height / 2 > target and len(blocks) - index >= remaining - 1
+        # Kalın grup başlığı, hemen ardından gelen açıklamadan ayrılmaz.
+        linked_height = 0.0
+        if index + 1 < len(blocks):
+            next_block = blocks[index + 1]
+            if (block.kind == "section" and next_block.kind != "gap") or (
+                block.kind == "body"
+                and block.weight == "bold"
+                and next_block.kind == "body"
+                and next_block.weight != "bold"
+            ):
+                linked_height = heights[index + 1]
+        projected = used + height + linked_height
+        exceeds_budget = current and projected > budget
+        balanced_break = current and remaining > 1 and projected - height / 2 > target and len(blocks) - index >= remaining - 1
         if exceeds_budget or balanced_break:
             pages.append(current)
             current, used = [], 0.0
@@ -332,7 +365,7 @@ def _paginate(blocks: list[_Block], text_width: float, budget: float) -> list[li
 DETAIL_SETTINGS = {
     "kompakt": {"ratio": 2.7, "limit": 3},
     "dengeli": {"ratio": 2.2, "limit": 4},
-    "tam": {"ratio": 2.0, "limit": 4},
+    "tam": {"ratio": 2.2, "limit": 4},
 }
 
 
@@ -357,11 +390,10 @@ def render_analyst_cards(status: dict[str, Any], directory: Path, stem: str = "a
     return paths
 
 def standardize_pages(paths: list[Path], background: str = BG) -> list[Path]:
-    """Tüm sayfaları aynı piksel boyutuna getirir.
+    """Sayfaların yalnız genişliğini eşitler; yüksekliğe boş dolgu eklemez.
 
-    Telegram, farklı en/boy oranındaki görselleri farklı genişliklerde gösterir;
-    aynı akışta yan yana duran sayfalar bu yüzden birbirinden kopuk görünür.
-    Sayfalar en uzun olanın boyuna tamamlanarak görsel bütünlük sağlanır.
+    Telegram albümünde ortak genişlik korunurken her görsel kendi içeriği kadar
+    uzar. Böylece kısa sayfaların altında büyük, boş renk alanları oluşmaz.
     """
     if not paths:
         return paths
@@ -372,12 +404,11 @@ def standardize_pages(paths: list[Path], background: str = BG) -> list[Path]:
         with Image.open(path) as image:
             sizes.append(image.size)
     target_width = max(width for width, _ in sizes)
-    target_height = max(height for _, height in sizes)
     for path, (width, height) in zip(paths, sizes, strict=True):
-        if (width, height) == (target_width, target_height):
+        if width == target_width:
             continue
+        target_height = max(1, round(height * target_width / width))
         with Image.open(path) as image:
-            canvas = Image.new("RGB", (target_width, target_height), background)
-            canvas.paste(image.convert("RGB"), ((target_width - width) // 2, 0))
-            canvas.save(path)
+            resized = image.convert("RGB").resize((target_width, target_height), Image.Resampling.LANCZOS)
+            resized.save(path)
     return paths
