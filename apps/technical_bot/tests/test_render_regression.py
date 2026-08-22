@@ -204,8 +204,8 @@ class DetailLevelTests(unittest.TestCase):
         directory = Path(tempfile.mkdtemp())
         return render_report_pages(data, status, directory) + render_analyst_cards(status, directory)
 
-    def test_compact_level_produces_five_images(self) -> None:
-        self.assertEqual(len(self._render("kompakt")), 5)
+    def test_compact_level_produces_four_images(self) -> None:
+        self.assertEqual(len(self._render("kompakt")), 4)
 
     def test_full_level_produces_more_images_than_compact(self) -> None:
         self.assertGreater(len(self._render("tam")), len(self._render("kompakt")))
