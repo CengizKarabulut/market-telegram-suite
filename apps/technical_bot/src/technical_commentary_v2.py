@@ -760,8 +760,9 @@ def build_technical_commentary(
     candle_story = str(context.get("candlestick_summary", {}).get("story", "Son iki mum için formasyon özeti üretilemedi."))
     divergence_story = _divergence_plain(context)
     general_interpretation = _general_interpretation(context, scenario, clarity)
-    analyst_note = "\n\n".join(
-        item for item in (market_story, candle_story, divergence_story, general_interpretation) if item
+    analyst_note = divergence_story or (
+        "Erken uyarı niteliğinde belirgin bir uyumsuzluk görülmedi. "
+        "Ana karar, kapanış seviyeleri ve hacim teyidiyle verilir."
     )
     literature_note = (
         "Araştırmalar teknik örüntülerin bazı dönemlerde bilgi taşıyabildiğini, ancak sonucun "
@@ -800,7 +801,6 @@ def build_technical_commentary(
         market_story,
         _plain_consensus(indicator_schemas),
         candle_story,
-        general_interpretation,
         *history_notes,
         disclaimer,
     ]
@@ -811,9 +811,9 @@ def build_technical_commentary(
             [
                 item["name"],
                 item["plain"],
-                f"Şu an: {item['reading']}",
-                f"Teyit: {item['confirmation']}",
-                f"Risk / bozulma: {item['risk']}",
+                f"Şu anda: {item['reading']}",
+                f"Yönün doğrulanması için: {item['confirmation']}",
+                f"Dikkat edilmesi gereken: {item['risk']}",
                 "",
             ]
         )
@@ -822,9 +822,6 @@ def build_technical_commentary(
         [
             "🗣️ Sade Özet",
             plain["text"],
-            "",
-            "🧭 Analist Notu",
-            analyst_note,
             "",
             "📐 Dört Gösterge Şeması",
             *schema_telegram_lines,
@@ -848,9 +845,6 @@ def build_technical_commentary(
             "",
             f"Okuma netliği: {clarity['state']} — {clarity['reason']}",
             "",
-            "🕯️ Son İki Mum",
-            candle_story,
-            "",
             "🧾 Genel Yorum",
             general_interpretation,
             "",
@@ -858,7 +852,7 @@ def build_technical_commentary(
         ]
     )
     return {
-        "version": "2.3",
+        "version": "2.4",
         "setup": setup,
         "duration": setup_context.get("duration", {}),
         "reconciliation": reconciliation,
