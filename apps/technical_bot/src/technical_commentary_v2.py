@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 
 from src.plain_language import build_plain_summary
-from src.setup_recognition import evidence_weight, reconcile
+from src.setup_recognition import evidence_weight
 from src.state_change import compare_states
 
 
