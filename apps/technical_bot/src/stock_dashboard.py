@@ -1186,7 +1186,7 @@ def render_report_pages(data: pd.DataFrame, status: dict[str, Any], directory: P
     for index, page in enumerate(pages, start=1):
         heights = [1.5, *[panel["height"] for panel in page]]
         figure = plt.figure(figsize=(PAGE_WIDTH_INCHES, sum(heights) + 1.2), dpi=PAGE_DPI, facecolor=BG)
-        grid = figure.add_gridspec(len(heights), 1, height_ratios=heights, hspace=0.30, top=0.985, bottom=0.012, left=0.035, right=0.972)
+        grid = figure.add_gridspec(len(heights), 1, height_ratios=heights, hspace=0.08, top=0.985, bottom=0.012, left=0.035, right=0.972)
         _draw_page_header(figure, grid, status, f"Sayfa {index}/{total} — Teknik Rapor")
         for position, panel in enumerate(page, start=1):
             panel["draw"](figure.add_subplot(grid[position, :]))
