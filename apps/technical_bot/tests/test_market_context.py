@@ -111,7 +111,7 @@ class MarketContextTests(unittest.TestCase):
         self.assertIn(context["regime"]["persistence_bars"], {2})
         self.assertEqual(
             set(context["divergences"]["indicators"]),
-            {"RSI", "MACD", "SMI", "Stoch RSI", "CCI", "Fisher", "OBV", "CMF", "Momentum"},
+            {"RSI", "MACD", "SMI", "CCI", "Fisher", "OBV", "CMF", "Momentum"},
         )
         self.assertEqual(context["divergences"]["settings"]["lookback_right"], 5)
         self.assertEqual(context["divergences"]["settings"]["active_max_age"], 5)
