@@ -78,7 +78,7 @@ def decision() -> dict:
 class TechnicalCommentaryV2Tests(unittest.TestCase):
     def test_squeeze_requires_expansion_and_acceptance(self) -> None:
         result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
-        self.assertEqual(result["version"], "2.2")
+        self.assertEqual(result["version"], "2.3")
         self.assertIn("Denge / teyit bekliyor", result["stance"])
         self.assertIn("bant genişlemesi", result["headline"])
         self.assertTrue(any("Bantlar genişlemeden" in item for item in result["scenario_map"]["neutral"]))
