@@ -634,6 +634,99 @@ def _indicator_confirmation(data: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+
+def _market_story(context: dict[str, Any], schemas: list[dict[str, str]]) -> str:
+    """Teknik katmanları jargon kullanmadan kısa bir piyasa hikâyesine çevirir."""
+    regime = str(context.get("regime", {}).get("state", "")).casefold()
+    semantic = context.get("semantic", {})
+    trend_tone = str(semantic.get("trend_quality", {}).get("tone", "neutral"))
+    momentum_tone = str(semantic.get("momentum_character", {}).get("tone", "neutral"))
+    participation = semantic.get("participation", {})
+    participation_tone = str(participation.get("tone", "neutral"))
+    positive = sum(item.get("tone") == "positive" for item in schemas)
+    negative = sum(item.get("tone") == "negative" for item in schemas)
+
+    if "sıkışma" in regime or "denge" in regime:
+        opening = "Hikâye şöyle: Fiyat bir karar alanında sıkışmış; piyasa yeni yönünü henüz seçmiş değil."
+    elif positive > negative:
+        opening = "Hikâye şöyle: Alıcılar önde, ancak hareketin kalıcı olup olmadığını teyit edecek işaretler hâlâ izlenmeli."
+    elif negative > positive:
+        opening = "Hikâye şöyle: Satıcı baskısı daha belirgin, ancak bunun yeni bir düşüş dalgasına dönüşüp dönüşmediği henüz kesin değil."
+    else:
+        opening = "Hikâye şöyle: Alıcılarla satıcılar arasında net üstünlük yok; göstergeler farklı yönlere bakıyor."
+
+    trend_text = {
+        "positive": "Ana fiyat yönü alıcıları destekliyor.",
+        "negative": "Ana fiyat yönü satıcıları destekliyor.",
+        "warning": "Ana fiyat yönü karışık.",
+        "neutral": "Ana fiyat yönü belirgin değil.",
+    }.get(trend_tone, "Ana fiyat yönü belirgin değil.")
+    momentum_text = {
+        "positive": "Kısa vadeli hız yukarı tarafta.",
+        "negative": "Kısa vadeli hız aşağı tarafta.",
+        "warning": "Kısa vadeli hız yön konusunda kararsız.",
+        "neutral": "Kısa vadeli hız nötr.",
+    }.get(momentum_tone, "Kısa vadeli hız nötr.")
+    rvol = _number(participation.get("rvol_1"))
+    if participation_tone == "positive":
+        volume_text = "İşlem hacmi bu hareketi destekliyor."
+    elif math.isfinite(rvol) and rvol < 0.8:
+        volume_text = "İşlem hacmi zayıf; görülen hareketin arkasında güçlü bir katılım yok."
+    else:
+        volume_text = "İşlem hacmi henüz yönü doğrulayacak kadar belirgin değil."
+    return " ".join((opening, trend_text, momentum_text, volume_text))
+
+
+def _divergence_plain(context: dict[str, Any]) -> str:
+    items = context.get("semantic", {}).get("momentum_character", {}).get("active_divergences", [])
+    if not items:
+        return ""
+    readable = "; ".join(
+        f"{item.get('indicator', 'gösterge')} {str(item.get('state', 'uyumsuzluk')).casefold()} "
+        f"({item.get('quality', '—')} kalite)"
+        for item in items[:2]
+    )
+    return (
+        f"Ek erken uyarı: {readable}. Bu işaret tek başına dönüş kanıtı değildir; "
+        "fiyatın önemli seviyeyi geçmesi ve hacmin eşlik etmesi gerekir."
+    )
+
+
+def _general_interpretation(context: dict[str, Any], scenario: dict[str, list[str]], clarity: dict[str, Any]) -> str:
+    """Raporun sonunda kullanılacak, açık ve koşullu genel sonucu üretir."""
+    setup = context.get("setup_context", {}).get("setup", {})
+    bias = str(setup.get("bias", ""))
+    structure = context.get("structure", {})
+    high, low = _number(structure.get("high")), _number(structure.get("low"))
+    if bias == "iki yönlü" and math.isfinite(high) and math.isfinite(low):
+        result = (
+            f"Net sonuç: {_fmt(high)} üzerinde kapanış gelirse yukarı hareket ciddiye alınır; "
+            f"{_fmt(low)} altında kapanış gelirse satış baskısı güçlenmiş sayılır. "
+            "Fiyat bu iki seviye arasında kaldığı sürece en dürüst yorum, kararın henüz verilmediğidir."
+        )
+    elif bias == "yukarı":
+        condition = scenario.get("strengthen", ["fiyatın yakın direnci aşması"])[0].rstrip(". ")
+        risk = scenario.get("weaken", ["yakın desteğin kaybedilmesi"])[0].rstrip(". ")
+        result = f"Net sonuç: Görünüm yukarı eğilimli. Bunu güçlendirecek ilk gelişme {condition.casefold()}; bu yorumu bozacak ilk gelişme {risk.casefold()}."
+    elif bias == "aşağı":
+        condition = scenario.get("strengthen", ["fiyatın yakın desteği kaybetmesi"])[0].rstrip(". ")
+        risk = scenario.get("weaken", ["yakın direncin aşılması"])[0].rstrip(". ")
+        result = f"Net sonuç: Görünüm aşağı eğilimli. Bunu güçlendirecek ilk gelişme {condition.casefold()}; bu yorumu bozacak ilk gelişme {risk.casefold()}."
+    else:
+        result = "Net sonuç: Şu anda güçlü ve tek yönlü bir teknik sonuç yok; yeni bir kapanış teyidi beklemek gerekiyor."
+    return f"{result} Okumanın güven düzeyi {str(clarity.get('state', 'düşük')).casefold()}."
+
+
+def _plain_consensus(schemas: list[dict[str, str]]) -> str:
+    positive = sum(item.get("tone") == "positive" for item in schemas)
+    negative = sum(item.get("tone") == "negative" for item in schemas)
+    if positive > negative:
+        return "Gösterge grupları birlikte okunduğunda alıcı tarafı biraz daha ağır basıyor; yine de bütün gruplar aynı yönde değil."
+    if negative > positive:
+        return "Gösterge grupları birlikte okunduğunda satıcı tarafı biraz daha ağır basıyor; yine de bütün gruplar aynı yönde değil."
+    return "Gösterge grupları birlikte okunduğunda belirgin bir üstünlük yok; sonuç karışık ve teyit bekliyor."
+
+
 def build_technical_commentary(
     data: pd.DataFrame,
     context: dict[str, Any],
@@ -663,12 +756,13 @@ def build_technical_commentary(
         for item in indicator_schemas
     ]
     reconciliation = reconcile(context.get("setup_context", {}).get("setup", {"name": direction}), supporting, counter)
-    analyst_note = _analyst_note(opening, context, decision, scenario, reconciliation)
-    schema_note = "\n\n".join(
-        f"{item['name']}: {item['plain']} {item['confirmation']} {item['risk']}"
-        for item in indicator_schemas
+    market_story = _market_story(context, indicator_schemas)
+    candle_story = str(context.get("candlestick_summary", {}).get("story", "Son iki mum için formasyon özeti üretilemedi."))
+    divergence_story = _divergence_plain(context)
+    general_interpretation = _general_interpretation(context, scenario, clarity)
+    analyst_note = "\n\n".join(
+        item for item in (market_story, candle_story, divergence_story, general_interpretation) if item
     )
-    analyst_note += "\n\nDört gösterge şeması:\n\n" + schema_note
     literature_note = (
         "Araştırmalar teknik örüntülerin bazı dönemlerde bilgi taşıyabildiğini, ancak sonucun "
         "piyasa rejimine, örnekleme, işlem maliyetlerine ve kural seçimine duyarlı olduğunu gösterir. "
@@ -699,12 +793,15 @@ def build_technical_commentary(
         bar_state,
         bool(context.get("short_history")),
     )
-    plain["sentences"].insert(
-        -1,
-        "Dört gösterge grubunun ortak özeti: "
-        + " ".join(f"{item['name'].split(' · ', 1)[0]}. grup {item['state'].casefold()}." for item in indicator_schemas),
-    )
-    plain["text"] = " ".join(plain["sentences"])
+    disclaimer = plain["sentences"][-1] if plain.get("sentences") else "Bu bir teknik durum yorumudur; yatırım tavsiyesi değildir."
+    plain["sentences"] = [
+        market_story,
+        _plain_consensus(indicator_schemas),
+        candle_story,
+        general_interpretation,
+        disclaimer,
+    ]
+    plain["text"] = " ".join(item for item in plain["sentences"] if item)
     schema_telegram_lines: list[str] = []
     for item in indicator_schemas:
         schema_telegram_lines.extend(
@@ -747,11 +844,18 @@ def build_technical_commentary(
             *[f"• {item}" for item in scenario["neutral"]],
             "",
             f"Okuma netliği: {clarity['state']} — {clarity['reason']}",
+            "",
+            "🕯️ Son İki Mum",
+            candle_story,
+            "",
+            "🧾 Genel Yorum",
+            general_interpretation,
+            "",
             "Teknik durum yorumudur; yatırım tavsiyesi veya otomatik AL/SAT sinyali değildir.",
         ]
     )
     return {
-        "version": "2.2",
+        "version": "2.3",
         "setup": setup,
         "duration": setup_context.get("duration", {}),
         "reconciliation": reconciliation,
@@ -760,6 +864,9 @@ def build_technical_commentary(
         "tone": tone,
         "headline": headline,
         "analyst_note": analyst_note,
+        "market_story": market_story,
+        "candle_story": candle_story,
+        "general_interpretation": general_interpretation,
         "indicator_confirmation": indicator_confirmation,
         "indicator_schemas": indicator_schemas,
         "literature_basis": LITERATURE_BASIS,
@@ -802,7 +909,7 @@ def build_technical_commentary(
             "Yorum yalnız OHLCV ve türetilmiş teknik bağlama dayanır; haber/KAP/temel veri içermez.",
             "Volume Profile ve delta alanları yaklaşık OHLCV proxy'dir; gerçek footprint değildir.",
             "Göreceli güç fon akışı değildir; RVOL kurumsal katılımı kanıtlamaz.",
-            "CANLI mum kapanışa kadar değişebilir; uyumsuzluk ve swingler sağ pivot barları tamamlanınca teyit edilir.",
+            "CANLI mum kapanışa kadar değişebilir; Stoch RSI uyumsuzluk taramasına dahil değildir, diğer uyumsuzluklar ve swingler sağ pivot barları tamamlanınca teyit edilir.",
             "Teknik kuralların geçmiş başarısı geleceğe taşınmayabilir; veri madenciliği ve işlem maliyetleri sonucu zayıflatabilir.",
         ],
     }
