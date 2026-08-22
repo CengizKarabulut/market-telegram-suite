@@ -852,7 +852,7 @@ def build_technical_commentary(
         ]
     )
     return {
-        "version": "2.4",
+        "version": "2.3",
         "setup": setup,
         "duration": setup_context.get("duration", {}),
         "reconciliation": reconciliation,
