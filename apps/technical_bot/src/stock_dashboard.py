@@ -21,7 +21,7 @@ import yfinance as yf
 
 from src.analyst_card import render_analyst_cards, standardize_pages
 from src.bar_state import build_bar_state
-from src.candlestick_patterns import detect_candlestick_patterns, summarize_recent_candles
+from src.candlestick_patterns import (\n    detect_candlestick_patterns,\n    summarize_recent_candles,\n)
 from src.decision_context import build_decision_context
 from src.intervals import (
     ABSOLUTE_MINIMUM_BARS,
