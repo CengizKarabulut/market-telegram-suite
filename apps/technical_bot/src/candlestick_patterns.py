@@ -138,3 +138,81 @@ def detect_candlestick_patterns(data: pd.DataFrame) -> dict[str, pd.Series]:
         "CANDLE_BEAR_NAMES": pd.Series(bear_names, index=index, dtype="object"),
         "CANDLE_NEUTRAL_NAMES": pd.Series(neutral_names, index=index, dtype="object"),
     }
+
+
+PATTERN_TR = {
+    "Doji": "Doji (kararsızlık)",
+    "Dragonfly Doji": "Yusufçuk Doji (alıcıların geri dönüşü)",
+    "Gravestone Doji": "Mezar Taşı Doji (satıcıların geri dönüşü)",
+    "Hammer": "Çekiç (olası yukarı dönüş)",
+    "Hanging Man": "Asılı Adam (olası aşağı dönüş uyarısı)",
+    "Inverted Hammer": "Ters Çekiç (olası yukarı dönüş)",
+    "Shooting Star": "Kayan Yıldız (olası aşağı dönüş)",
+    "Long Lower Shadow": "Uzun alt fitil (dipten alım tepkisi)",
+    "Long Upper Shadow": "Uzun üst fitil (tepeden satış baskısı)",
+    "Marubozu White": "Yeşil Marubozu (güçlü alıcı mumu)",
+    "Marubozu Black": "Kırmızı Marubozu (güçlü satıcı mumu)",
+    "Spinning Top White": "Yeşil Topaç (kararsızlık)",
+    "Spinning Top Black": "Kırmızı Topaç (kararsızlık)",
+    "Engulfing Bullish": "Boğa Yutan (olası yukarı dönüş)",
+    "Engulfing Bearish": "Ayı Yutan (olası aşağı dönüş)",
+    "Harami Bullish": "Boğa Harami (olası yukarı dönüş)",
+    "Harami Bearish": "Ayı Harami (olası aşağı dönüş)",
+    "Harami Cross Bullish": "Boğa Harami Cross (olası yukarı dönüş)",
+    "Harami Cross Bearish": "Ayı Harami Cross (olası aşağı dönüş)",
+    "Piercing": "Delici Mum (olası yukarı dönüş)",
+    "Dark Cloud Cover": "Kara Bulut (olası aşağı dönüş)",
+    "Tweezer Bottom": "Cımbız Dip (olası yukarı dönüş)",
+    "Tweezer Top": "Cımbız Tepe (olası aşağı dönüş)",
+    "Rising Window": "Yukarı Pencere (yükseliş devamı)",
+    "Falling Window": "Aşağı Pencere (düşüş devamı)",
+    "Morning Star": "Sabah Yıldızı (olası yukarı dönüş)",
+    "Evening Star": "Akşam Yıldızı (olası aşağı dönüş)",
+    "Morning Doji Star": "Sabah Doji Yıldızı (olası yukarı dönüş)",
+    "Evening Doji Star": "Akşam Doji Yıldızı (olası aşağı dönüş)",
+    "Three White Soldiers": "Üç Beyaz Asker (güçlü yükseliş dizisi)",
+    "Three Black Crows": "Üç Kara Karga (güçlü düşüş dizisi)",
+}
+
+
+def _names_at(row: pd.Series, column: str) -> list[str]:
+    value = str(row.get(column, "")).strip()
+    if not value or value == "nan":
+        return []
+    return [PATTERN_TR.get(name.strip(), name.strip()) for name in value.split(";") if name.strip()]
+
+
+def summarize_recent_candles(data: pd.DataFrame) -> dict[str, object]:
+    """Yalnız son iki bardaki formasyonları, halk dilindeki anlamıyla özetler."""
+    bars: list[dict[str, object]] = []
+    for offset, label in ((0, "Son mum"), (1, "Bir önceki mum")):
+        if len(data) <= offset:
+            continue
+        row = data.iloc[-1 - offset]
+        bullish = _names_at(row, "CANDLE_BULL_NAMES")
+        bearish = _names_at(row, "CANDLE_BEAR_NAMES")
+        neutral = _names_at(row, "CANDLE_NEUTRAL_NAMES")
+        names = bullish + bearish + neutral
+        tone = "positive" if bullish and not bearish else "negative" if bearish and not bullish else "warning" if names else "neutral"
+        bars.append({"label": label, "names": names, "tone": tone, "text": ", ".join(names) or "Belirgin formasyon yok"})
+
+    current = bars[0] if bars else {"label": "Son mum", "names": [], "tone": "neutral", "text": "Veri yok"}
+    previous = bars[1] if len(bars) > 1 else {"label": "Bir önceki mum", "names": [], "tone": "neutral", "text": "Veri yok"}
+    detected = [bar for bar in bars if bar["names"]]
+    if not detected:
+        story = (
+            "Son iki mumda tanımlı güçlü bir mum formasyonu görülmedi. "
+            "Bu, mumların tek başına dönüş veya devam yönünde belirgin bir ipucu vermediği anlamına gelir."
+        )
+        tone = "neutral"
+    else:
+        observations = " ".join(f"{bar['label']}: {bar['text']}." for bar in detected)
+        tones = {str(bar["tone"]) for bar in detected}
+        if tones == {"positive"}:
+            conclusion, tone = "Alıcı tarafında bir ipucu var; fiyat seviyesi ve hacim teyidi olmadan kesin dönüş sayılmaz.", "positive"
+        elif tones == {"negative"}:
+            conclusion, tone = "Satıcı tarafında bir uyarı var; fiyat seviyesi ve hacim teyidi olmadan kesin dönüş sayılmaz.", "negative"
+        else:
+            conclusion, tone = "Mumlar karışık mesaj veriyor; tek başına yön kararı çıkarmak doğru olmaz.", "warning"
+        story = f"{observations} {conclusion}"
+    return {"current": current, "previous": previous, "story": story, "tone": tone, "window": 2}
