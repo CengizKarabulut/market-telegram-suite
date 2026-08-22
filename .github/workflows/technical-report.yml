@@ -71,7 +71,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TECHNICAL_TOPIC_ID }}
           TELEGRAM_SEND_CAPTION: "0"
-          TELEGRAM_SEND_TEXT_DETAIL: "0"
+          TELEGRAM_SEND_TEXT_DETAIL: "1"
         run: python -m src.send_telegram
       - name: Raporu sakla
         if: always()
