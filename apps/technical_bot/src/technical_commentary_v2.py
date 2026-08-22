@@ -682,7 +682,7 @@ def _divergence_plain(context: dict[str, Any]) -> str:
     if not items:
         return ""
     readable = "; ".join(
-        f"{item.get('indicator', 'gösterge')} {str(item.get('state', 'uyumsuzluk')).casefold()} "
+        f"{item.get('indicator', 'gösterge')} {str(item.get('state', 'uyumsuzluk'))} "
         f"({item.get('quality', '—')} kalite)"
         for item in items[:2]
     )
@@ -793,12 +793,15 @@ def build_technical_commentary(
         bar_state,
         bool(context.get("short_history")),
     )
-    disclaimer = plain["sentences"][-1] if plain.get("sentences") else "Bu bir teknik durum yorumudur; yatırım tavsiyesi değildir."
+    original_plain_sentences = list(plain.get("sentences", []))
+    disclaimer = original_plain_sentences[-1] if original_plain_sentences else "Bu bir teknik durum yorumudur; yatırım tavsiyesi değildir."
+    history_notes = [item for item in original_plain_sentences if "işlem geçmişi kısa" in item.casefold()]
     plain["sentences"] = [
         market_story,
         _plain_consensus(indicator_schemas),
         candle_story,
         general_interpretation,
+        *history_notes,
         disclaimer,
     ]
     plain["text"] = " ".join(item for item in plain["sentences"] if item)
