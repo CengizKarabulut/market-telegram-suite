@@ -24,6 +24,39 @@ def _fmt(value: Any, digits: int = 2) -> str:
     return "—" if not math.isfinite(number) else f"{number:,.{digits}f}"
 
 
+def _relation(
+    value: Any,
+    reference: Any,
+    above: str,
+    equal: str,
+    below: str,
+    unavailable: str = "hesaplanamadı",
+) -> str:
+    """İki değeri NaN ve eşitlik durumlarını bozmadan karşılaştırır."""
+    left, right = _number(value), _number(reference)
+    if not math.isfinite(left) or not math.isfinite(right):
+        return unavailable
+    if math.isclose(left, right, rel_tol=1e-9, abs_tol=1e-12):
+        return equal
+    return above if left > right else below
+
+
+def _signed(
+    value: Any,
+    positive: str,
+    zero: str,
+    negative: str,
+    unavailable: str = "hesaplanamadı",
+) -> str:
+    """İşaret yorumunda sıfırı ve eksik veriyi negatiften ayırır."""
+    number = _number(value)
+    if not math.isfinite(number):
+        return unavailable
+    if math.isclose(number, 0.0, rel_tol=0.0, abs_tol=1e-12):
+        return zero
+    return positive if number > 0 else negative
+
+
 def _direction(context: dict[str, Any]) -> tuple[str, str]:
     """Yönü yapıdan uzatmak yerine tanınan kurulumun eğiliminden türetir."""
     setup = context.get("setup_context", {}).get("setup", {})
@@ -443,19 +476,29 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
     flow_side = _side(obv > obv_ma, obv < obv_ma)
     schema1_side = bb_side if bb_side == impulse_side == flow_side else "mixed"
     schema1_tone = {"up": "positive", "down": "negative"}.get(schema1_side, "warning")
-    band_position = (
-        "üst bandın üzerinde" if price > bb_upper
-        else "alt bandın altında" if price < bb_lower
-        else "orta çizginin üzerinde" if price > bb_mid
-        else "orta çizginin altında"
+    if not all(math.isfinite(value) for value in (price, bb_mid, bb_upper, bb_lower)):
+        band_position = "konumu hesaplanamadı"
+    elif price > bb_upper:
+        band_position = "üst bandın üzerinde"
+    elif price < bb_lower:
+        band_position = "alt bandın altında"
+    else:
+        band_position = _relation(
+            price, bb_mid, "orta çizginin üzerinde", "orta çizgiyle aynı seviyede", "orta çizginin altında"
+        )
+    width_state = _relation(
+        bb_width, prev_width, "genişliyor", "değişmiyor", "daralıyor"
     )
-    width_state = "genişliyor" if bb_width > prev_width else "daralıyor"
-    macd_state = (
-        "pozitif bölgede ve güçleniyor" if macd_hist >= 0 and macd_hist > prev_hist
-        else "pozitif ama ivme kaybediyor" if macd_hist >= 0
-        else "negatif bölgede fakat baskı azalıyor" if macd_hist > prev_hist
-        else "negatif bölgede ve baskı artıyor"
-    )
+    if not math.isfinite(macd_hist) or not math.isfinite(prev_hist):
+        macd_state = "durumu hesaplanamadı"
+    elif macd_hist >= 0:
+        macd_state = "pozitif bölgede ve güçleniyor" if macd_hist > prev_hist else (
+            "pozitif ve değişmiyor" if math.isclose(macd_hist, prev_hist) else "pozitif ama ivme kaybediyor"
+        )
+    else:
+        macd_state = "negatif bölgede fakat baskı azalıyor" if macd_hist > prev_hist else (
+            "negatif ve değişmiyor" if math.isclose(macd_hist, prev_hist) else "negatif bölgede ve baskı artıyor"
+        )
     schema1 = {
         "name": "1 · Bollinger / MACD / SMI / OBV",
         "state": {
@@ -477,8 +520,8 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
         ),
         "stock_comment": (
             f"Bu hissede fiyat Bollinger {band_position}; MACD {macd_state}. "
-            f"SMI {'sinyal çizgisinin üzerinde' if smi > smi_signal else 'sinyal çizgisinin altında'}, "
-            f"OBV ise {'kendi ortalamasının üzerinde' if obv > obv_ma else 'kendi ortalamasının altında'}. "
+            f"SMI {_relation(smi, smi_signal, 'sinyal çizgisinin üzerinde', 'sinyal çizgisiyle aynı seviyede', 'sinyal çizgisinin altında')}, "
+            f"OBV ise {_relation(obv, obv_ma, 'kendi ortalamasının üzerinde', 'kendi ortalamasıyla aynı seviyede', 'kendi ortalamasının altında')}. "
             + {
                 "up": "Fiyat, hız ve hacim aynı yönde olduğu için yukarı hareket daha sağlıklı görünüyor.",
                 "down": "Fiyat, hız ve hacim aynı yönde olduğu için satış baskısı teknik olarak teyit ediliyor.",
@@ -518,7 +561,14 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
     oscillator_side = _side(rsi > 50 and cci > 0, rsi < 50 and cci < 0)
     schema2_side = cloud_side if cloud_side == oscillator_side else "mixed"
     schema2_tone = {"up": "positive", "down": "negative"}.get(schema2_side, "warning")
-    cloud_state = "bulutun üzerinde" if price > cloud_top else "bulutun altında" if price < cloud_bottom else "bulutun içinde"
+    if not all(math.isfinite(value) for value in (price, cloud_top, cloud_bottom)):
+        cloud_state = "buluta göre konumu hesaplanamadı"
+    elif price > cloud_top:
+        cloud_state = "bulutun üzerinde"
+    elif price < cloud_bottom:
+        cloud_state = "bulutun altında"
+    else:
+        cloud_state = "bulut sınırında" if math.isclose(price, cloud_top) or math.isclose(price, cloud_bottom) else "bulutun içinde"
     schema2 = {
         "name": "2 · Ichimoku / RSI / CCI / ATR",
         "state": {
@@ -537,8 +587,8 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
             f"CCI {_fmt(cci)} (SMA14 {_fmt(cci_ma)}), ATR% {_fmt(atr_pct)}."
         ),
         "stock_comment": (
-            f"Bu hissede fiyat {cloud_state}; RSI {'50 üzerinde' if rsi > 50 else '50 altında'} ve "
-            f"CCI {'sıfır üzerinde' if cci > 0 else 'sıfır altında'}. ATR, bir barlık tipik hareketin "
+            f"Bu hissede fiyat {cloud_state}; RSI {_relation(rsi, 50, '50 üzerinde', 'tam 50 seviyesinde', '50 altında')} ve "
+            f"CCI {_signed(cci, 'sıfır üzerinde', 'tam sıfır seviyesinde', 'sıfır altında')}. ATR, bir barlık tipik hareketin "
             f"yaklaşık %{_fmt(atr_pct)} olduğunu gösteriyor. "
             + {
                 "up": "Ana eğilim ile itiş gücü birlikte yukarıyı destekliyor.",
@@ -600,12 +650,12 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
             f"ADX {_fmt(adx)}, +DI {_fmt(plus_di)}, -DI {_fmt(minus_di)}."
         ),
         "stock_comment": (
-            f"Bu hissede fiyat SAR'ın {'üzerinde' if price > psar else 'altında'} ve Auto AVWAP'ın "
-            f"{'üzerinde' if price > vwap else 'altında'}. Stoch RSI K, D çizgisinin "
-            f"{'üzerinde' if stoch_k > stoch_d else 'altında'}; "
-            f"{'+DI alıcı yönünü öne çıkarıyor' if plus_di > minus_di else '-DI satıcı yönünü öne çıkarıyor'}. "
+            f"Bu hissede fiyat SAR'ın {_relation(price, psar, 'üzerinde', 'aynı seviyesinde', 'altında', 'konumu hesaplanamadı')} ve Auto AVWAP'ın "
+            f"{_relation(price, vwap, 'üzerinde', 'aynı seviyesinde', 'altında', 'konumu hesaplanamadı')}. Stoch RSI K, D çizgisinin "
+            f"{_relation(stoch_k, stoch_d, 'üzerinde', 'aynı seviyesinde', 'altında')}; "
+            f"{_relation(plus_di, minus_di, '+DI alıcı yönünü öne çıkarıyor', 'DI çizgileri dengede', '-DI satıcı yönünü öne çıkarıyor')}. "
             f"ADX {_fmt(adx)} ile "
-            f"{'trend gücü belirgin' if adx >= 25 else 'trend gücü zayıf' if adx < 20 else 'trend gücü oluşma aşamasında'}. "
+            f"{'hesaplanamadı' if not math.isfinite(adx) else 'trend gücü belirgin' if adx >= 25 else 'trend gücü zayıf' if adx < 20 else 'trend gücü oluşma aşamasında'}. "
             + (
                 "Yön ve zamanlama uyumlu olsa da ADX güçlenmeden hareket tam teyitli sayılmaz."
                 if schema3_side != "mixed" and not strong_trend
@@ -660,9 +710,10 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
             f"{_fmt(fisher)}/{_fmt(fisher_trigger)}, CMF {_fmt(cmf)}, Momentum10 {_fmt(momentum)}."
         ),
         "stock_comment": (
-            f"Bu hissede fiyat Supertrend'in {'üzerinde' if price > supertrend else 'altında'}; Fisher "
-            f"tetik çizgisinin {'üzerinde' if fisher > fisher_trigger else 'altında'}, CMF "
-            f"{'pozitif' if cmf > 0 else 'negatif'} ve Momentum10 {'sıfır üzerinde' if momentum > 0 else 'sıfır altında'}. "
+            f"Bu hissede fiyat Supertrend'in {_relation(price, supertrend, 'üzerinde', 'aynı seviyesinde', 'altında', 'konumu hesaplanamadı')}; Fisher "
+            f"tetik çizgisinin {_relation(fisher, fisher_trigger, 'üzerinde', 'aynı seviyesinde', 'altında')}, CMF "
+            f"{_signed(cmf, 'pozitif', 'nötr (sıfır)', 'negatif')} ve Momentum10 "
+            f"{_signed(momentum, 'sıfır üzerinde', 'tam sıfır seviyesinde', 'sıfır altında')}. "
             + {
                 "up": "Ana trend, dönüş hızı ve para akışı birlikte yukarı hareketi destekliyor.",
                 "down": "Ana trend, dönüş hızı ve para akışı birlikte aşağı yönlü baskıyı destekliyor.",
