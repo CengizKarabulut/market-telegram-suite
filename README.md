@@ -27,7 +27,8 @@ Repository Settings → Secrets and variables → Actions bölümünde:
 | CHART_TOPIC_ID | Grafik botu konu kimliği |
 | TECHNICAL_TOPIC_ID | Teknik analiz botu konu kimliği |
 | TELEGRAM_ALLOWED_USERS | Teknik botu kullanabilecek Telegram kullanıcı kimlikleri; isteğe bağlı |
-| GH_PAT | İsteğe bağlı yerel yedek; Actions içindeki bot zincirleri repoya sınırlı `GITHUB_TOKEN` kullanır |
+
+GitHub Actions içindeki dinleme zincirleri, workflow'un `actions: write` iznine sahip repoya sınırlı `GITHUB_TOKEN` değerini otomatik kullanır; bunun için ayrıca PAT secret'ı gerekmez.
 
 GitHub, eski repolardaki secret değerlerini API üzerinden okunabilir biçimde
 vermediği için token değerleri yeni repoya manuel olarak eklenmelidir.
