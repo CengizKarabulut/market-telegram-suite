@@ -329,14 +329,11 @@ Sık cron (`*/5 * * * *`) kullanılmamasının sebebi: GitHub'ın beş dakikalı
 pratikte çoğu zaman atlanır, komutlar dakikalarca cevapsız kalır. Buradaki saatlik cron
 yalnızca zincir koparsa (hata, iptal, kota) devreye giren emniyet ağıdır.
 
-Gerekli repository secret'ları: `CHART_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
-`CHART_TOPIC_ID` ve zincir için `GH_PAT`. Workflow bu değerleri uygulamanın
-beklediği ortam değişkenlerine eşler.
-
-> **`GH_PAT` neden gerekli:** GitHub, `GITHUB_TOKEN` ile tetiklenen olayların yeni koşu
-> başlatmasını engeller (sonsuz döngü koruması). Zincirin sürmesi için `actions: write`
-> yetkili bir kişisel erişim jetonu gerekir. Tanımlı değilse koşu biter ve cron bir
-> sonraki saat başında yeniden başlatır — bot çalışır ama saatte bir kopar.
+Gerekli repository secret'ları: `CHART_BOT_TOKEN`, `TELEGRAM_CHAT_ID` ve
+`CHART_TOPIC_ID`. Workflow bu değerleri uygulamanın beklediği ortam değişkenlerine
+eşler. Dinleme zinciri için ayrıca PAT gerekmez: workflow'un `actions: write` iznine
+sahip, repoya sınırlı ve kısa ömürlü `GITHUB_TOKEN` değeri `workflow_dispatch`
+çağrısında otomatik kullanılır.
 
 Zinciri **bir kez elle başlatmak** gerekir:
 `Actions → Grafik Telegram Botu → Run workflow`.
