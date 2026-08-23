@@ -446,34 +446,69 @@ def process_once(token: str, allowed: set[int], long_poll: int) -> int:
     return handled
 
 
-def restart_self() -> None:
+def _restart_tokens() -> list[tuple[str, str]]:
+    """Dinleme zinciri için jetonları güvenli öncelik sırasına koyar."""
+    candidates = [
+        (os.getenv("GITHUB_TOKEN", "").strip(), "GITHUB_TOKEN"),
+        (os.getenv("GH_PAT", "").strip(), "GH_PAT"),
+    ]
+    result: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for token, source in candidates:
+        if token and token not in seen:
+            result.append((token, source))
+            seen.add(token)
+    return result
+
+
+def restart_self() -> bool:
     """Koşu süresi dolduğunda kendini yeniden tetikler.
 
-    GitHub'ın beş dakikalık zamanlanmış koşuları güvenilir çalışmadığı için
-    dinleme zinciri koşudan koşuya devredilir; cron yalnızca zincir koptuğunda
-    devreye giren emniyet ağıdır.
+    workflow_dispatch, GitHub'ın GITHUB_TOKEN ile yeni koşu oluşturmasına izin
+    verdiği olaylardan biridir. Repoya sınırlı GITHUB_TOKEN önce kullanılır;
+    GH_PAT yalnızca yerel/özel çalıştırmalar için yedektir.
     """
-    token = os.getenv("GH_PAT", "").strip() or os.getenv("GITHUB_TOKEN", "").strip()
-    repository = os.getenv("GITHUB_REPOSITORY", "")
-    if not token or not repository:
+    repository = os.getenv("GITHUB_REPOSITORY", "").strip()
+    credentials = _restart_tokens()
+    if not repository or not credentials:
         print("Kendini yeniden tetikleyemedi: GitHub kimlik bilgisi yok.")
-        return
-    response = requests.post(
-        f"https://api.github.com/repos/{repository}/actions/workflows/{BOT_WORKFLOW_FILE}/dispatches",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-        json={"ref": os.getenv("GITHUB_REF_NAME", "main")},
-        timeout=30,
-    )
-    if response.status_code == 204:
-        print("Sonraki dinleme turu tetiklendi.")
-        return
+        return False
+
+    url = f"https://api.github.com/repos/{repository}/actions/workflows/{BOT_WORKFLOW_FILE}/dispatches"
+    payload = {"ref": os.getenv("GITHUB_REF_NAME", "main").strip() or "main"}
+    last_error = ""
+    for token, source in credentials:
+        try:
+            response = requests.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                json=payload,
+                timeout=30,
+            )
+        except requests.RequestException as error:
+            last_error = f"{source}: {error}"
+            print(f"Dinleme zinciri isteği başarısız ({last_error}); yedek jeton deneniyor.")
+            continue
+
+        if response.status_code == 204:
+            print(f"Sonraki dinleme turu tetiklendi ({source}).")
+            return True
+
+        last_error = f"{source}: HTTP {response.status_code} {response.text[:150]}"
+        print(f"Dinleme zinciri isteği reddedildi ({last_error}); yedek jeton deneniyor.")
+
     # Zincir koptuğunda sessiz kalmak, botun çalıştığı sanılmasına yol açar.
-    message = f"⚠ Bot dinleme zinciri devam ettirilemedi (HTTP {response.status_code}). Komutlar bir sonraki saat başına kadar gecikebilir."
-    print(message)
+    message = "⚠ Bot dinleme zinciri devam ettirilemedi. Komutlar bir sonraki zamanlanmış koşuya kadar gecikebilir."
+    print(f"{message} Son hata: {last_error}")
     try:
         send_text(message)
     except Exception as error:  # noqa: BLE001 -- bildirim hatası koşuyu bozmamalı
         print(f"  bildirim gönderilemedi: {type(error).__name__}")
+    return False
 
 
 def main() -> None:
