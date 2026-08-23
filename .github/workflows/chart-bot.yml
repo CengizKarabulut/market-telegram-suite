@@ -40,7 +40,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.CHART_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_TOPIC_ID: ${{ secrets.CHART_TOPIC_ID }}
-          GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOT_WORKFLOW_FILE: chart-bot.yml
           BOT_RUN_MINUTES: "50"

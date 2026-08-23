@@ -1020,14 +1020,14 @@ class TestSelfRestart(unittest.TestCase):
         self.assertEqual(captured["json"], {"ref": "main"})
         self.assertIn("pat123", captured["headers"]["Authorization"])
 
-    def test_pat_preferred_over_github_token(self) -> None:
+    def test_github_token_preferred_over_pat(self) -> None:
         import os
         from unittest import mock
 
         from src import bot_runner
 
         with mock.patch.dict(os.environ, self._env(GH_PAT="pat", GITHUB_TOKEN="tok")):
-            self.assertEqual(bot_runner._restart_token(), ("pat", "GH_PAT"))
+            self.assertEqual(bot_runner._restart_tokens()[0], ("tok", "GITHUB_TOKEN"))
 
     def test_missing_token_is_reported_not_raised(self) -> None:
         import os

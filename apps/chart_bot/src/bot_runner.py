@@ -20,11 +20,10 @@ Ortam degiskenleri:
     GITHUB_REPOSITORY "kullanici/depo" (Actions otomatik verir)
     GITHUB_REF_NAME   dal adi (Actions otomatik verir)
 
-JETON NOTU: GitHub, GITHUB_TOKEN ile tetiklenen olaylarin yeni kosu
-baslatmamasi kuralini uygular (sonsuz dongu korumasi). Zincirin surmesi icin
-`actions: write` yetkisi olan bir kisisel erisim jetonunu GH_PAT olarak
-tanimlamak gerekir. Tanimli degilse calistirici bunu acikca bildirir ve kosu
-biter; cron bir sonraki saat basinda yeniden baslatir.
+JETON NOTU: workflow `actions: write` izniyle verilen GITHUB_TOKEN,
+workflow_dispatch olayini tetikleyebilir. Bu nedenle once kisa omurlu ve
+repoya sinirli GITHUB_TOKEN kullanilir. GH_PAT yalnizca yerel/ozel calistirma
+icin yedektir; hatali bir PAT calisan Actions jetonunu engellemez.
 """
 
 from __future__ import annotations
@@ -39,54 +38,58 @@ from . import bot
 WORKFLOW_FILE = os.environ.get("BOT_WORKFLOW_FILE", "chart-bot.yml")
 
 
-def _restart_token() -> tuple[str, str] | None:
-    """(jeton, kaynak adi) dondurur; yoksa None."""
-    pat = os.environ.get("GH_PAT", "").strip()
-    if pat:
-        return pat, "GH_PAT"
-    token = os.environ.get("GITHUB_TOKEN", "").strip()
-    if token:
-        return token, "GITHUB_TOKEN"
-    return None
+def _restart_tokens() -> list[tuple[str, str]]:
+    """Kullanilabilir jetonlari guvenli oncelik sirasinda dondurur."""
+    candidates = [
+        (os.environ.get("GITHUB_TOKEN", "").strip(), "GITHUB_TOKEN"),
+        (os.environ.get("GH_PAT", "").strip(), "GH_PAT"),
+    ]
+    result: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for token, source in candidates:
+        if token and token not in seen:
+            result.append((token, source))
+            seen.add(token)
+    return result
 
 
 def restart_self() -> bool:
     """Ayni workflow'u yeniden tetikler. Basarili olursa True."""
     repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
     ref = os.environ.get("GITHUB_REF_NAME", "main").strip() or "main"
-    credentials = _restart_token()
+    credentials = _restart_tokens()
 
     if not repo or not credentials:
         print("Zincir surdurulemedi: GITHUB_REPOSITORY veya jeton yok. "
               "Cron bir sonraki saat basinda yeniden baslatacak.")
         return False
 
-    token, source = credentials
     url = (f"https://api.github.com/repos/{repo}/actions/workflows/"
            f"{WORKFLOW_FILE}/dispatches")
-    try:
-        response = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {token}",
-                     "Accept": "application/vnd.github+json",
-                     "X-GitHub-Api-Version": "2022-11-28"},
-            json={"ref": ref},
-            timeout=30,
-        )
-    except requests.RequestException as exc:
-        print(f"Zincir istegi basarisiz: {exc}")
-        return False
+    last_error = ""
+    for token, source in credentials:
+        try:
+            response = requests.post(
+                url,
+                headers={"Authorization": f"Bearer {token}",
+                         "Accept": "application/vnd.github+json",
+                         "X-GitHub-Api-Version": "2022-11-28"},
+                json={"ref": ref},
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            last_error = f"{source}: {exc}"
+            print(f"Zincir istegi basarisiz ({last_error}); yedek jeton deneniyor.")
+            continue
 
-    if response.status_code == 204:
-        print(f"Zincir surduruldu ({source} ile yeni kosu tetiklendi).")
-        return True
+        if response.status_code == 204:
+            print(f"Zincir surduruldu ({source} ile yeni kosu tetiklendi).")
+            return True
 
-    print(f"Zincir surdurulemedi: HTTP {response.status_code} {response.text[:200]}")
-    if source == "GITHUB_TOKEN":
-        # GitHub, GITHUB_TOKEN ile tetiklenen olaylarin yeni kosu baslatmasini
-        # engeller. Bu durumda PAT gerekir.
-        print("Not: GITHUB_TOKEN ile tetiklenen olaylar yeni kosu baslatmaz. "
-              "actions:write yetkili bir PAT'i GH_PAT olarak tanimlayin.")
+        last_error = f"{source}: HTTP {response.status_code} {response.text[:200]}"
+        print(f"Zincir istegi reddedildi ({last_error}); yedek jeton deneniyor.")
+
+    print(f"Zincir surdurulemedi: {last_error}")
     return False
 
 
