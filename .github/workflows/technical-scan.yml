@@ -96,7 +96,18 @@ jobs:
         run: |
           SEND_FLAG=""
           if [ "$SEND_TELEGRAM" = "true" ]; then SEND_FLAG="--send-telegram"; fi
-          python -m src.screener_cli +            --universe "$INPUT_UNIVERSE" +            --watchlist watchlist.txt +            --limit "$INPUT_LIMIT" +            --bb-rank-max "$INPUT_BB_RANK_MAX" +            --rvol-min "$INPUT_RVOL_MIN" +            --rvol-spike "$INPUT_RVOL_SPIKE" +            --min-turnover "$INPUT_MIN_TURNOVER" +            --interval "$INPUT_INTERVAL" +            --report-top "$INPUT_REPORT_TOP" +            --state reports/scan_state.json +            $SEND_FLAG
+          python -m src.screener_cli \
+            --universe "$INPUT_UNIVERSE" \
+            --watchlist watchlist.txt \
+            --limit "$INPUT_LIMIT" \
+            --bb-rank-max "$INPUT_BB_RANK_MAX" \
+            --rvol-min "$INPUT_RVOL_MIN" \
+            --rvol-spike "$INPUT_RVOL_SPIKE" \
+            --min-turnover "$INPUT_MIN_TURNOVER" \
+            --interval "$INPUT_INTERVAL" \
+            --report-top "$INPUT_REPORT_TOP" \
+            --state reports/scan_state.json \
+            $SEND_FLAG
       - name: Sonuçları sakla
         if: always()
         uses: actions/upload-artifact@v7
