@@ -124,6 +124,39 @@ class TechnicalCommentaryV2Tests(unittest.TestCase):
         self.assertNotIn("Yönün doğrulanması için: Teyit için", result["telegram_detail"])
         self.assertIn("Genel Yorum", result["telegram_detail"])
 
+    def test_equal_indicator_boundaries_remain_neutral(self) -> None:
+        from src.technical_commentary_v2 import _indicator_schemas
+
+        row = {
+            "Close": 100.0,
+            "BB_MID": 100.0, "BB_UPPER": 100.0, "BB_LOWER": 100.0, "BB_WIDTH": 0.0,
+            "MACD_HIST": 0.0, "SMI": 0.0, "SMI_EMA": 0.0, "OBV": 0.0, "OBV_SMA": 0.0,
+            "VISIBLE_SPAN_A": 100.0, "VISIBLE_SPAN_B": 100.0,
+            "RSI": 50.0, "RSI_MA": 50.0, "CCI": 0.0, "CCI_MA": 0.0, "ATR_PCT": 0.0,
+            "PSAR": 100.0, "STOCH_K": 50.0, "STOCH_D": 50.0, "VWAP": 100.0,
+            "ADX": 0.0, "PLUS_DI": 0.0, "MINUS_DI": 0.0,
+            "SUPERTREND": 100.0, "FISHER": 0.0, "FISHER_TRIGGER": 0.0,
+            "CMF": 0.0, "MOMENTUM": 0.0,
+        }
+        schemas = _indicator_schemas(pd.DataFrame([row, row]))
+        comments = [item["stock_comment"] for item in schemas]
+
+        self.assertIn("aynı seviyede", comments[0])
+        self.assertIn("tam 50 seviyesinde", comments[1])
+        self.assertIn("tam sıfır seviyesinde", comments[1])
+        self.assertIn("DI çizgileri dengede", comments[2])
+        self.assertIn("nötr (sıfır)", comments[3])
+        self.assertIn("Momentum10 tam sıfır seviyesinde", comments[3])
+
+    def test_missing_indicator_values_are_not_reported_as_bearish(self) -> None:
+        from src.technical_commentary_v2 import _indicator_schemas
+
+        schemas = _indicator_schemas(pd.DataFrame([{"Close": 100.0}, {"Close": 100.0}]))
+        for item in schemas:
+            self.assertIn("hesaplanamadı", item["stock_comment"])
+        self.assertNotIn("CMF negatif", schemas[3]["stock_comment"])
+        self.assertNotIn("Momentum10 sıfır altında", schemas[3]["stock_comment"])
+
     def test_literature_note_discloses_data_mining_and_cost_limits(self) -> None:
         result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
         self.assertGreaterEqual(len(result["literature_basis"]), 5)
