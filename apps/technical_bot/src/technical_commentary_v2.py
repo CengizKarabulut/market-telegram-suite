@@ -650,8 +650,8 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
             f"ADX {_fmt(adx)}, +DI {_fmt(plus_di)}, -DI {_fmt(minus_di)}."
         ),
         "stock_comment": (
-            f"Bu hissede fiyat SAR'ın {_relation(price, psar, 'üzerinde', 'aynı seviyesinde', 'altında')} ve Auto AVWAP'ın "
-            f"{_relation(price, vwap, 'üzerinde', 'aynı seviyesinde', 'altında')}. Stoch RSI K, D çizgisinin "
+            f"Bu hissede fiyat SAR'ın {_relation(price, psar, 'üzerinde', 'aynı seviyesinde', 'altında', 'konumu hesaplanamadı')} ve Auto AVWAP'ın "
+            f"{_relation(price, vwap, 'üzerinde', 'aynı seviyesinde', 'altında', 'konumu hesaplanamadı')}. Stoch RSI K, D çizgisinin "
             f"{_relation(stoch_k, stoch_d, 'üzerinde', 'aynı seviyesinde', 'altında')}; "
             f"{_relation(plus_di, minus_di, '+DI alıcı yönünü öne çıkarıyor', 'DI çizgileri dengede', '-DI satıcı yönünü öne çıkarıyor')}. "
             f"ADX {_fmt(adx)} ile "
@@ -710,7 +710,7 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
             f"{_fmt(fisher)}/{_fmt(fisher_trigger)}, CMF {_fmt(cmf)}, Momentum10 {_fmt(momentum)}."
         ),
         "stock_comment": (
-            f"Bu hissede fiyat Supertrend'in {_relation(price, supertrend, 'üzerinde', 'aynı seviyesinde', 'altında')}; Fisher "
+            f"Bu hissede fiyat Supertrend'in {_relation(price, supertrend, 'üzerinde', 'aynı seviyesinde', 'altında', 'konumu hesaplanamadı')}; Fisher "
             f"tetik çizgisinin {_relation(fisher, fisher_trigger, 'üzerinde', 'aynı seviyesinde', 'altında')}, CMF "
             f"{_signed(cmf, 'pozitif', 'nötr (sıfır)', 'negatif')} ve Momentum10 "
             f"{_signed(momentum, 'sıfır üzerinde', 'tam sıfır seviyesinde', 'sıfır altında')}. "
