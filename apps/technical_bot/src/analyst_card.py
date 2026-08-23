@@ -213,9 +213,21 @@ def _detail_blocks(commentary: dict[str, Any], limit: int = 4) -> list[_Block]:
     """2. kart: dört grubun kısa anlamı, gerekçe, seviyeler ve senaryolar."""
     blocks: list[_Block] = [_Block("section", "DÖRT GÖSTERGE GRUBU", 23, ACCENT)]
     for item in commentary.get("indicator_schemas", []):
-        blocks.append(_Block("body", f"{item.get('name', 'Grup')} — {item.get('state', '—')}", 18, tone_colour(item.get("tone", "neutral")), "bold"))
-        blocks.append(_Block("body", item.get("plain", ""), 16, MUTED))
-        blocks.append(_Block("gap", "", 10, WHITE))
+        tone = tone_colour(item.get("tone", "neutral"))
+        blocks.append(_Block("body", f"{item.get('name', 'Grup')} — {item.get('state', '—')}", 18, tone, "bold"))
+        if item.get("guide"):
+            blocks.append(_Block("body", f"NASIL OKUNUR?  {item['guide']}", 16, MUTED))
+        if item.get("stock_comment"):
+            blocks.append(_Block("body", f"BU HİSSEDE NE SÖYLÜYOR?  {item['stock_comment']}", 17, WHITE, "bold"))
+        if item.get("reading"):
+            blocks.append(_Block("body", f"GÖSTERGE DEĞERLERİ  {item['reading']}", 14, GRAY))
+        if item.get("confirmation"):
+            blocks.append(_Block("body", f"TEYİT  {item['confirmation']}", 15, LIGHT_GREEN))
+        if item.get("risk"):
+            blocks.append(_Block("body", f"RİSK  {item['risk']}", 15, YELLOW))
+        if not item.get("guide") and item.get("plain"):
+            blocks.append(_Block("body", item["plain"], 16, MUTED))
+        blocks.append(_Block("gap", "", 12, WHITE))
     blocks.append(_Block("section", "NEDEN BU OKUMA?", 23, ACCENT))
     blocks.append(_Block("body", commentary.get("reconciliation", "—"), 17, MUTED))
     blocks.append(_Block("gap", "", 12, WHITE))

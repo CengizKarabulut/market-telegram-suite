@@ -78,7 +78,7 @@ def decision() -> dict:
 class TechnicalCommentaryV2Tests(unittest.TestCase):
     def test_squeeze_requires_expansion_and_acceptance(self) -> None:
         result = build_technical_commentary(data_frame(), context(), decision(), {"is_live": False})
-        self.assertEqual(result["version"], "2.3")
+        self.assertEqual(result["version"], "2.4")
         self.assertIn("Denge / teyit bekliyor", result["stance"])
         self.assertIn("bant genişlemesi", result["headline"])
         self.assertTrue(any("Bantlar genişlemeden" in item for item in result["scenario_map"]["neutral"]))
@@ -111,11 +111,17 @@ class TechnicalCommentaryV2Tests(unittest.TestCase):
         )
         for item in schemas:
             self.assertTrue(item["plain"])
+            self.assertTrue(item["guide"])
+            self.assertIn("Genel okuma:", item["guide"])
+            self.assertIn("Bu hissede", item["stock_comment"])
             self.assertIn("Teyit", item["confirmation"])
             self.assertTrue(item["risk"])
         self.assertIn("Hikâye şöyle", result["market_story"])
         self.assertIn("Net sonuç:", result["general_interpretation"])
         self.assertIn("Dört Gösterge Şeması", result["telegram_detail"])
+        self.assertIn("Nasıl okunur?", result["telegram_detail"])
+        self.assertIn("Bu hisse özelinde:", result["telegram_detail"])
+        self.assertNotIn("Yönün doğrulanması için: Teyit için", result["telegram_detail"])
         self.assertIn("Genel Yorum", result["telegram_detail"])
 
     def test_literature_note_discloses_data_mining_and_cost_limits(self) -> None:

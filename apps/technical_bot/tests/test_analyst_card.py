@@ -19,7 +19,17 @@ STATUS = {
         "candle_story": "Son mumda Doji görüldü; tek başına yön kanıtı değildir.",
         "general_interpretation": "Net sonuç: 325,50 üstü yukarı, 295,25 altı aşağı teyittir.",
         "indicator_schemas": [
-            {"name": "1 · Bollinger / MACD / SMI / OBV", "state": "Karışık", "plain": "Hız ve hacim aynı yönde değil.", "tone": "warning"},
+            {
+                "name": "1 · Bollinger / MACD / SMI / OBV",
+                "state": "Karışık",
+                "plain": "Hız ve hacim aynı yönde değil.",
+                "guide": "Genel okuma: fiyat, hız ve hacim birlikte değerlendirilir.",
+                "stock_comment": "Bu hissede hız toparlanırken hacim henüz eşlik etmiyor.",
+                "reading": "Fiyat 300,50; MACD -0,20; OBV ortalama altında.",
+                "confirmation": "Teyit için fiyat ve hacim aynı yönde kapanmalı.",
+                "risk": "Hacimsiz hareket yanıltıcı olabilir.",
+                "tone": "warning",
+            },
             {"name": "2 · Ichimoku / RSI / CCI / ATR", "state": "Aşağı baskı", "plain": "Ana yön satıcıları destekliyor.", "tone": "negative"},
         ],
         "reconciliation": "Kanıtlar iki yöne dağılmış.",
@@ -92,6 +102,14 @@ class CardWrappingTests(unittest.TestCase):
         texts = [block.text for block in _blocks(STATUS)]
         self.assertNotIn("Birinci paragraf.", texts)
         self.assertIn("DÖRT GÖSTERGE GRUBU", texts)
+
+    def test_indicator_group_shows_guide_and_stock_specific_reading(self) -> None:
+        texts = " ".join(block.text for block in _blocks(STATUS))
+        self.assertIn("NASIL OKUNUR?", texts)
+        self.assertIn("BU HİSSEDE NE SÖYLÜYOR?", texts)
+        self.assertIn("GÖSTERGE DEĞERLERİ", texts)
+        self.assertIn("TEYİT", texts)
+        self.assertIn("RİSK", texts)
 
 
 class CardPagingTests(unittest.TestCase):

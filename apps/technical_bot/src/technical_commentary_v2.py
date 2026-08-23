@@ -463,11 +463,29 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
             "down": "Fiyat, ivme ve hacim aşağı yönde uyumlu",
         }.get(schema1_side, "Fiyat, ivme ve hacim aynı şeyi söylemiyor"),
         "tone": schema1_tone,
+        "guide": (
+            "Genel okuma: Bollinger orta çizgisi fiyatın kısa vadeli denge noktasını, bantların "
+            "genişleyip daralması oynaklığın artıp azaldığını gösterir. MACD histogramının yönü "
+            "ivmedeki değişimi, SMI'nin sinyal çizgisine göre konumu kısa vadeli hızı, OBV'nin "
+            "kendi ortalamasına göre konumu ise hacmin fiyat hareketine eşlik edip etmediğini anlatır."
+        ),
         "reading": (
             f"Fiyat {_fmt(price)} ile Bollinger {band_position}; bant alanı {width_state}. "
             f"MACD histogramı {_fmt(macd_hist)} ve {macd_state}. "
             f"SMI {_fmt(smi)}, sinyal çizgisi {_fmt(smi_signal)}; "
             f"OBV {_fmt(obv, 0)}, SMA14 {_fmt(obv_ma, 0)}."
+        ),
+        "stock_comment": (
+            f"Bu hissede fiyat Bollinger {band_position}; MACD {macd_state}. "
+            f"SMI {'sinyal çizgisinin üzerinde' if smi > smi_signal else 'sinyal çizgisinin altında'}, "
+            f"OBV ise {'kendi ortalamasının üzerinde' if obv > obv_ma else 'kendi ortalamasının altında'}. "
+            + {
+                "up": "Fiyat, hız ve hacim aynı yönde olduğu için yukarı hareket daha sağlıklı görünüyor.",
+                "down": "Fiyat, hız ve hacim aynı yönde olduğu için satış baskısı teknik olarak teyit ediliyor.",
+            }.get(
+                schema1_side,
+                "Bu parçalar aynı yönü göstermediği için hissede tek başına bu gruba dayanarak yön seçmek erken.",
+            )
         ),
         "plain": (
             "Bu grup hareketin yalnız yönüne değil, hareketin hız kazanıp kazanmadığına "
@@ -508,9 +526,27 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
             "down": "Ana yön ve momentum aşağı yönde uyumlu",
         }.get(schema2_side, "Ana yön ile momentum arasında ayrışma var"),
         "tone": schema2_tone,
+        "guide": (
+            "Genel okuma: Fiyat bulutun üzerindeyse ana eğilim olumlu, altındaysa olumsuz, "
+            "bulutun içindeyse kararsız kabul edilir. RSI'da 50, CCI'da sıfır yön eşiğidir; "
+            "30/70 RSI ve -100/+100 CCI seviyeleri aşırılaşmayı gösterir. ATR yalnızca hareketin "
+            "beklenen büyüklüğünü anlatır, yukarı veya aşağı yön söylemez."
+        ),
         "reading": (
             f"Fiyat {cloud_state}. RSI {_fmt(rsi)} (SMA14 {_fmt(rsi_ma)}), "
             f"CCI {_fmt(cci)} (SMA14 {_fmt(cci_ma)}), ATR% {_fmt(atr_pct)}."
+        ),
+        "stock_comment": (
+            f"Bu hissede fiyat {cloud_state}; RSI {'50 üzerinde' if rsi > 50 else '50 altında'} ve "
+            f"CCI {'sıfır üzerinde' if cci > 0 else 'sıfır altında'}. ATR, bir barlık tipik hareketin "
+            f"yaklaşık %{_fmt(atr_pct)} olduğunu gösteriyor. "
+            + {
+                "up": "Ana eğilim ile itiş gücü birlikte yukarıyı destekliyor.",
+                "down": "Ana eğilim ile itiş gücü birlikte aşağı yönlü baskıyı destekliyor.",
+            }.get(
+                schema2_side,
+                "Ana eğilim ile hız göstergeleri uyuşmadığından hissede geçiş veya kararsızlık öne çıkıyor.",
+            )
         ),
         "plain": (
             "Ichimoku büyük resmi, RSI ve CCI hareketin itiş gücünü, ATR ise fiyatın ne kadar "
@@ -552,10 +588,31 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
             "down": "Aşağı yönlü takip koşulları uyumlu" if strong_trend else "Aşağı eğilim var, yön gücü henüz sınırlı",
         }.get(schema3_side, "Takip yönü ve kısa vadeli zamanlama ayrışıyor"),
         "tone": schema3_tone,
+        "guide": (
+            "Genel okuma: Fiyat SAR ve AVWAP'ın üzerindeyse takip yönü yukarı, altındaysa aşağı kabul edilir. "
+            "Stoch RSI'da 20 altı aşırı satım, 80 üstü aşırı alım bölgesidir; K/D kesişimi yalnız zamanlama "
+            "ipucudur. +DI ile -DI yönü, ADX ise bu yönün gücünü gösterir; ADX 20 altında zayıf, "
+            "25 üzerinde daha belirgin trend olarak okunur."
+        ),
         "reading": (
             f"Fiyat {_fmt(price)}; SAR {_fmt(psar)}, Auto AVWAP {_fmt(vwap)}. "
             f"Stoch RSI K/D {_fmt(stoch_k)}/{_fmt(stoch_d)}; "
             f"ADX {_fmt(adx)}, +DI {_fmt(plus_di)}, -DI {_fmt(minus_di)}."
+        ),
+        "stock_comment": (
+            f"Bu hissede fiyat SAR'ın {'üzerinde' if price > psar else 'altında'} ve Auto AVWAP'ın "
+            f"{'üzerinde' if price > vwap else 'altında'}. Stoch RSI K, D çizgisinin "
+            f"{'üzerinde' if stoch_k > stoch_d else 'altında'}; "
+            f"{'+DI alıcı yönünü öne çıkarıyor' if plus_di > minus_di else '-DI satıcı yönünü öne çıkarıyor'}. "
+            f"ADX {_fmt(adx)} ile "
+            f"{'trend gücü belirgin' if adx >= 25 else 'trend gücü zayıf' if adx < 20 else 'trend gücü oluşma aşamasında'}. "
+            + (
+                "Yön ve zamanlama uyumlu olsa da ADX güçlenmeden hareket tam teyitli sayılmaz."
+                if schema3_side != "mixed" and not strong_trend
+                else "Yön, zamanlama ve trend gücü birlikte teyit veriyor."
+                if schema3_side != "mixed"
+                else "Takip yönü ile kısa vadeli zamanlama ayrıştığı için bu hissede yanlış sinyal riski yüksek."
+            )
         ),
         "plain": (
             "SAR ve hacim ağırlıklı ortalama fiyatın hangi tarafında kalındığını, Stoch RSI kısa "
@@ -592,9 +649,27 @@ def _indicator_schemas(data: pd.DataFrame) -> list[dict[str, str]]:
             "down": "Trend, dönüş ölçümü ve para akışı aşağı yönde uyumlu",
         }.get(schema4_side, "Trend ile dönüş/para akışı teyitleri ayrışıyor"),
         "tone": schema4_tone,
+        "guide": (
+            "Genel okuma: Fiyat Supertrend'in üzerindeyse ana takip yönü yukarı, altındaysa aşağıdır. "
+            "Fisher'ın tetik çizgisini kesmesi dönüş hızına ilişkin erken uyarıdır. CMF'nin sıfır üzerinde "
+            "olması alım, altında olması satış baskısını; Momentum'un sıfıra göre konumu ise fiyatın "
+            "10 bar öncesine göre ilerleyip gerilediğini gösterir."
+        ),
         "reading": (
             f"Fiyat {_fmt(price)}, Supertrend {_fmt(supertrend)}. Fisher/Trigger "
             f"{_fmt(fisher)}/{_fmt(fisher_trigger)}, CMF {_fmt(cmf)}, Momentum10 {_fmt(momentum)}."
+        ),
+        "stock_comment": (
+            f"Bu hissede fiyat Supertrend'in {'üzerinde' if price > supertrend else 'altında'}; Fisher "
+            f"tetik çizgisinin {'üzerinde' if fisher > fisher_trigger else 'altında'}, CMF "
+            f"{'pozitif' if cmf > 0 else 'negatif'} ve Momentum10 {'sıfır üzerinde' if momentum > 0 else 'sıfır altında'}. "
+            + {
+                "up": "Ana trend, dönüş hızı ve para akışı birlikte yukarı hareketi destekliyor.",
+                "down": "Ana trend, dönüş hızı ve para akışı birlikte aşağı yönlü baskıyı destekliyor.",
+            }.get(
+                schema4_side,
+                "Ana yön ile para akışı/hız aynı şeyi söylemediğinden bu hissede hareketin devamı güvenilir biçimde teyit edilmiş değil.",
+            )
         ),
         "plain": (
             "Supertrend izlenen ana yönü, Fisher olası dönüş hızını, CMF para giriş-çıkış dengesini, "
@@ -840,12 +915,13 @@ def build_technical_commentary(
     plain["text"] = " ".join(item for item in plain["sentences"] if item)
     schema_telegram_lines: list[str] = []
     for item in indicator_schemas:
-        confirmation = re.sub(r"^Teyit için\\s*", "", item["confirmation"], flags=re.IGNORECASE)
+        confirmation = re.sub(r"^Teyit için\s*", "", item["confirmation"], flags=re.IGNORECASE)
         schema_telegram_lines.extend(
             [
                 item["name"],
-                item["plain"],
-                f"Şu anda: {item['reading']}",
+                f"Nasıl okunur? {item['guide']}",
+                f"Bu hisse özelinde: {item['stock_comment']}",
+                f"Gösterge değerleri: {item['reading']}",
                 f"Yönün doğrulanması için: {confirmation}",
                 f"Dikkat edilmesi gereken: {item['risk']}",
                 "",
@@ -886,7 +962,7 @@ def build_technical_commentary(
         ]
     )
     return {
-        "version": "2.3",
+        "version": "2.4",
         "setup": setup,
         "duration": setup_context.get("duration", {}),
         "reconciliation": reconciliation,
