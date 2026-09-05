@@ -139,6 +139,8 @@ class MarketState:
     interpretation: dict[str, Any] = field(default_factory=dict)
     relative_strength: dict[str, Any] = field(default_factory=dict)
     multi_timeframe: dict[str, Any] = field(default_factory=dict)
+    scanner_evidence: list[dict[str, Any]] = field(default_factory=list)
+    ma_level_evidence: list[dict[str, Any]] = field(default_factory=list)
     changes: list[str] = field(default_factory=list)
     confidence: dict[str, Any] = field(default_factory=dict)
     limitations: list[str] = field(default_factory=list)
