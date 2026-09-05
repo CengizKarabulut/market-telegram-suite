@@ -22,8 +22,34 @@ def attach_reader_view(state: MarketState, report: dict[str, Any]) -> dict[str, 
     return result
 
 
+def _paragraph(reader: dict[str, Any]) -> str:
+    """Reader bölümlerini başlıksız, tek akıcı analist paragrafında birleştirir."""
+    ordered = (
+        "headline",
+        "overview",
+        "momentum",
+        "participation",
+        "screening",
+        "what_changed",
+        "levels",
+        "conclusion",
+    )
+    parts: list[str] = []
+    seen: set[str] = set()
+    for key in ordered:
+        text = str(reader.get(key) or "").strip()
+        if not text:
+            continue
+        normalized = " ".join(text.lower().split())
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        parts.append(text)
+    return " ".join(parts)
+
+
 def format_reader_telegram(report: dict[str, Any]) -> str:
-    """Scanner/indikatör kodlarını göstermeyen analist dili Telegram görünümü."""
+    """Scanner/indikatör adlarını göstermeyen tek-paragraf analist görünümü."""
     symbol = str(report.get("symbol") or "—")
     label = str(report.get("interval_label") or report.get("interval") or "")
     price = _fmt_number(report.get("price"))
@@ -34,37 +60,15 @@ def format_reader_telegram(report: dict[str, Any]) -> str:
         change_text = "—"
 
     reader = report.get("reader_view") or {}
-    if not reader.get("available", True):
-        return "\n".join(
-            [
-                f"{symbol} — Analist Görüşü ({label})",
-                f"Fiyat: {price} · Günlük değişim: {change_text}",
-                "",
-                str(reader.get("headline") or "Güvenilir analiz üretilemiyor."),
-                str(reader.get("overview") or ""),
-                str(reader.get("conclusion") or ""),
-            ]
-        ).strip()
+    paragraph = _paragraph(reader)
+    if not paragraph:
+        paragraph = "Güvenilir bir analist değerlendirmesi üretmek için yeterli veri yok."
 
-    sections = [
-        ("Genel görünüm", reader.get("overview")),
-        ("Kısa vadede güç ne durumda?", reader.get("momentum")),
-        ("Hareketin arkasında para var mı?", reader.get("participation")),
-        ("Ek teknik koşullar ne söylüyor?", reader.get("screening")),
-        ("Önemli fiyat bölgeleri", reader.get("levels")),
-        ("Son seansta ne değişti?", reader.get("what_changed")),
-        ("Sonuç", reader.get("conclusion")),
-    ]
-
-    lines = [
-        f"{symbol} — Analist Görüşü ({label})",
-        f"Fiyat: {price} · Değişim: {change_text}",
-        "",
-        str(reader.get("headline") or ""),
-    ]
-    for title, text in sections:
-        cleaned = str(text or "").strip()
-        if not cleaned:
-            continue
-        lines.extend(["", f"{title}:", cleaned])
-    return "\n".join(lines).strip()
+    return "\n".join(
+        [
+            f"{symbol} — Analist Görüşü ({label})",
+            f"Fiyat: {price} · Değişim: {change_text}",
+            "",
+            paragraph,
+        ]
+    ).strip()
