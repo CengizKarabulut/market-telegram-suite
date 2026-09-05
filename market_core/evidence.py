@@ -123,6 +123,18 @@ def wave_evidence(hypotheses: list[WaveHypothesis]) -> list[Evidence]:
     return result
 
 
+def _location_direction(level: TechnicalLevel) -> EvidenceDirection:
+    """Konumu tek başına yön oyu saymaz; yalnız lifecycle rolü yön bilgisi taşır."""
+    role = level.role.upper()
+    if level.lifecycle_state == LevelLifecycle.RECLAIMED and "SUPPORT" in role:
+        return EvidenceDirection.BULLISH
+    if level.lifecycle_state == LevelLifecycle.REJECTED and "SUPPORT" in role:
+        return EvidenceDirection.BEARISH
+    if level.lifecycle_state == LevelLifecycle.TESTED and "RETEST_HELD" in role:
+        return EvidenceDirection.BULLISH
+    return EvidenceDirection.NEUTRAL
+
+
 def level_evidence(levels: Iterable[TechnicalLevel], price: float) -> list[Evidence]:
     nearby = [
         level
@@ -150,12 +162,12 @@ def level_evidence(levels: Iterable[TechnicalLevel], price: float) -> list[Evide
         result.append(
             Evidence(
                 family="location_support",
-                direction=EvidenceDirection.BULLISH,
+                direction=_location_direction(support),
                 state=support.role,
                 strength=_clamp(support.priority),
                 confidence=_clamp(support.confidence),
                 independent_group="location_support",
-                reason=f"En yakın aktif alt referans {support.value:.2f}; rolü {support.role}.",
+                reason=f"En yakın aktif alt referans {support.value:.2f}; rolü {support.role}. Konum tek başına yön oyu değildir.",
                 metadata={"level": support.value, "source": support.source},
             )
         )
@@ -164,12 +176,12 @@ def level_evidence(levels: Iterable[TechnicalLevel], price: float) -> list[Evide
         result.append(
             Evidence(
                 family="location_resistance",
-                direction=EvidenceDirection.BEARISH,
+                direction=_location_direction(resistance),
                 state=resistance.role,
                 strength=_clamp(resistance.priority),
                 confidence=_clamp(resistance.confidence),
                 independent_group="location_resistance",
-                reason=f"En yakın aktif üst referans {resistance.value:.2f}; rolü {resistance.role}.",
+                reason=f"En yakın aktif üst referans {resistance.value:.2f}; rolü {resistance.role}. Konum tek başına yön oyu değildir.",
                 metadata={"level": resistance.value, "source": resistance.source},
             )
         )
@@ -177,11 +189,6 @@ def level_evidence(levels: Iterable[TechnicalLevel], price: float) -> list[Evide
 
 
 def indicator_evidence(indicators: dict[str, Any]) -> list[Evidence]:
-    """Yalnız ortak ve açıkça bağımsız aileleri kullanır.
-
-    Aynı momentum ailesindeki RSI/MACD/SMI değerleri ayrı ayrı üç oy sayılmaz;
-    önce aile içinde birleştirilir. Eksik veri yön değil belirsizlik üretir.
-    """
     result: list[Evidence] = []
     momentum_votes: list[float] = []
     for key in ("RSI", "MACD_HIST", "SMI"):
@@ -260,7 +267,6 @@ def indicator_evidence(indicators: dict[str, Any]) -> list[Evidence]:
 
 
 def summarize_evidence(evidence: Iterable[Evidence]) -> dict[str, Any]:
-    """Bağımsız aileleri çift saymadan yön ve belirsizlik özetini üretir."""
     groups: dict[str, list[Evidence]] = defaultdict(list)
     for item in evidence:
         groups[item.independent_group or item.family].append(item)
@@ -269,7 +275,6 @@ def summarize_evidence(evidence: Iterable[Evidence]) -> dict[str, Any]:
     represented = 0
     for items in groups.values():
         represented += 1
-        # Aynı bağımsız grupta en güçlü gözlem temsilci olur.
         representative = max(items, key=lambda item: item.strength * item.confidence * item.freshness)
         scores[representative.direction.value] += representative.strength * representative.confidence * representative.freshness
 
