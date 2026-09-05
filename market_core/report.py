@@ -111,10 +111,7 @@ def _summary_text(state: MarketState) -> str:
 
 
 def build_report_contract(state: MarketState) -> dict[str, Any]:
-    """Presentation/Telegram/PNG katmanlarının ortak rapor sözleşmesini üretir.
-
-    Bu fonksiyon canonical state'te olmayan hiçbir teknik seviye üretmez.
-    """
+    """Presentation/Telegram/PNG katmanlarının ortak rapor sözleşmesini üretir."""
     label = interval_label(state.interval)
     nearest_below = _nearest(state.levels, state.price, "BELOW")
     nearest_above = _nearest(state.levels, state.price, "ABOVE")
@@ -141,10 +138,18 @@ def build_report_contract(state: MarketState) -> dict[str, Any]:
             "summary": _summary_text(state),
             "current_state": {
                 "structure": interpretation.get("current_state"),
-                "regime": interpretation.get("regime"),
+                "regime": state.regime.get("state") if state.regime else None,
                 "evidence": interpretation.get("evidence"),
-                "relative_strength": interpretation.get("relative_strength"),
-                "multi_timeframe": interpretation.get("multi_timeframe"),
+                "relative_strength": (
+                    f"{state.relative_strength.get('state')} ({state.relative_strength.get('benchmark')})"
+                    if state.relative_strength.get("available")
+                    else None
+                ),
+                "multi_timeframe": (
+                    state.multi_timeframe.get("state")
+                    if state.multi_timeframe.get("available")
+                    else None
+                ),
             },
             "location": {
                 "text": interpretation.get("location"),
