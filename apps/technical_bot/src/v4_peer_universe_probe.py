@@ -12,13 +12,6 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from market_core.peer_benchmarks import build_hierarchical_peer_benchmark  # noqa: E402
-from market_core.sector_profiles import profile_for_sector  # noqa: E402
-from market_core.tradingview_peers import (  # noqa: E402
-    TRADINGVIEW_FIELDS,
-    observations_from_tradingview_frame,
-)
-
 
 _PERCENT_METRICS = {
     "revenue_growth",
@@ -80,6 +73,8 @@ def _json_default(value: Any) -> str:
 
 
 def _metric_label(sector_type: Any, name: str) -> str:
+    from market_core.sector_profiles import profile_for_sector
+
     profile = profile_for_sector(sector_type)
     for rule in profile.metric_rules:
         if rule.metric == name:
@@ -99,7 +94,33 @@ def _format_number(name: str, value: Any) -> str:
     return f"{number:.2f}"
 
 
+def _format_delta(name: str, value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if name in _PERCENT_METRICS:
+        return f"{number * 100:+.1f} puan"
+    if name in _MULTIPLE_METRICS:
+        return f"{number:+.2f}x"
+    return f"{number:+.2f}"
+
+
+def _scope_label(metric: dict[str, Any]) -> str:
+    scope = str(metric.get("scope") or "")
+    if scope == "INDUSTRY_PEER_GROUP":
+        return "doğrudan eş grup"
+    if scope == "PROVIDER_SECTOR_FALLBACK":
+        label = str(metric.get("benchmark_label") or "sektör")
+        return f"{label} sektörü (eş grup örneklemi yetersiz)"
+    if scope == "BROAD_SECTOR_FALLBACK":
+        return "geniş analiz ailesi (sektör örneklemi yetersiz)"
+    return "karşılaştırma grubu"
+
+
 def _summary_text(observation: Any, benchmark: dict[str, Any]) -> str:
+    from market_core.sector_profiles import profile_for_sector
+
     profile = profile_for_sector(observation.sector_type)
     metadata = observation.metadata
     synthesis = benchmark.get("synthesis") or {}
@@ -127,37 +148,35 @@ def _summary_text(observation: Any, benchmark: dict[str, Any]) -> str:
         )
     )
     for name, metric in available[:8]:
-        scope = (
-            "eş grup"
-            if metric.get("scope") == "INDUSTRY_PEER_GROUP"
-            else "geniş sektör (eş grup verisi yetersiz)"
-        )
+        delta = _format_delta(name, metric.get("delta_to_median"))
+        delta_text = f" · medyana fark {delta}" if delta else ""
         lines.append(
             "• "
             f"{_metric_label(observation.sector_type, name)}: "
             f"şirket {_format_number(name, metric.get('target_value'))} · "
-            f"medyan {_format_number(name, metric.get('peer_median'))} · "
+            f"medyan {_format_number(name, metric.get('peer_median'))}{delta_text} · "
             f"ortalama {_format_number(name, metric.get('peer_mean'))} · "
             f"{_POSITION_TR.get(str(metric.get('position')), metric.get('position'))} · "
             f"{_FAVOURABILITY_TR.get(str(metric.get('favourability')), metric.get('favourability'))} · "
-            f"{scope}"
+            f"{_scope_label(metric)}"
         )
 
     if not available:
         lines.append("• Sağlıklı karşılaştırma için yeterli ortak metrik/eş şirket bulunamadı.")
 
-    fallback_metrics = benchmark.get("fallback_metrics") or []
-    if fallback_metrics:
-        lines.extend(
-            [
-                "",
-                "Veri kapsamı notu:",
-                (
-                    "• Bazı metriklerde alt sektör/eş grup örneklemi yetersiz olduğu için geniş sektör "
-                    "karşılaştırması açıkça işaretlenerek kullanıldı."
-                ),
-            ]
+    provider_fallbacks = benchmark.get("provider_sector_fallback_metrics") or []
+    broad_fallbacks = benchmark.get("broad_sector_fallback_metrics") or []
+    if provider_fallbacks or broad_fallbacks:
+        lines.extend(["", "Veri kapsamı notu:"])
+    if provider_fallbacks:
+        lines.append(
+            "• Bazı metriklerde doğrudan eş şirket sayısı yetersiz olduğu için önce aynı provider sektörü kullanıldı."
         )
+    if broad_fallbacks:
+        lines.append(
+            "• Provider sektörü de yetersiz kalan metriklerde geniş analiz ailesine son çare olarak geçildi."
+        )
+
     lines.extend(
         [
             "",
@@ -174,6 +193,12 @@ def _summary_text(observation: Any, benchmark: dict[str, Any]) -> str:
 
 
 def main() -> int:
+    from market_core.peer_benchmarks import build_hierarchical_peer_benchmark
+    from market_core.tradingview_peers import (
+        TRADINGVIEW_FIELDS,
+        observations_from_tradingview_frame,
+    )
+
     parser = argparse.ArgumentParser(description="V4 BIST sektör/eş şirket karşılaştırma probu")
     parser.add_argument("symbols", nargs="+", help="Karşılaştırılacak BIST sembolleri")
     parser.add_argument("--limit", type=int, default=1000)
