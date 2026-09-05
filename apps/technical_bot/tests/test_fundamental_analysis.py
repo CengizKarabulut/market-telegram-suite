@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.bot_runner_fundamental import _validate_ticker
 from src.fundamental_analysis import (
     Factor,
     FundamentalReport,
@@ -16,7 +17,6 @@ from src.fundamental_analysis import (
     build_fundamental_report,
 )
 from src.fundamental_card import render_fundamental_card
-from src.bot_runner_fundamental import _validate_ticker
 
 
 PERIODS = ["2026/06", "2026/03", "2025/12", "2025/09", "2025/06", "2025/03", "2024/12", "2024/09"]
