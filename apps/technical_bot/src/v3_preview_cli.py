@@ -9,7 +9,9 @@ from src.stock_dashboard import (
     download_benchmark,
     download_prices,
 )
+from src.v3_card import render_v3_card
 from src.v3_preview import build_v3_preview, write_preview_json
+from src.v3_telegram import send_v3_preview
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,6 +22,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--provider", default="AUTO")
     parser.add_argument("--benchmark", default="XU100")
     parser.add_argument("--output", default="reports/v3_preview")
+    parser.add_argument(
+        "--telegram",
+        action="store_true",
+        help="Üretilen V3 metin + kartı teknik Telegram hedefine gönderir.",
+    )
     return parser.parse_args()
 
 
@@ -55,11 +62,22 @@ def main() -> int:
     state_path, report_path = write_preview_json(state, report, target, ticker)
     text_path = target / f"{ticker}_telegram_v3.txt"
     text_path.write_text(text + "\n", encoding="utf-8")
+    card_path = render_v3_card(report, target / f"{ticker}_card_v3.png")
+
+    if args.telegram:
+        send_v3_preview(
+            text,
+            card_path,
+            symbol=ticker,
+            interval_label=str(report.get("interval_label") or args.interval),
+        )
+        print("Telegram: V3 preview metni ve kartı gönderildi.")
 
     print(text)
     print(f"\nMarketState: {state_path}")
     print(f"Report: {report_path}")
     print(f"Telegram preview: {text_path}")
+    print(f"V3 card: {card_path}")
     return 0
 
 
