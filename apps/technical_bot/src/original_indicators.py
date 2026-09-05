@@ -39,7 +39,6 @@ def tv_rma(values: pd.Series, length: int) -> pd.Series:
     if length <= 0:
         return out
     arr = source.to_numpy(dtype=float)
-    valid = np.isfinite(arr)
     if len(arr) < length:
         return out
     for end in range(length - 1, len(arr)):
