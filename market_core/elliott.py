@@ -105,10 +105,6 @@ def impulse_candidates(
     timeframe: str = "1d",
     max_candidates: int = 4,
 ) -> list[WaveHypothesis]:
-    """Son pivot dizisinden standart impuls adayları üretir.
-
-    Tek kesin sayım yerine hard-rule geçerli adayları confidence sırasıyla döndürür.
-    """
     candidates: list[WaveHypothesis] = []
     if len(pivots) < 6:
         return candidates
@@ -124,7 +120,6 @@ def impulse_candidates(
         recency = 1.0 / (1.0 + max(pivots[-1].index - points[-1].index, 0) / 10.0)
         degree_bonus = sum(item.degree == "intermediate" for item in points) / 6 * 0.08
         confidence = min(0.45 + soft_score * 0.45 + recency * 0.08 + degree_bonus, 0.99)
-        invalidation = points[0].price
         hypothesis = WaveHypothesis(
             id=f"impulse-{points[0].index}-{points[-1].index}-{direction.lower()}",
             timeframe=timeframe,
@@ -132,13 +127,13 @@ def impulse_candidates(
             pattern_type="IMPULSE_12345",
             direction=direction,
             pivot_indices=[item.index for item in points],
-            active_wave="5_COMPLETE_OR_EXTENDING",
+            active_wave="IMPULSE_COMPLETE",
             confidence=confidence,
             hard_rule_valid=True,
             soft_score=soft_score,
-            invalidation_level=invalidation,
-            target_zones=[_target_zone(points, direction)],
-            reasons=reasons,
+            invalidation_level=points[0].price,
+            target_zones=[],
+            reasons=reasons + ["Wave 5 teyitli pivotla tamamlandığı için bu sayım aktif hedef üretmez."],
             warnings=warnings,
         )
         candidates.append(hypothesis)
@@ -149,7 +144,6 @@ def impulse_candidates(
 
 
 def abc_candidates(pivots: list[Pivot], timeframe: str = "1d", max_candidates: int = 4) -> list[WaveHypothesis]:
-    """Basit ABC zigzag/flat adaylarını üretir."""
     results: list[WaveHypothesis] = []
     if len(pivots) < 4:
         return results
@@ -186,13 +180,13 @@ def abc_candidates(pivots: list[Pivot], timeframe: str = "1d", max_candidates: i
                 pattern_type=pattern,
                 direction=direction,
                 pivot_indices=[item.index for item in points],
-                active_wave="C_COMPLETE_OR_EXTENDING",
+                active_wave="ABC_COMPLETE",
                 confidence=confidence,
                 hard_rule_valid=True,
                 soft_score=fib_bonus,
                 invalidation_level=p0,
                 target_zones=[],
-                reasons=reasons,
+                reasons=reasons + ["C pivotu teyitli olduğundan sayım tamamlanmış yapı bağlamıdır."],
             )
         )
     results.sort(key=lambda item: item.confidence, reverse=True)
@@ -202,7 +196,6 @@ def abc_candidates(pivots: list[Pivot], timeframe: str = "1d", max_candidates: i
 
 
 def build_wave_hypotheses(pivots: list[Pivot], timeframe: str = "1d", max_total: int = 5) -> list[WaveHypothesis]:
-    """Primary + alternate Elliott hipotezlerini ortak confidence sırasıyla döndürür."""
     candidates = impulse_candidates(pivots, timeframe=timeframe) + abc_candidates(pivots, timeframe=timeframe)
     candidates.sort(key=lambda item: item.confidence, reverse=True)
     for rank, item in enumerate(candidates[:max_total], start=1):
