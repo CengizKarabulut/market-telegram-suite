@@ -8,9 +8,9 @@ on:
         required: true
         default: "ZGYO"
       financial_group:
-        description: "İş Yatırım finansal grup kodu"
+        description: "İş Yatırım finansal grup kodu (AUTO / XI_29 / UFRS)"
         required: true
-        default: "XI_29"
+        default: "AUTO"
   push:
     branches:
       - rebuild/v3-market-analysis-engine
@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 30
     env:
       PROBE_SYMBOL: ${{ github.event.inputs.symbol || 'ZGYO' }}
-      PROBE_FINANCIAL_GROUP: ${{ github.event.inputs.financial_group || 'XI_29' }}
+      PROBE_FINANCIAL_GROUP: ${{ github.event.inputs.financial_group || 'AUTO' }}
     steps:
       - uses: actions/checkout@v6
 
