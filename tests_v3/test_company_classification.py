@@ -15,6 +15,29 @@ class CompanyClassificationTests(unittest.TestCase):
         self.assertTrue(result.peer_group.startswith("INDUSTRY_"))
         self.assertEqual(result.confidence, "HIGH")
 
+    def test_gyo_company_name_overrides_generic_real_estate_development_industry(self):
+        result = classify_company(
+            symbol="ZGYO",
+            sector="Finance",
+            industry="Real Estate Development",
+            company_name="Z Gayrimenkul Yatırım Ortaklığı A.Ş.",
+        )
+        self.assertEqual(result.sector_type, SectorType.GYO)
+        self.assertEqual(result.peer_group, "ARCHETYPE_GYO")
+        self.assertEqual(
+            result.metadata["archetype_reason"],
+            "real_estate_investment_trust_company_name_match",
+        )
+
+    def test_generic_real_estate_developer_is_not_assumed_to_be_gyo(self):
+        result = classify_company(
+            symbol="DEV",
+            sector="Finance",
+            industry="Real Estate Development",
+            company_name="Example Property Development A.Ş.",
+        )
+        self.assertEqual(result.sector_type, SectorType.INDUSTRIAL)
+
     def test_bank_is_not_treated_as_industrial(self):
         result = classify_company(
             symbol="AKBNK",
