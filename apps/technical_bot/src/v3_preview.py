@@ -4,7 +4,7 @@ import importlib
 import math
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 
@@ -83,6 +83,8 @@ def build_v3_preview(
     benchmark_data: pd.DataFrame | None = None,
     benchmark_name: str = "XU100",
     multi_timeframe_states: dict[str, dict[str, Any]] | None = None,
+    scanner_rows: list[Mapping[str, Any]] | None = None,
+    ma_level_rows: list[Mapping[str, Any]] | None = None,
 ) -> tuple[Any, dict[str, Any], str]:
     state = build_market_state(
         data,
@@ -93,6 +95,8 @@ def build_v3_preview(
         benchmark_data=benchmark_data,
         benchmark_name=benchmark_name,
         multi_timeframe_states=multi_timeframe_states,
+        scanner_rows=scanner_rows,
+        ma_level_rows=ma_level_rows,
     )
     report = build_report_contract(state)
     return state, report, format_telegram_preview(report)
