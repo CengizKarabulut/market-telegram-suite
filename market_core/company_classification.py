@@ -47,16 +47,20 @@ def classify_company(
     symbol: str,
     sector: str | None,
     industry: str | None,
+    company_name: str | None = None,
     source: str = "provider_info",
     explicit_sector_type: SectorType | None = None,
     explicit_peer_group: str | None = None,
 ) -> CompanyClassification:
-    """Map provider company metadata to an accounting archetype and peer group.
+    """Map provider metadata to an accounting archetype and peer group.
 
     ``sector_type`` controls which accounting/valuation family is safe to use.
     ``peer_group`` is intentionally more granular and normally follows provider
-    ``industry`` so a retailer is not benchmarked against an airline merely
-    because both are non-financial companies.
+    ``industry``. Regulated entity names are also accepted as classification
+    evidence because some BIST providers label a GYO merely as "Real Estate
+    Development" even though the legal company name explicitly says
+    ``Gayrimenkul Yatırım Ortaklığı``. The name is *not* used to invent a peer
+    group; it only prevents the wrong accounting archetype from being applied.
     """
     normalized_symbol = symbol.strip().upper()
     if not normalized_symbol:
@@ -64,14 +68,18 @@ def classify_company(
 
     sector_clean = _clean(sector)
     industry_clean = _clean(industry)
-    combined = _fold(" ".join(item for item in (sector_clean, industry_clean) if item))
+    company_name_clean = _clean(company_name)
+    provider_combined = _fold(" ".join(item for item in (sector_clean, industry_clean) if item))
+    classification_combined = _fold(
+        " ".join(item for item in (sector_clean, industry_clean, company_name_clean) if item)
+    )
 
     if explicit_sector_type is not None:
         sector_type = explicit_sector_type
         confidence = "EXPLICIT"
         archetype_reason = "explicit_override"
     elif _contains_any(
-        combined,
+        classification_combined,
         (
             "gayrimenkul yatirim ortakligi",
             "gayrimenkul yatirim ortakliklari",
@@ -81,9 +89,21 @@ def classify_company(
     ):
         sector_type = SectorType.GYO
         confidence = "HIGH"
-        archetype_reason = "real_estate_investment_trust_match"
+        archetype_reason = (
+            "real_estate_investment_trust_provider_match"
+            if _contains_any(
+                provider_combined,
+                (
+                    "gayrimenkul yatirim ortakligi",
+                    "gayrimenkul yatirim ortakliklari",
+                    "real estate investment trust",
+                    "reit",
+                ),
+            )
+            else "real_estate_investment_trust_company_name_match"
+        )
     elif _contains_any(
-        combined,
+        classification_combined,
         (
             "banka",
             "bankacilik",
@@ -98,7 +118,7 @@ def classify_company(
         confidence = "HIGH"
         archetype_reason = "bank_match"
     elif _contains_any(
-        combined,
+        classification_combined,
         (
             "holding",
             "investment holding",
@@ -109,7 +129,7 @@ def classify_company(
         confidence = "HIGH"
         archetype_reason = "holding_match"
     elif _contains_any(
-        combined,
+        classification_combined,
         (
             "sigorta",
             "insurance",
@@ -125,7 +145,7 @@ def classify_company(
         confidence = "HIGH"
         archetype_reason = "insurance_match"
     elif _contains_any(
-        combined,
+        classification_combined,
         (
             "finansal kiralama",
             "leasing",
@@ -158,6 +178,15 @@ def classify_company(
     if explicit_peer_group:
         peer_group = explicit_peer_group.strip().upper()
         peer_group_source = "explicit_override"
+    elif (
+        sector_type == SectorType.GYO
+        and archetype_reason == "real_estate_investment_trust_company_name_match"
+    ):
+        # Provider industry such as "Real Estate Development" may mix regulated
+        # GYOs with ordinary developers. Fall back to the accounting archetype
+        # rather than declaring those ordinary developers direct peers.
+        peer_group = "ARCHETYPE_GYO"
+        peer_group_source = "regulated_name_archetype_fallback"
     elif industry_clean:
         peer_group = f"INDUSTRY_{_slug(industry_clean)}"
         peer_group_source = "provider_industry"
@@ -182,6 +211,7 @@ def classify_company(
             "sector_type_is_not_peer_group": True,
             "provider_sector": sector_clean,
             "provider_industry": industry_clean,
+            "company_name": company_name_clean,
         },
     )
 
