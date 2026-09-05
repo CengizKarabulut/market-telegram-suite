@@ -35,6 +35,11 @@ on:
           - AUTO
           - BORSAPY
           - YFINANCE
+      telegram:
+        description: "Deneme sonucunu Telegram'a da gönder"
+        required: true
+        default: true
+        type: boolean
   push:
     branches:
       - rebuild/v3-market-analysis-engine
@@ -59,20 +64,29 @@ jobs:
           cache-dependency-path: apps/technical_bot/requirements.txt
       - name: Bağımlılıkları yükle
         run: python -m pip install --requirement requirements.txt
-      - name: V3 preview üret
+      - name: V3 preview üret ve isteğe bağlı Telegram'a gönder
         env:
           PYTHONPATH: ../..
           PREVIEW_SYMBOL: ${{ github.event.inputs.symbol || 'ZGYO' }}
           PREVIEW_INTERVAL: ${{ github.event.inputs.interval || '1d' }}
           PREVIEW_PERIOD: ${{ github.event.inputs.period || '2y' }}
           PREVIEW_PROVIDER: ${{ github.event.inputs.provider || 'AUTO' }}
-        run: >-
-          python -m src.v3_preview_cli
-          "$PREVIEW_SYMBOL"
-          --interval "$PREVIEW_INTERVAL"
-          --period "$PREVIEW_PERIOD"
-          --provider "$PREVIEW_PROVIDER"
-          --output reports/v3_preview
+          PREVIEW_TELEGRAM: ${{ github.event_name == 'push' || github.event.inputs.telegram == 'true' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TECHNICAL_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TECHNICAL_TOPIC_ID }}
+        run: |
+          args=(
+            "$PREVIEW_SYMBOL"
+            --interval "$PREVIEW_INTERVAL"
+            --period "$PREVIEW_PERIOD"
+            --provider "$PREVIEW_PROVIDER"
+            --output reports/v3_preview
+          )
+          if [ "$PREVIEW_TELEGRAM" = "true" ]; then
+            args+=(--telegram)
+          fi
+          python -m src.v3_preview_cli "${args[@]}"
       - name: Preview artifact yükle
         uses: actions/upload-artifact@v7
         with:
