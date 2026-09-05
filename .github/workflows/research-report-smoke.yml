@@ -7,7 +7,10 @@ on:
     paths:
       - 'apps/technical_bot/src/research_*.py'
       - 'apps/technical_bot/src/fundamental_*.py'
+      - 'apps/technical_bot/src/original_indicators.py'
+      - 'apps/technical_bot/src/moving_average_card.py'
       - 'apps/technical_bot/tests/test_research_engine.py'
+      - 'apps/technical_bot/tests/test_original_indicators.py'
       - '.github/workflows/research-report-smoke.yml'
 
 permissions:
@@ -38,6 +41,7 @@ jobs:
           from pathlib import Path
 
           from src.fundamental_card import render_fundamental_card
+          from src.moving_average_card import render_moving_average_card
           from src.research_card import render_research_card
           from src.research_chart import render_research_chart
           from src.research_risk import build_research_report
@@ -51,9 +55,12 @@ jobs:
               report = build_research_report(ticker)
               summary = render_research_card(report, target / f'{ticker}_arastirma.png')
               fundamental = render_fundamental_card(report.fundamental, target / f'{ticker}_temel.png')
+              ma_image, ma_snapshot = render_moving_average_card(ticker, target / f'{ticker}_ortalamalar.png')
               technical = render_research_chart(ticker, report, target / f'{ticker}_teknik_yapi.png')
+              payload = report.to_dict()
+              payload['moving_averages'] = ma_snapshot
               (target / f'{ticker}_arastirma.json').write_text(
-                  json.dumps(report.to_dict(), ensure_ascii=False, indent=2, default=str) + '\n',
+                  json.dumps(payload, ensure_ascii=False, indent=2, default=str) + '\n',
                   encoding='utf-8',
               )
 
@@ -71,7 +78,9 @@ jobs:
                   raise SystemExit(f'{ticker}: stale/far level leaked into actionable output')
               if len(report.dimensions) != 5:
                   raise SystemExit(f'{ticker}: expected five research dimensions')
-              for image in (summary, fundamental, technical):
+              if len(ma_snapshot['rows']) != 9 or len(ma_snapshot['summaries']) != 3:
+                  raise SystemExit(f'{ticker}: moving-average table is incomplete')
+              for image in (summary, fundamental, ma_image, technical):
                   if image.stat().st_size < 10_000:
                       raise SystemExit(f'{ticker}: unexpectedly small image {image.name}')
 
@@ -85,6 +94,7 @@ jobs:
                   'debt=', report.financial.get('debt_direction'),
                   'valuation=', report.valuation.get('score'), report.valuation.get('scope'),
                   'technical=', report.technical.get('score'), report.technical.get('structure', {}).get('state'),
+                  'ma=', ma_snapshot['summaries'],
                   'main_risk=', None if report.main_risk is None else (report.main_risk.name, report.main_risk.score),
                   'supports=', [(z.low, z.high, z.score, z.status) for z in report.supports],
                   'resistances=', [(z.low, z.high, z.score, z.status) for z in report.resistances],
