@@ -111,6 +111,9 @@ def _role_changes(levels: list[TechnicalLevel]) -> list[dict[str, Any]]:
 
 
 def _summary_text(state: MarketState) -> str:
+    synthesis = state.technical_synthesis or {}
+    if synthesis.get("headline"):
+        return str(synthesis["headline"])
     interpretation = state.interpretation or {}
     if not interpretation.get("available", True):
         return str(interpretation.get("headline") or "Teknik yorum veri kalitesi nedeniyle kullanılamıyor.")
@@ -180,6 +183,7 @@ def build_report_contract(state: MarketState) -> dict[str, Any]:
             },
             "headline": interpretation.get("headline"),
             "summary": _summary_text(state),
+            "technical_synthesis": state.technical_synthesis,
             "current_state": {
                 "structure": interpretation.get("current_state"),
                 "structure_price_position": state.structure.get("price_position"),
@@ -342,6 +346,16 @@ def format_telegram_preview(report: dict[str, Any]) -> str:
         lines.append("")
         lines.append("Dinamik MA destek/direnç taraması:")
         lines.extend(_ma_label(item) for item in ma_levels[:4])
+
+    synthesis = report.get("technical_synthesis") or {}
+    if synthesis.get("headline"):
+        lines.append("")
+        lines.append("Teknik sentez:")
+        lines.append(str(synthesis["headline"]))
+        for conflict in (synthesis.get("conflicts") or [])[:3]:
+            lines.append(f"• Çelişki: {conflict}")
+        for risk in (synthesis.get("risks") or [])[:2]:
+            lines.append(f"• Risk: {risk}")
 
     location = report.get("location", {})
     support = location.get("nearest_support")
