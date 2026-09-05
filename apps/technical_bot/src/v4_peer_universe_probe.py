@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +12,9 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from market_core.peer_benchmarks import build_hierarchical_peer_benchmark
-from market_core.sector_profiles import profile_for_sector
-from market_core.tradingview_peers import (
+from market_core.peer_benchmarks import build_hierarchical_peer_benchmark  # noqa: E402
+from market_core.sector_profiles import profile_for_sector  # noqa: E402
+from market_core.tradingview_peers import (  # noqa: E402
     TRADINGVIEW_FIELDS,
     observations_from_tradingview_frame,
 )
@@ -153,8 +152,10 @@ def _summary_text(observation: Any, benchmark: dict[str, Any]) -> str:
             [
                 "",
                 "Veri kapsamı notu:",
-                "• Bazı metriklerde alt sektör/eş grup örneklemi yetersiz olduğu için geniş sektör "
-                "karşılaştırması açıkça işaretlenerek kullanıldı.",
+                (
+                    "• Bazı metriklerde alt sektör/eş grup örneklemi yetersiz olduğu için geniş sektör "
+                    "karşılaştırması açıkça işaretlenerek kullanıldı."
+                ),
             ]
         )
     lines.extend(
@@ -162,8 +163,10 @@ def _summary_text(observation: Any, benchmark: dict[str, Any]) -> str:
             "",
             "Yorum kuralı:",
             "• Ortalama tek başına kullanılmaz; medyan ve çeyrekler ana referanstır.",
-            "• F/K, F/DD, FD/FAVÖK gibi çarpanlarda düşük/yüksek konum otomatik olarak ucuz/pahalı "
-            "kararı değildir.",
+            (
+                "• F/K, F/DD, FD/FAVÖK gibi çarpanlarda düşük/yüksek konum otomatik olarak ucuz/pahalı "
+                "kararı değildir."
+            ),
             "• Aynı metrik farklı dönem/baz ile raporlanıyorsa karşılaştırma grubundan çıkarılır.",
         ]
     )
