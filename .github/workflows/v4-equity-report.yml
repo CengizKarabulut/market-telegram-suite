@@ -119,16 +119,6 @@ jobs:
             --scanner-state reports/v4_external/taramabot_state.json \
             --ma-watchlist reports/v4_external/ma_watchlist.csv
 
-      - name: Güncel temel analiz ve KAP katmanını üret
-        continue-on-error: true
-        working-directory: apps/technical_bot
-        env:
-          PYTHONPATH: ../..
-        run: |
-          python -m src.v4_fundamental_probe "$APP_SYMBOL" \
-            --financial-group AUTO \
-            --output reports/v4_fundamental_probe
-
       - name: BIST sektör/eş şirket karşılaştırmasını üret
         continue-on-error: true
         working-directory: apps/technical_bot
@@ -138,6 +128,24 @@ jobs:
           python -m src.v4_peer_universe_probe "$APP_SYMBOL" \
             --limit 1000 \
             --output reports/v4_peer_universe
+
+      - name: Güncel temel analiz ve KAP katmanını üret
+        continue-on-error: true
+        working-directory: apps/technical_bot
+        env:
+          PYTHONPATH: ../..
+        shell: bash
+        run: |
+          args=(
+            "$APP_SYMBOL"
+            --financial-group AUTO
+            --output reports/v4_fundamental_probe
+          )
+          classification_file="reports/v4_peer_universe/$APP_SYMBOL/peer_benchmark.json"
+          if [ -f "$classification_file" ]; then
+            args+=(--classification-file "$classification_file")
+          fi
+          python -m src.v4_fundamental_probe "${args[@]}"
 
       - name: Tek paragraf bütünleşik analist görüşünü oluştur
         working-directory: apps/technical_bot
