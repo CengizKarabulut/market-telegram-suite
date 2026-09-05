@@ -25,6 +25,10 @@ from .fundamental_models import (
     SectorType,
     StatementType,
 )
+from .fundamental_period import (
+    PeriodComparative,
+    build_current_period_fundamental_view,
+)
 from .models import (
     Evidence,
     EvidenceDirection,
@@ -57,6 +61,7 @@ __all__ = [
     "MALevelEvidence",
     "MarketState",
     "MetricResult",
+    "PeriodComparative",
     "Pivot",
     "PointInTimeSelection",
     "ScanSignal",
@@ -69,6 +74,7 @@ __all__ = [
     "ValuationState",
     "WaveHypothesis",
     "assemble_ttm",
+    "build_current_period_fundamental_view",
     "build_daily_valuation",
     "build_fundamental_metrics",
     "build_market_state",
