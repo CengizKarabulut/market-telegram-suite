@@ -67,6 +67,17 @@ class MarketStateEngineTests(unittest.TestCase):
         self.assertEqual(len(momentum), 1)
         self.assertEqual(momentum[0].direction, EvidenceDirection.BULLISH)
 
+    def test_plain_location_is_not_directional_vote(self) -> None:
+        state = build_market_state(
+            self._frame(),
+            "TEST",
+            "1d",
+            indicators={"RSI": 50.0, "MACD_HIST": 0.0, "SMI": 0.0, "RVOL": 1.0},
+        )
+        location = [item for item in state.evidence if item.family.startswith("location_")]
+        self.assertTrue(location)
+        self.assertTrue(all(item.direction == EvidenceDirection.NEUTRAL for item in location))
+
     def test_critical_data_quality_hard_gates_interpretation(self) -> None:
         state = build_market_state(
             self._frame(),
@@ -80,10 +91,17 @@ class MarketStateEngineTests(unittest.TestCase):
         self.assertFalse(state.interpretation["available"])
         self.assertEqual(state.interpretation["up_scenario"], [])
         self.assertEqual(state.interpretation["down_scenario"], [])
+        self.assertEqual(state.scenarios, [])
 
     def test_missing_ohlc_is_rejected(self) -> None:
         bad = self._frame().drop(columns=["Low"])
         with self.assertRaisesRegex(ValueError, "Low"):
+            build_market_state(bad, "TEST", "1d")
+
+    def test_nan_last_close_is_rejected(self) -> None:
+        bad = self._frame()
+        bad.loc[bad.index[-1], "Close"] = float("nan")
+        with self.assertRaisesRegex(ValueError, "son kapanış"):
             build_market_state(bad, "TEST", "1d")
 
 
