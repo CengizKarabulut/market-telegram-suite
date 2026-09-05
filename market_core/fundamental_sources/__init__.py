@@ -11,12 +11,16 @@ from .borsapy_adapter import (
     build_snapshot_from_borsapy_tables,
     extract_canonical_period_values,
 )
-from .isyatirim_maps import ISYATIRIM_XI29_GYO_ROW_MAP
+from .isyatirim_maps import (
+    ISYATIRIM_XI29_GENERAL_ROW_MAP,
+    ISYATIRIM_XI29_GYO_ROW_MAP,
+)
 from .kap_metadata import KapFilingMetadata, parse_kap_financial_report_html
 
 __all__ = [
     "CanonicalPeriodValues",
     "CanonicalRowMap",
+    "ISYATIRIM_XI29_GENERAL_ROW_MAP",
     "ISYATIRIM_XI29_GYO_ROW_MAP",
     "KapFilingMetadata",
     "RowSelector",
