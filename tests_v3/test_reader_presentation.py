@@ -35,9 +35,9 @@ class ReaderPresentationTests(unittest.TestCase):
         self.assertNotIn("kama89", lowered)
         self.assertNotIn("wma100", lowered)
         self.assertIn("Analist Görüşü", text)
-        self.assertIn("Önemli fiyat bölgeleri", text)
+        self.assertIn("21.30 ilk toparlanma eşiği", text)
 
-    def test_reader_output_is_paragraph_first_not_raw_metric_dump(self) -> None:
+    def test_reader_output_is_one_cohesive_paragraph(self) -> None:
         report = {
             "symbol": "TEST",
             "interval_label": "günlük",
@@ -56,8 +56,14 @@ class ReaderPresentationTests(unittest.TestCase):
             },
         }
         text = format_reader_telegram(report)
-        self.assertIn("Toparlanma işaretleri", text)
-        self.assertIn("Sonuç:", text)
+        lines = [line for line in text.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 3)
+        paragraph = lines[-1]
+        self.assertIn("Toparlanma işaretleri", paragraph)
+        self.assertIn("Kısa vadeli alım isteği", paragraph)
+        self.assertIn("10.40 aşılmadan", paragraph)
+        self.assertNotIn("Genel görünüm:", text)
+        self.assertNotIn("Sonuç:", text)
         self.assertNotIn("RSI:", text)
         self.assertNotIn("MACD", text)
 
