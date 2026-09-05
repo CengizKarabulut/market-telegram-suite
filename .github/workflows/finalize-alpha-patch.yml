@@ -1,0 +1,53 @@
+name: Finalize AlphaTrend Pine Patch
+
+on:
+  push:
+    branches: [finalize/research-production]
+    paths:
+      - '.finalize-alpha-patch'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: finalize/research-production
+      - name: Apply exact Pine colour ternary
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/technical_bot/src/research_chart.py')
+          text = path.read_text(encoding='utf-8')
+          marker = '    valid_alpha = alpha.notna() & alpha_lag2.notna()\n'
+          insert = (
+              marker
+              + '    alpha_green = ((alpha > alpha_lag2) | '
+                '((alpha == alpha_lag2) & (alpha.shift(1) > alpha.shift(3)))).fillna(False)\n'
+              + '    alpha_red = (valid_alpha & ~alpha_green).fillna(False)\n'
+          )
+          if marker not in text:
+              raise SystemExit('AlphaTrend marker not found')
+          if 'alpha_green = ' not in text:
+              text = text.replace(marker, insert, 1)
+          old_green = 'where=(alpha >= alpha_lag2).fillna(False).to_numpy() & valid_alpha.to_numpy(),'
+          old_red = 'where=(alpha < alpha_lag2).fillna(False).to_numpy() & valid_alpha.to_numpy(),'
+          if old_green not in text or old_red not in text:
+              raise SystemExit('Expected AlphaTrend fill predicates not found')
+          text = text.replace(old_green, 'where=alpha_green.to_numpy() & valid_alpha.to_numpy(),', 1)
+          text = text.replace(old_red, 'where=alpha_red.to_numpy(),', 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Remove one-shot trigger files
+        run: rm -f .finalize-alpha-patch .github/workflows/finalize-alpha-patch.yml
+      - name: Commit exact renderer fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/technical_bot/src/research_chart.py .github/workflows/finalize-alpha-patch.yml .finalize-alpha-patch
+          git commit -m 'Match AlphaTrend Pine fill tie logic'
+          git push origin HEAD:finalize/research-production
