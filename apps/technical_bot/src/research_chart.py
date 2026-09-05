@@ -297,11 +297,13 @@ def render_research_chart(symbol: str, report: ResearchReport, output: Path) -> 
     alpha = view["AlphaTrend"]
     alpha_lag2 = view["AlphaTrendLag2"]
     valid_alpha = alpha.notna() & alpha_lag2.notna()
+    alpha_green = ((alpha > alpha_lag2) | ((alpha == alpha_lag2) & (alpha.shift(1) > alpha.shift(3)))).fillna(False)
+    alpha_red = (valid_alpha & ~alpha_green).fillna(False)
     price_ax.fill_between(
         view.index,
         alpha.to_numpy(),
         alpha_lag2.to_numpy(),
-        where=(alpha >= alpha_lag2).fillna(False).to_numpy() & valid_alpha.to_numpy(),
+        where=alpha_green.to_numpy() & valid_alpha.to_numpy(),
         color=ALPHA_GREEN,
         alpha=1.0,
         interpolate=True,
@@ -311,7 +313,7 @@ def render_research_chart(symbol: str, report: ResearchReport, output: Path) -> 
         view.index,
         alpha.to_numpy(),
         alpha_lag2.to_numpy(),
-        where=(alpha < alpha_lag2).fillna(False).to_numpy() & valid_alpha.to_numpy(),
+        where=alpha_red.to_numpy(),
         color=ALPHA_MAROON,
         alpha=1.0,
         interpolate=True,

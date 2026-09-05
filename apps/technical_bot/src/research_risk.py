@@ -1,16 +1,19 @@
-"""Auditable risk layer for the integrated research command.
+"""Auditable risk and final scoring layer for the integrated research command.
 
-Bank capital strength is a higher-is-better proxy. Official SYR/NPL values are
-never inferred when the provider does not expose them. The build wrapper also
-routes technical scoring through the same original indicator formulas used by
-the chart, so visual and report conclusions cannot diverge.
+Missing evidence is never converted into a neutral-looking risk score. Company
+quality excludes valuation so the independent valuation dimension is not counted
+twice. Research coverage reflects the underlying dimension coverage.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from src import research_engine as core
-from src.research_engine import LevelZone, RiskItem
+from src.research_engine import LevelZone, ResearchDimension, RiskItem
 from src.research_technical import _technical_analysis
+
+MIN_DIMENSION_COVERAGE = 0.50
 
 
 def _risk_engine(
@@ -24,129 +27,205 @@ def _risk_engine(
     risks: list[RiskItem] = []
 
     if profile == "BANK":
-        capital_proxy = fm.get("equity_assets")
-        loan_deposit = fm.get("loans_deposits")
-        bank_score, _ = core._weighted(
+        capital_proxy = core._finite(fm.get("equity_assets"))
+        loan_deposit = core._finite(fm.get("loans_deposits"))
+        bank_score, bank_coverage = core._weighted(
             [
                 (core._score_higher(capital_proxy, 5.0, 14.0), 1.0),
                 (
-                    core._score_lower(
-                        abs((loan_deposit or 0.9) - 0.9),
-                        0.0,
-                        0.5,
-                    ),
+                    core._score_lower(abs(loan_deposit - 0.9), 0.0, 0.5)
+                    if loan_deposit is not None
+                    else None,
                     1.0,
                 ),
             ]
         )
-        bank_risk = 50.0 if bank_score is None else 100.0 - bank_score
-        risks.append(
-            RiskItem(
-                "Banka bilanço riski",
-                round(bank_risk, 1),
-                "Resmi SYR/NPL yoksa özkaynak/aktif ve kredi/mevduat yalnız vekil göstergedir.",
+        if bank_score is not None and bank_coverage > 0:
+            risks.append(
+                RiskItem(
+                    "Banka bilanço riski",
+                    round(100.0 - bank_score, 1),
+                    "Resmi SYR/NPL yoksa özkaynak/aktif ve kredi/mevduat yalnız vekil göstergedir.",
+                )
             )
-        )
     else:
-        nde = fm.get("net_debt_equity")
-        nd_ebitda = fm.get("net_debt_ebitda")
-        current_ratio = fm.get("current_ratio")
-        leverage_score, _ = core._weighted(
+        nde = core._finite(fm.get("net_debt_equity"))
+        nd_ebitda = core._finite(fm.get("net_debt_ebitda"))
+        current_ratio = core._finite(fm.get("current_ratio"))
+        leverage_score, leverage_coverage = core._weighted(
             [
                 (core._score_lower(nde, 0.0, 2.0), 1.0),
                 (core._score_lower(nd_ebitda, 0.0, 4.0), 1.2),
                 (core._score_target(current_ratio, 1.2, 2.8, 0.5, 6.0), 0.8),
             ]
         )
-        leverage_risk = 50.0 if leverage_score is None else 100.0 - leverage_score
+        if leverage_score is not None and leverage_coverage > 0:
+            risks.append(
+                RiskItem(
+                    "Finansal kaldıraç",
+                    round(100.0 - leverage_score, 1),
+                    f"Net borç yönü: {financial.get('debt_direction', '—')}; "
+                    f"net borç/FAVÖK {nd_ebitda if nd_ebitda is not None else '—'}.",
+                )
+            )
+
+    quality_score = core._finite(financial.get("earnings_quality_score"))
+    quality_coverage = core._finite(financial.get("earnings_quality_coverage")) or 0.0
+    if quality_score is not None and quality_coverage >= 0.35:
+        if profile == "BANK":
+            quality_evidence = (
+                f"Net faiz büyümesi {fm.get('net_interest_growth', '—')} · "
+                f"ROE {fm.get('roe', '—')} · gider büyümesi {fm.get('operating_expense_growth', '—')}."
+            )
+        else:
+            quality_evidence = (
+                f"CFO/net kâr {fm.get('cfo_net_income', '—')} · "
+                f"accrual %{fm.get('accrual_ratio', '—')}."
+            )
         risks.append(
             RiskItem(
-                "Finansal kaldıraç",
-                round(leverage_risk, 1),
-                f"Net borç yönü: {financial.get('debt_direction', '—')}; net borç/FAVÖK {nd_ebitda if nd_ebitda is not None else '—'}.",
+                "Kâr kalitesi",
+                round(100.0 - quality_score, 1),
+                quality_evidence,
             )
         )
 
-    quality_score = financial.get("earnings_quality_score")
-    if profile == "BANK":
-        quality_evidence = (
-            f"Net faiz büyümesi {fm.get('net_interest_growth', '—')} · "
-            f"ROE {fm.get('roe', '—')} · gider büyümesi {fm.get('operating_expense_growth', '—')}."
+    valuation_score = core._finite(valuation.get("score"))
+    valuation_coverage = core._finite(valuation.get("coverage")) or 0.0
+    if valuation_score is not None and valuation_coverage >= 0.35:
+        risks.append(
+            RiskItem(
+                "Değerleme hassasiyeti",
+                round(100.0 - valuation_score, 1),
+                f"Karşılaştırma kapsamı: {valuation.get('scope', '—')}.",
+            )
         )
-    else:
-        quality_evidence = (
-            f"CFO/net kâr {fm.get('cfo_net_income', '—')} · accrual %{fm.get('accrual_ratio', '—')}."
-        )
-    risks.append(
-        RiskItem(
-            "Kâr kalitesi",
-            round(50.0 if quality_score is None else 100.0 - float(quality_score), 1),
-            quality_evidence,
-        )
-    )
 
-    valuation_score = valuation.get("score")
-    risks.append(
-        RiskItem(
-            "Değerleme hassasiyeti",
-            round(50.0 if valuation_score is None else 100.0 - float(valuation_score), 1),
-            f"Karşılaştırma kapsamı: {valuation.get('scope', '—')}.",
-        )
-    )
-
-    technical_score = technical.get("score")
+    technical_score = core._finite(technical.get("score"))
     atr_pct = core._finite(technical.get("atr_pct"))
-    support_penalty = 15.0 if not supports else min(float(supports[0].distance_atr) * 4.0, 20.0)
-    technical_risk = 50.0 if technical_score is None else 100.0 - float(technical_score)
-    technical_risk = min(
-        100.0,
-        technical_risk + support_penalty + (10.0 if atr_pct is not None and atr_pct > 5 else 0.0),
-    )
-    divergence = technical.get("latest_rsi_divergence")
-    if divergence and "Bearish" in str(divergence.get("kind")):
-        technical_risk = min(100.0, technical_risk + 8.0)
-    risks.append(
-        RiskItem(
-            "Teknik yapı",
-            round(technical_risk, 1),
-            (
-                f"Yapı {technical.get('structure', {}).get('state', '—')} · ATR %{atr_pct:.1f} · "
-                f"AlphaTrend {technical.get('alpha_trend_state', '—')} · RSI uyumsuzluk {divergence.get('kind') if divergence else 'yok'}"
-                if atr_pct is not None
-                else "Teknik volatilite verisi yetersiz."
-            ),
+    if technical_score is not None:
+        support_penalty = 15.0 if not supports else min(float(supports[0].distance_atr) * 4.0, 20.0)
+        technical_risk = 100.0 - technical_score
+        technical_risk = min(
+            100.0,
+            technical_risk + support_penalty + (10.0 if atr_pct is not None and atr_pct > 5 else 0.0),
         )
-    )
+        divergence = technical.get("latest_rsi_divergence")
+        if divergence and "Bearish" in str(divergence.get("kind")):
+            technical_risk = min(100.0, technical_risk + 8.0)
+        structure = technical.get("structure", {})
+        elliott = technical.get("elliott", {})
+        evidence = (
+            f"Yapı {structure.get('state', '—')} / {structure.get('event', '—')}"
+            f" · ATR %{atr_pct:.1f}" if atr_pct is not None else f"Yapı {structure.get('state', '—')}"
+        )
+        evidence += (
+            f" · AlphaTrend {technical.get('alpha_trend_state', '—')}"
+            f" · RSI uyumsuzluk {divergence.get('kind') if divergence else 'yok'}"
+            f" · Elliott {elliott.get('primary', '—')}"
+        )
+        risks.append(RiskItem("Teknik yapı", round(technical_risk, 1), evidence))
 
     turnover = core._finite(technical.get("average_turnover_20"))
-    if turnover is None:
-        liquidity_risk = 50.0
-    elif turnover < 25_000_000:
-        liquidity_risk = 85.0
-    elif turnover < 100_000_000:
-        liquidity_risk = 55.0
-    else:
-        liquidity_risk = 20.0
-    risks.append(
-        RiskItem(
-            "Likidite",
-            liquidity_risk,
-            f"20 günlük ortalama TL hacim {turnover:,.0f}." if turnover else "TL hacim hesaplanamadı.",
+    if turnover is not None:
+        if turnover < 25_000_000:
+            liquidity_risk = 85.0
+        elif turnover < 100_000_000:
+            liquidity_risk = 55.0
+        else:
+            liquidity_risk = 20.0
+        risks.append(
+            RiskItem(
+                "Likidite",
+                liquidity_risk,
+                f"20 günlük ortalama TL hacim {turnover:,.0f}.",
+            )
         )
-    )
 
     ordered = tuple(sorted(risks, key=lambda item: item.score, reverse=True))
-    return (ordered[0] if ordered else None), ordered
+    main_risk = ordered[0] if ordered and ordered[0].score >= 35.0 else None
+    return main_risk, ordered
+
+
+def _quality_dimension(report) -> ResearchDimension:
+    factors = [
+        factor
+        for factor in report.fundamental.factors
+        if "değerleme" not in factor.name.casefold() and "degerleme" not in factor.name.casefold()
+    ]
+    available = [factor for factor in factors if factor.score is not None]
+    if not available:
+        return ResearchDimension(
+            "Şirket Kalitesi",
+            None,
+            0.0,
+            "VERİ YETERSİZ",
+            "Değerleme hariç şirket kalite faktörlerinde yeterli veri yok.",
+        )
+    used_weight = sum(max(float(factor.coverage), 0.01) for factor in available)
+    score = sum(
+        float(factor.score) / 5.0 * 100.0 * max(float(factor.coverage), 0.01)
+        for factor in available
+    ) / used_weight
+    coverage = sum(float(factor.coverage) for factor in factors) / max(len(factors), 1)
+    return ResearchDimension(
+        "Şirket Kalitesi",
+        round(score, 1),
+        round(coverage, 2),
+        core._label(score, "GÜÇLÜ", "ORTA", "ZAYIF"),
+        "Değerleme hariç sektör uyarlamalı kârlılık, büyüme, bilanço/sermaye ve nakit faktörleri.",
+    )
+
+
+def _coverage_gate_dimension(dimension: ResearchDimension) -> ResearchDimension:
+    coverage = max(0.0, min(1.0, float(dimension.coverage)))
+    if dimension.score is None or coverage >= MIN_DIMENSION_COVERAGE:
+        return replace(dimension, coverage=round(coverage, 2))
+    return replace(
+        dimension,
+        score=None,
+        coverage=round(coverage, 2),
+        label="VERİ YETERSİZ",
+        summary=(
+            f"{dimension.summary} Kapsam %{round(coverage * 100)}; "
+            "bu boyut genel araştırma skoruna katılmadı."
+        ),
+    )
+
+
+def _finalize_dimensions(report):
+    dimensions = list(report.dimensions)
+    if dimensions:
+        dimensions[0] = _quality_dimension(report)
+    dimensions = [_coverage_gate_dimension(dimension) for dimension in dimensions]
+
+    available = [dimension for dimension in dimensions if dimension.score is not None]
+    if available:
+        used_weight = sum(max(float(dimension.coverage), 0.01) for dimension in available)
+        research_score = sum(
+            float(dimension.score) * max(float(dimension.coverage), 0.01)
+            for dimension in available
+        ) / used_weight
+    else:
+        research_score = None
+    coverage = sum(float(dimension.coverage) for dimension in dimensions) / max(len(dimensions), 1)
+    return replace(
+        report,
+        dimensions=tuple(dimensions),
+        research_score=None if research_score is None else round(research_score, 1),
+        coverage=round(coverage, 2),
+    )
 
 
 def build_research_report(symbol: str):
-    """Build through core using the corrected risk and original-indicator technical layers."""
+    """Build the production research report with coverage-aware finalisation."""
     previous_risk = core._risk_engine
     previous_technical = core._technical_analysis
     core._risk_engine = _risk_engine
     core._technical_analysis = _technical_analysis
     try:
-        return core.build_research_report(symbol)
+        report = core.build_research_report(symbol)
     finally:
         core._risk_engine = previous_risk
         core._technical_analysis = previous_technical
+    return _finalize_dimensions(report)
