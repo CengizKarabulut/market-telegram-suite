@@ -48,7 +48,7 @@ def _verified_message(response_payload: dict[str, Any], expected_thread_id: str)
         raise RuntimeError("Telegram Bot API ok=true dönmedi.")
     result = response_payload.get("result")
     if not isinstance(result, dict) or not isinstance(result.get("message_id"), int):
-        raise RuntimeError("Telegram gönderiminde message_id doğrulanamadı.")
+        raise TypeError("Telegram gönderiminde message_id doğrulanamadı.")
     if expected_thread_id:
         actual_thread = result.get("message_thread_id")
         if str(actual_thread) != str(expected_thread_id):
