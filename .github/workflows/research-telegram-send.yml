@@ -45,7 +45,9 @@ jobs:
           from src.research_chart import render_research_chart
           from src.research_risk import build_research_report
           from src.research_telegram import send_research_bundle
+          from src.research_theme import apply_white_theme
 
+          apply_white_theme()
           ticker = os.environ['TICKER'].strip().upper().removesuffix('.IS')
           target = Path('reports/telegram-send') / ticker
           target.mkdir(parents=True, exist_ok=True)
@@ -57,11 +59,20 @@ jobs:
           technical = render_research_chart(ticker, report, target / f'{ticker}_teknik_yapi.png')
           responses = send_research_bundle(summary, fundamental, ma_image, technical, report)
 
+          if len(responses) < 5:
+              raise SystemExit(f'Expected four visuals plus commentary, got {len(responses)} messages')
+          if any('photo' not in response['result'] for response in responses[:4]):
+              raise SystemExit('Telegram order violation: first four messages must be visuals')
+          if any('text' not in response['result'] for response in responses[4:]):
+              raise SystemExit('Telegram order violation: commentary must follow all visuals')
+
           verification = []
-          for response in responses:
+          for index, response in enumerate(responses, start=1):
               result = response['result']
               verification.append(
                   {
+                      'sequence': index,
+                      'kind': 'photo' if 'photo' in result else 'text',
                       'message_id': result['message_id'],
                       'message_thread_id': result.get('message_thread_id'),
                       'chat_id': result.get('chat', {}).get('id'),

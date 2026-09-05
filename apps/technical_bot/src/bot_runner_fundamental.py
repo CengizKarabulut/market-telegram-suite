@@ -20,9 +20,14 @@ from src.research_card import render_research_card
 from src.research_chart import render_research_chart
 from src.research_risk import build_research_report
 from src.research_telegram import send_research_bundle
+from src.research_theme import apply_white_theme
 from src.telegram_bot import VALID_TICKER
 
 _BASE_EXECUTE = base.execute
+
+# One visual language for /temel and /analiz. Pine indicator colours are kept;
+# only research canvas/panel/text colours are changed to the white theme.
+apply_white_theme()
 
 
 def _validate_ticker(args: list[str], command: str = "temel") -> tuple[str | None, str | None]:
@@ -59,10 +64,9 @@ def handle_research(chat_id: int, args: list[str]) -> None:
     if error or ticker is None:
         base.reply(chat_id, error or "Geçersiz sembol.")
         return
-    base.reply(
-        chat_id,
-        f"{ticker} araştırma raporu hazırlanıyor… Temel + bilanço + değerleme + kâr kalitesi + teknik yapı + risk birlikte okunacak.",
-    )
+
+    # Intentionally no pre-report text message here: the user-facing bundle must
+    # open with visuals, followed by analyst commentary.
     report = build_research_report(ticker)
     target = base.REPORTS_DIR / "komut" / ticker
     target.mkdir(parents=True, exist_ok=True)

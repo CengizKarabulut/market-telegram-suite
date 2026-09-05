@@ -11,6 +11,7 @@ on:
       - 'apps/technical_bot/src/moving_average_card.py'
       - 'apps/technical_bot/tests/test_research_engine.py'
       - 'apps/technical_bot/tests/test_research_commentary.py'
+      - 'apps/technical_bot/tests/test_research_output_contract.py'
       - 'apps/technical_bot/tests/test_original_indicators.py'
       - '.github/workflows/research-report-smoke.yml'
 
@@ -41,15 +42,24 @@ jobs:
           import json
           from pathlib import Path
 
+          import matplotlib.image as mpimg
+
           from src.fundamental_card import render_fundamental_card
           from src.moving_average_card import render_moving_average_card
           from src.research_card import render_research_card
           from src.research_chart import render_research_chart
-          from src.research_commentary import commentary_messages, compose_research_commentary
+          from src.research_commentary_rich import commentary_messages, compose_research_commentary
           from src.research_risk import build_research_report
+          from src.research_theme import apply_white_theme
 
+          apply_white_theme()
           root = Path('reports/research-smoke')
           root.mkdir(parents=True, exist_ok=True)
+
+          required_technical_terms = (
+              'Günlük', 'haftalık', 'aylık', 'AlphaTrend', 'Bollinger',
+              'RSI', 'SMI', 'MACD', 'OBV', 'RVOL20', 'ATR', 'Elliott',
+          )
 
           for ticker in ('GARAN', 'ZGYO', 'ASELS'):
               target = root / ticker
@@ -94,9 +104,19 @@ jobs:
                   raise SystemExit(f'{ticker}: analyst commentary paragraph is unexpectedly short')
               if any(len(message) > 3900 for message in messages):
                   raise SystemExit(f'{ticker}: Telegram commentary message exceeds safe length')
+
+              technical_paragraph = dict(commentary).get('TEKNİK YAPI NE DİYOR?', '')
+              for term in required_technical_terms:
+                  if term not in technical_paragraph:
+                      raise SystemExit(f'{ticker}: rich technical commentary missing {term}')
+
               for image in (summary, fundamental, ma_image, technical):
                   if image.stat().st_size < 10_000:
                       raise SystemExit(f'{ticker}: unexpectedly small image {image.name}')
+                  pixels = mpimg.imread(image)
+                  corner = pixels[2, 2, :3]
+                  if float(corner.min()) < 0.94:
+                      raise SystemExit(f'{ticker}: image background is not white: {image.name} {corner}')
 
               print(
                   ticker,
