@@ -51,7 +51,7 @@ def classify_company(
     explicit_sector_type: SectorType | None = None,
     explicit_peer_group: str | None = None,
 ) -> CompanyClassification:
-    """Map provider company metadata to an analysis archetype and peer group.
+    """Map provider company metadata to an accounting archetype and peer group.
 
     ``sector_type`` controls which accounting/valuation family is safe to use.
     ``peer_group`` is intentionally more granular and normally follows provider
@@ -82,15 +82,45 @@ def classify_company(
         sector_type = SectorType.GYO
         confidence = "HIGH"
         archetype_reason = "real_estate_investment_trust_match"
-    elif _contains_any(combined, ("banka", "bankacilik", "banking", "banks")):
+    elif _contains_any(
+        combined,
+        (
+            "banka",
+            "bankacilik",
+            "banking",
+            "banks",
+            "major banks",
+            "regional banks",
+            "savings banks",
+        ),
+    ):
         sector_type = SectorType.BANK
         confidence = "HIGH"
         archetype_reason = "bank_match"
-    elif _contains_any(combined, ("holding", "investment holding")):
+    elif _contains_any(
+        combined,
+        (
+            "holding",
+            "investment holding",
+            "financial conglomerates",
+        ),
+    ):
         sector_type = SectorType.HOLDING
         confidence = "HIGH"
         archetype_reason = "holding_match"
-    elif _contains_any(combined, ("sigorta", "insurance", "emeklilik", "pension")):
+    elif _contains_any(
+        combined,
+        (
+            "sigorta",
+            "insurance",
+            "emeklilik",
+            "pension",
+            "multi line insurance",
+            "property casualty insurance",
+            "life health insurance",
+            "specialty insurers",
+        ),
+    ):
         sector_type = SectorType.INSURANCE
         confidence = "HIGH"
         archetype_reason = "insurance_match"
@@ -103,10 +133,13 @@ def classify_company(
             "factoring",
             "araci kurum",
             "brokerage",
+            "investment banks brokers",
             "menkul deger",
             "portfoy yonetim",
             "asset management",
+            "investment managers",
             "consumer finance",
+            "finance rental leasing",
             "finansman sirket",
         ),
     ):
