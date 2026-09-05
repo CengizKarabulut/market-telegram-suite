@@ -4,7 +4,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
+from matplotlib import pyplot as plt
 from matplotlib.patches import FancyBboxPatch
 
 
