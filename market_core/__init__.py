@@ -6,6 +6,7 @@ başlangıç noktasıdır. V3 tamamlanana kadar mevcut uygulamaları değiştirm
 
 from .engine import build_market_state
 from .models import (
+    Evidence,
     EvidenceDirection,
     LevelClass,
     LevelLifecycle,
@@ -18,6 +19,7 @@ from .models import (
 )
 
 __all__ = [
+    "Evidence",
     "EvidenceDirection",
     "LevelClass",
     "LevelLifecycle",
