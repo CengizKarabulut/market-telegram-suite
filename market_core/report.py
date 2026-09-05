@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .models import LevelClass, LevelLifecycle, MarketState, TechnicalLevel
@@ -10,6 +11,7 @@ INTERVAL_LABELS = {
     "5m": "5 dakikalık",
     "15m": "15 dakikalık",
     "30m": "30 dakikalık",
+    "45m": "45 dakikalık",
     "1h": "saatlik",
     "2h": "2 saatlik",
     "4h": "4 saatlik",
@@ -110,6 +112,31 @@ def _summary_text(state: MarketState) -> str:
     return " ".join(piece for piece in pieces if piece)
 
 
+def _scanner_payload(state: MarketState) -> list[dict[str, Any]]:
+    rows = list(state.scanner_evidence or [])
+    rows.sort(
+        key=lambda item: (
+            str(item.get("state", "")) not in {"NEW", "ACTIVE", "CONFIRMED"},
+            item.get("age_bars") if item.get("age_bars") is not None else 10**9,
+            str(item.get("timeframe", "")),
+        )
+    )
+    return rows[:12]
+
+
+def _ma_level_payload(state: MarketState) -> list[dict[str, Any]]:
+    rows = list(state.ma_level_evidence or [])
+    rows.sort(
+        key=lambda item: (
+            abs(float(item.get("distance_atr")))
+            if item.get("distance_atr") is not None and math.isfinite(float(item.get("distance_atr")))
+            else math.inf,
+            -float(item.get("zone_score") or 0.0),
+        )
+    )
+    return rows[:12]
+
+
 def build_report_contract(state: MarketState) -> dict[str, Any]:
     """Presentation/Telegram/PNG katmanlarının ortak rapor sözleşmesini üretir."""
     label = interval_label(state.interval)
@@ -133,11 +160,14 @@ def build_report_contract(state: MarketState) -> dict[str, Any]:
                 "wave": bool(state.wave_hypotheses),
                 "relative_strength": bool(state.relative_strength.get("available")),
                 "multi_timeframe": bool(state.multi_timeframe.get("available")),
+                "scanner_evidence": bool(state.scanner_evidence),
+                "ma_level_evidence": bool(state.ma_level_evidence),
             },
             "headline": interpretation.get("headline"),
             "summary": _summary_text(state),
             "current_state": {
                 "structure": interpretation.get("current_state"),
+                "structure_price_position": state.structure.get("price_position"),
                 "regime": state.regime.get("state") if state.regime else None,
                 "evidence": interpretation.get("evidence"),
                 "relative_strength": (
@@ -156,6 +186,8 @@ def build_report_contract(state: MarketState) -> dict[str, Any]:
                 "nearest_support": _level_payload(nearest_below) if nearest_below else None,
                 "nearest_resistance": _level_payload(nearest_above) if nearest_above else None,
             },
+            "scanner_evidence": _scanner_payload(state),
+            "ma_support_resistance": _ma_level_payload(state),
             "wave": _wave_payload(state),
             "scenarios": {
                 "up": _scenario_payload(state, "UP"),
@@ -179,6 +211,41 @@ def build_report_contract(state: MarketState) -> dict[str, Any]:
     )
 
 
+def _fmt_number(value: Any, digits: int = 2) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    return f"{number:.{digits}f}" if math.isfinite(number) else "—"
+
+
+def _scanner_label(item: dict[str, Any]) -> str:
+    side = {"BUY": "AL adayı", "SELL": "SAT adayı", "NEUTRAL": "nötr"}.get(
+        str(item.get("side", "NEUTRAL")), str(item.get("side", ""))
+    )
+    code = item.get("scanner_code") or item.get("scanner_name") or "Tarama"
+    timeframe = interval_label(str(item.get("timeframe") or ""))
+    age = item.get("age_bars")
+    age_text = f" · {age} bar önce" if age is not None else ""
+    return f"• {timeframe} {code}: {side}{age_text}"
+
+
+def _ma_label(item: dict[str, Any]) -> str:
+    side = "destek" if item.get("side") == "SUPPORT" else "direnç" if item.get("side") == "RESISTANCE" else "seviye"
+    timeframe = interval_label(str(item.get("timeframe") or ""))
+    low = item.get("zone_low")
+    high = item.get("zone_high")
+    mid = item.get("zone_mid")
+    if low is not None and high is not None:
+        zone = f"{_fmt_number(low)}–{_fmt_number(high)}"
+    else:
+        zone = _fmt_number(mid)
+    quality = item.get("zone_quality") or ""
+    ma_list = ", ".join(item.get("ma_list") or [])
+    suffix = " · ".join(part for part in (quality, ma_list) if part)
+    return f"• {timeframe} {side}: {zone}" + (f" · {suffix}" if suffix else "")
+
+
 def format_telegram_preview(report: dict[str, Any]) -> str:
     """Yeni presentation sözleşmesinden kompakt, interval-aware Telegram metni."""
     if not report.get("availability", {}).get("analysis", True):
@@ -189,17 +256,23 @@ def format_telegram_preview(report: dict[str, Any]) -> str:
 
     symbol = report.get("symbol", "—")
     label = report.get("interval_label", report.get("interval", ""))
-    price = float(report.get("price") or 0.0)
-    change = float(report.get("change_pct") or 0.0)
+    price = _fmt_number(report.get("price"))
+    change_raw = report.get("change_pct")
+    try:
+        change = float(change_raw)
+        change_text = f"%{change:+.2f}" if math.isfinite(change) else "—"
+    except (TypeError, ValueError):
+        change_text = "—"
     lines = [
         f"{symbol} — V3 Teknik Durum ({label})",
-        f"Fiyat: {price:.2f} · Değişim: %{change:+.2f}",
+        f"Fiyat: {price} · Değişim: {change_text}",
         "",
         str(report.get("headline") or ""),
     ]
     current = report.get("current_state", {})
     for key, title in (
         ("structure", "Yapı"),
+        ("structure_price_position", "Fiyat konumu"),
         ("regime", "Rejim"),
         ("relative_strength", "Göreceli güç"),
         ("multi_timeframe", "Çoklu zaman dilimi"),
@@ -208,22 +281,34 @@ def format_telegram_preview(report: dict[str, Any]) -> str:
         if value:
             lines.append(f"{title}: {value}")
 
+    scanner = report.get("scanner_evidence") or []
+    if scanner:
+        lines.append("")
+        lines.append("Taramabot durumu:")
+        lines.extend(_scanner_label(item) for item in scanner[:4])
+
+    ma_levels = report.get("ma_support_resistance") or []
+    if ma_levels:
+        lines.append("")
+        lines.append("Dinamik MA destek/direnç taraması:")
+        lines.extend(_ma_label(item) for item in ma_levels[:4])
+
     location = report.get("location", {})
     support = location.get("nearest_support")
     resistance = location.get("nearest_resistance")
     if support or resistance:
         lines.append("")
-        lines.append("Yakın seviyeler:")
+        lines.append("Birleşik yakın seviyeler:")
         if support:
-            lines.append(f"• Alt referans {float(support['value']):.2f} — {support['role']}")
+            lines.append(f"• Alt referans {_fmt_number(support['value'])} — {support['role']}")
         if resistance:
-            lines.append(f"• Üst referans {float(resistance['value']):.2f} — {resistance['role']}")
+            lines.append(f"• Üst referans {_fmt_number(resistance['value'])} — {resistance['role']}")
 
     wave = report.get("wave", {}).get("primary")
     if wave:
         lines.append("")
         lines.append(
-            f"Elliott primary: {wave.get('pattern_type')} / {wave.get('direction')} · güven %{float(wave.get('confidence') or 0) * 100:.0f}"
+            f"Elliott bağlamı: {wave.get('pattern_type')} / {wave.get('direction')} · güven %{float(wave.get('confidence') or 0) * 100:.0f}"
         )
 
     scenarios = report.get("scenarios", {})
@@ -241,7 +326,7 @@ def format_telegram_preview(report: dict[str, Any]) -> str:
         lines.append("")
         lines.append("Rol değiştiren seviyeler:")
         lines.extend(
-            f"• {float(item['value']):.2f} — {item['role']} ({item['lifecycle']})"
+            f"• {_fmt_number(item['value'])} — {item['role']} ({item['lifecycle']})"
             for item in changes[:3]
         )
     return "\n".join(line for line in lines if line is not None).strip()
