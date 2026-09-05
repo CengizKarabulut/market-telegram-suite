@@ -26,7 +26,8 @@ def _clean(value: object) -> str | None:
 
 
 def _fold(value: object) -> str:
-    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = str(value or "").translate(str.maketrans({"ı": "i", "İ": "I"}))
+    text = unicodedata.normalize("NFKD", text)
     text = "".join(char for char in text if not unicodedata.combining(char))
     return re.sub(r"\s+", " ", text.casefold()).strip()
 
