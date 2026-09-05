@@ -8,6 +8,8 @@ from .engine import build_market_state
 from .multi_timeframe import build_multi_timeframe
 from .regime import build_regime
 from .relative_strength import build_relative_strength
+from .report import build_report_contract, format_telegram_preview, interval_label
+from .serialization import market_state_dict, market_state_json, report_json, to_primitive
 from .models import (
     Evidence,
     EvidenceDirection,
@@ -36,4 +38,11 @@ __all__ = [
     "build_multi_timeframe",
     "build_regime",
     "build_relative_strength",
+    "build_report_contract",
+    "format_telegram_preview",
+    "interval_label",
+    "market_state_dict",
+    "market_state_json",
+    "report_json",
+    "to_primitive",
 ]
