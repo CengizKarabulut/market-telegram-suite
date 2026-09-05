@@ -8,9 +8,8 @@ from pathlib import Path
 
 import pandas as pd
 
-import src.bot_runner_fundamental as bot_runner_fundamental
-import src.fundamental_analysis as fundamental_analysis
-import src.fundamental_card as fundamental_card
+from src import bot_runner_fundamental, fundamental_analysis, fundamental_card
+from src.fundamental_quality import apply_coverage_policy
 
 
 PERIODS = ["2026/06", "2026/03", "2025/12", "2025/09", "2025/06", "2025/03", "2024/12", "2024/09"]
@@ -83,6 +82,34 @@ class FundamentalAnalysisTests(unittest.TestCase):
         self.assertIsNotNone(report.overall_score)
         self.assertGreater(report.coverage, 0.7)
         self.assertIn("resmi SYR değildir", report.note)
+
+    def test_low_coverage_factor_is_not_scored(self) -> None:
+        report = fundamental_analysis.FundamentalReport(
+            symbol="GARAN",
+            company_name="GARAN",
+            price=131.4,
+            sector="Banking",
+            profile="BANK",
+            overall_score=4.2,
+            coverage=0.72,
+            factors=(
+                fundamental_analysis.Factor("Kârlılık", 4.5, 1.0, "ROE %+30"),
+                fundamental_analysis.Factor("Bilanço Yapısı", 5.0, 0.33, "Kredi/mevduat —"),
+            ),
+            positives=(
+                "Kârlılık: güçlü görünüm (4.5/5).",
+                "Bilanço Yapısı: güçlü görünüm (5.0/5).",
+            ),
+            risks=(),
+            metrics={},
+            note="test",
+        )
+        adjusted = apply_coverage_policy(report)
+        self.assertEqual(adjusted.factors[0].score, 4.5)
+        self.assertIsNone(adjusted.factors[1].score)
+        self.assertEqual(adjusted.overall_score, 4.5)
+        self.assertNotIn("Bilanço Yapısı: güçlü görünüm (5.0/5).", adjusted.positives)
+        self.assertIn("Veri kapsamı %33", adjusted.factors[1].detail)
 
     def test_mobile_card_renders_png(self) -> None:
         report = fundamental_analysis.FundamentalReport(
