@@ -241,7 +241,7 @@ def indicator_evidence(indicators: dict[str, Any]) -> list[Evidence]:
                 independent_group="momentum",
                 reason="Momentum göstergelerinin canonical değerleri sağlanmadı.",
             )
-        ]
+        )
 
     rvol = _number(indicators.get("RVOL"))
     if rvol is None:
