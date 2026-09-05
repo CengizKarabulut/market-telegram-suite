@@ -21,9 +21,10 @@ def _technical_analysis(symbol: str) -> tuple[dict[str, Any], tuple[LevelZone, .
     if len(daily) < 240:
         raise RuntimeError("Insufficient daily history for technical research")
 
-    pivots = core._pivots(prepared.dropna(subset=["ATR"]))
-    structure = core._structure(prepared.dropna(subset=["ATR"]), pivots)
-    supports, resistances = core._level_zones(prepared.dropna(subset=["ATR"]), pivots)
+    pivot_frame = prepared.dropna(subset=["ATR"])
+    pivots = core._pivots(pivot_frame)
+    structure = core._structure(pivot_frame, pivots)
+    supports, resistances = core._level_zones(pivot_frame, pivots)
     row = daily.iloc[-1]
     price = float(row["Close"])
 
@@ -51,7 +52,9 @@ def _technical_analysis(symbol: str) -> tuple[dict[str, Any], tuple[LevelZone, .
     obv_series = daily["OBV"].dropna()
     obv_change = None
     if len(obv_series) >= 11 and abs(float(obv_series.iloc[-11])) > 1e-9:
-        obv_change = (float(obv_series.iloc[-1]) / abs(float(obv_series.iloc[-11])) - 1.0) * 100.0
+        old_obv = float(obv_series.iloc[-11])
+        new_obv = float(obv_series.iloc[-1])
+        obv_change = (new_obv - old_obv) / abs(old_obv) * 100.0
 
     smi_score = None
     if smi_value is not None and smi_signal is not None:
