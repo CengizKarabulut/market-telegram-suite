@@ -13,6 +13,8 @@ from src import research_engine as core
 from src.research_engine import LevelZone, ResearchDimension, RiskItem
 from src.research_technical import _technical_analysis
 
+MIN_DIMENSION_COVERAGE = 0.50
+
 
 def _risk_engine(
     profile: str,
@@ -175,10 +177,27 @@ def _quality_dimension(report) -> ResearchDimension:
     )
 
 
+def _coverage_gate_dimension(dimension: ResearchDimension) -> ResearchDimension:
+    coverage = max(0.0, min(1.0, float(dimension.coverage)))
+    if dimension.score is None or coverage >= MIN_DIMENSION_COVERAGE:
+        return replace(dimension, coverage=round(coverage, 2))
+    return replace(
+        dimension,
+        score=None,
+        coverage=round(coverage, 2),
+        label="VERİ YETERSİZ",
+        summary=(
+            f"{dimension.summary} Kapsam %{round(coverage * 100)}; "
+            "bu boyut genel araştırma skoruna katılmadı."
+        ),
+    )
+
+
 def _finalize_dimensions(report):
     dimensions = list(report.dimensions)
     if dimensions:
         dimensions[0] = _quality_dimension(report)
+    dimensions = [_coverage_gate_dimension(dimension) for dimension in dimensions]
 
     available = [dimension for dimension in dimensions if dimension.score is not None]
     if available:
