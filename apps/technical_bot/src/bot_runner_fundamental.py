@@ -12,6 +12,7 @@ from pathlib import Path
 from src import bot_runner as base
 from src.fundamental_analysis import build_fundamental_report
 from src.fundamental_card import render_fundamental_card
+from src.fundamental_quality import apply_coverage_policy
 from src.fundamental_telegram import send_fundamental_card
 from src.telegram_bot import VALID_TICKER
 
@@ -35,7 +36,7 @@ def handle_fundamental(chat_id: int, args: list[str]) -> None:
         base.reply(chat_id, error or "Geçersiz sembol.")
         return
     base.reply(chat_id, f"{ticker} temel analiz kartı hazırlanıyor…")
-    report = build_fundamental_report(ticker)
+    report = apply_coverage_policy(build_fundamental_report(ticker))
     target = base.REPORTS_DIR / "komut" / ticker
     target.mkdir(parents=True, exist_ok=True)
     image = render_fundamental_card(report, target / f"{ticker}_temel.png")
