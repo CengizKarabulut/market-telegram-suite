@@ -25,6 +25,14 @@ VALUATION_METRICS = (
     "price_to_nav",
     "nav_discount",
 )
+VALUATION_LABELS = {
+    "pe": "F/K",
+    "price_to_book": "F/DD",
+    "ev_to_ebitda": "FD/FAVÖK",
+    "price_to_sales": "Fiyat/Satışlar",
+    "price_to_nav": "Fiyat/NAD",
+    "nav_discount": "NAD iskontosu",
+}
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -125,6 +133,31 @@ def _peer_sentences(peer_payload: Mapping[str, Any], limit: int = 3) -> list[str
     return _dedupe([comment for _, comment in rows[:limit]])
 
 
+def _valuation_sentence(valuation: Mapping[str, Any]) -> str:
+    if not valuation.get("available"):
+        return "Değerleme tarafında sağlıklı ve karşılaştırılabilir güncel çarpan verisi bulunmadığı için bu eksende kesin yorum yapılmıyor."
+    metrics = valuation.get("metrics") or {}
+    visible: list[str] = []
+    for name in VALUATION_METRICS:
+        value = _finite(metrics.get(name)) if isinstance(metrics, Mapping) else None
+        if value is None:
+            continue
+        label = VALUATION_LABELS.get(name, name)
+        if name == "nav_discount":
+            visible.append(f"{label} %{value * 100:.1f}".replace(".", ","))
+        else:
+            visible.append(f"{label} {value:.2f}x".replace(".", ","))
+        if len(visible) >= 3:
+            break
+    if not visible:
+        return ""
+    return (
+        "Güncel değerleme bağlamında "
+        + ", ".join(visible)
+        + " izleniyor; bu çarpanların düşük veya yüksek olması tek başına ucuzluk ya da pahalılık kararı sayılmıyor."
+    )
+
+
 def _event_sentence(events: list[Mapping[str, Any]]) -> str:
     if not events:
         return ""
@@ -163,14 +196,16 @@ def format_application_text(report: Mapping[str, Any]) -> str:
 
     fundamental = (report.get("fundamental") or {}).get("current_period") or {}
     peer_block = (report.get("sector_and_peers") or {}).get("benchmark") or {}
-    peer_payload = {
-        "benchmark": peer_block,
-    }
+    peer_payload = {"benchmark": peer_block}
+    valuation = report.get("valuation") or {}
     events = list(report.get("corporate_events") or [])
 
     parts = [_technical_paragraph(technical)]
     parts.extend(_fundamental_sentences(fundamental))
     parts.extend(_peer_sentences(peer_payload))
+    valuation_text = _valuation_sentence(valuation)
+    if valuation_text:
+        parts.append(valuation_text)
     event_text = _event_sentence(events)
     if event_text:
         parts.append(event_text)
