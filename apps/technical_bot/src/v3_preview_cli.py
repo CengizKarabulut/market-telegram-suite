@@ -8,6 +8,7 @@ from market_core.external_io import (
     load_scanner_snapshot_rows,
     load_taramabot_state_rows,
 )
+
 from src.stock_dashboard import (
     ScanConfig,
     calculate_indicators,
