@@ -35,7 +35,8 @@ class ReaderPresentationTests(unittest.TestCase):
         self.assertNotIn("kama89", lowered)
         self.assertNotIn("wma100", lowered)
         self.assertIn("Analist Görüşü", text)
-        self.assertIn("21.30 ilk toparlanma eşiği", text)
+        self.assertIn("21,30 ilk toparlanma eşiği", text)
+        self.assertIn("Fiyat: 21,00 · Değişim: -1,25%", text)
 
     def test_reader_output_is_one_cohesive_paragraph(self) -> None:
         report = {
@@ -61,11 +62,61 @@ class ReaderPresentationTests(unittest.TestCase):
         paragraph = lines[-1]
         self.assertIn("Toparlanma işaretleri", paragraph)
         self.assertIn("Kısa vadeli alım isteği", paragraph)
-        self.assertIn("10.40 aşılmadan", paragraph)
+        self.assertIn("10,40 aşılmadan", paragraph)
         self.assertNotIn("Genel görünüm:", text)
         self.assertNotIn("Sonuç:", text)
         self.assertNotIn("RSI:", text)
         self.assertNotIn("MACD", text)
+
+    def test_reader_does_not_repeat_momentum_and_volume_change(self) -> None:
+        report = {
+            "symbol": "TEST",
+            "interval_label": "günlük",
+            "price": 21.0,
+            "change_pct": -3.76,
+            "reader_view": {
+                "available": True,
+                "headline": "Hisse zayıf bölgede.",
+                "overview": "Ana baskı sürüyor.",
+                "momentum": "Alım isteği zayıf ve son seansta ivme biraz daha bozuldu.",
+                "participation": "Fiyat geriliyor ancak hacim zayıf (0.60x).",
+                "screening": "Ek teknik koşullar güncel teyit vermiyor.",
+                "what_changed": (
+                    "Kısa vadeli ivme önceki seansa göre zayıfladı. "
+                    "Hacim katılımı da değişti ve son değer normalin yaklaşık 0.60 katında."
+                ),
+                "levels": "Yukarıda 21.24 ilk toparlanma eşiği.",
+                "conclusion": "21.24 geri alınmadan kalıcı güçlenme teyidi yok.",
+            },
+        }
+        text = format_reader_telegram(report)
+        paragraph = [line for line in text.splitlines() if line.strip()][-1]
+        self.assertNotIn("önceki seansa göre zayıfladı", paragraph)
+        self.assertNotIn("Hacim katılımı da değişti", paragraph)
+        self.assertIn("0,60x", paragraph)
+        self.assertIn("21,24", paragraph)
+        self.assertIn("Değişim: -3,76%", text)
+
+    def test_reader_keeps_non_redundant_structural_change(self) -> None:
+        report = {
+            "symbol": "TEST",
+            "interval_label": "günlük",
+            "price": 15.0,
+            "change_pct": 2.0,
+            "reader_view": {
+                "available": True,
+                "headline": "Toparlanma denemesi var.",
+                "overview": "Fiyat yapısı geçiş bölgesinde.",
+                "momentum": "Kısa vadeli alım isteği toparlanıyor.",
+                "participation": "Hacim normal aralıkta.",
+                "screening": "Ek teknik koşullar yön teyidi vermiyor.",
+                "what_changed": "Fiyat yapısında olumlu bir kırılma oluştu.",
+                "levels": "15.40 ilk önemli eşik.",
+                "conclusion": "15.40 üzerinde kalıcılık görünümü güçlendirir.",
+            },
+        }
+        text = format_reader_telegram(report)
+        self.assertIn("Fiyat yapısında olumlu bir kırılma oluştu.", text)
 
 
 if __name__ == "__main__":
