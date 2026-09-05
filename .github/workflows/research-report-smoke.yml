@@ -10,6 +10,7 @@ on:
       - 'apps/technical_bot/src/original_indicators.py'
       - 'apps/technical_bot/src/moving_average_card.py'
       - 'apps/technical_bot/tests/test_research_engine.py'
+      - 'apps/technical_bot/tests/test_research_commentary.py'
       - 'apps/technical_bot/tests/test_original_indicators.py'
       - '.github/workflows/research-report-smoke.yml'
 
@@ -44,6 +45,7 @@ jobs:
           from src.moving_average_card import render_moving_average_card
           from src.research_card import render_research_card
           from src.research_chart import render_research_chart
+          from src.research_commentary import commentary_messages, compose_research_commentary
           from src.research_risk import build_research_report
 
           root = Path('reports/research-smoke')
@@ -57,8 +59,14 @@ jobs:
               fundamental = render_fundamental_card(report.fundamental, target / f'{ticker}_temel.png')
               ma_image, ma_snapshot = render_moving_average_card(ticker, target / f'{ticker}_ortalamalar.png')
               technical = render_research_chart(ticker, report, target / f'{ticker}_teknik_yapi.png')
+              commentary = compose_research_commentary(report)
+              messages = commentary_messages(report)
+              commentary_text = '\n\n'.join(f'{title}\n{paragraph}' for title, paragraph in commentary)
+              (target / f'{ticker}_yorum.txt').write_text(commentary_text + '\n', encoding='utf-8')
+
               payload = report.to_dict()
               payload['moving_averages'] = ma_snapshot
+              payload['commentary'] = dict(commentary)
               (target / f'{ticker}_arastirma.json').write_text(
                   json.dumps(payload, ensure_ascii=False, indent=2, default=str) + '\n',
                   encoding='utf-8',
@@ -80,6 +88,12 @@ jobs:
                   raise SystemExit(f'{ticker}: expected five research dimensions')
               if len(ma_snapshot['rows']) != 9 or len(ma_snapshot['summaries']) != 3:
                   raise SystemExit(f'{ticker}: moving-average table is incomplete')
+              if len(commentary) != 9:
+                  raise SystemExit(f'{ticker}: expected nine analyst commentary sections')
+              if any(len(paragraph) < 80 for _, paragraph in commentary):
+                  raise SystemExit(f'{ticker}: analyst commentary paragraph is unexpectedly short')
+              if any(len(message) > 3900 for message in messages):
+                  raise SystemExit(f'{ticker}: Telegram commentary message exceeds safe length')
               for image in (summary, fundamental, ma_image, technical):
                   if image.stat().st_size < 10_000:
                       raise SystemExit(f'{ticker}: unexpectedly small image {image.name}')
@@ -94,6 +108,8 @@ jobs:
                   'debt=', report.financial.get('debt_direction'),
                   'valuation=', report.valuation.get('score'), report.valuation.get('scope'),
                   'technical=', report.technical.get('score'), report.technical.get('structure', {}).get('state'),
+                  'commentary_sections=', len(commentary),
+                  'commentary_messages=', len(messages),
                   'ma=', ma_snapshot['summaries'],
                   'main_risk=', None if report.main_risk is None else (report.main_risk.name, report.main_risk.score),
                   'supports=', [(z.low, z.high, z.score, z.status) for z in report.supports],
