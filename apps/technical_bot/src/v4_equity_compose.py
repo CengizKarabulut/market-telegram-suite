@@ -5,8 +5,9 @@ import json
 import math
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -14,6 +15,7 @@ if str(ROOT) not in sys.path:
 
 from market_core.equity_report import build_equity_report_contract
 from market_core.reader_presentation import format_reader_telegram
+
 from src.telegram_client import send_text
 
 
