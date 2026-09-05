@@ -142,13 +142,13 @@ def wave_evidence(hypotheses: list[WaveHypothesis]) -> list[Evidence]:
 
 
 def _location_direction(level: TechnicalLevel) -> EvidenceDirection:
-    role = level.role.upper()
-    if level.lifecycle_state == LevelLifecycle.RECLAIMED and "SUPPORT" in role:
-        return EvidenceDirection.BULLISH
-    if level.lifecycle_state == LevelLifecycle.REJECTED and "SUPPORT" in role:
-        return EvidenceDirection.BEARISH
-    if level.lifecycle_state == LevelLifecycle.TESTED and "RETEST_HELD" in role:
-        return EvidenceDirection.BULLISH
+    """Fiyatin bir seviyeye gore konumu tek basina yonlu oy degildir.
+
+    Reclaim/rejection gibi olaylar structure/lifecycle kanitinda degerlendirilir.
+    Location ailesinin gorevi yalnizca fiyatin nerede oldugunu anlatmaktir;
+    aksi halde ayni yapisal olay iki kez bullish/bearish oy olarak sayilabilir.
+    """
+    _ = level
     return EvidenceDirection.NEUTRAL
 
 
@@ -283,35 +283,6 @@ def indicator_evidence(indicators: dict[str, Any]) -> list[Evidence]:
     return result
 
 
-def summarize_evidence(evidence: Iterable[Evidence]) -> dict[str, Any]:
-    groups: dict[str, list[Evidence]] = defaultdict(list)
-    for item in evidence:
-        groups[item.independent_group or item.family].append(item)
-
-    scores = {direction.value: 0.0 for direction in EvidenceDirection}
-    represented = 0
-    for items in groups.values():
-        represented += 1
-        representative = max(items, key=lambda item: item.strength * item.confidence * item.freshness)
-        scores[representative.direction.value] += representative.strength * representative.confidence * representative.freshness
-
-    bull = scores[EvidenceDirection.BULLISH.value]
-    bear = scores[EvidenceDirection.BEARISH.value]
-    uncertainty = scores[EvidenceDirection.UNCERTAINTY.value]
-    directional_total = bull + bear
-    directional_bias = 0.0 if directional_total == 0 else (bull - bear) / directional_total
-    clarity = 0.0 if represented == 0 else _clamp((directional_total + scores[EvidenceDirection.NEUTRAL.value] * 0.25) / (directional_total + uncertainty + 1e-9))
-    return {
-        "scores": scores,
-        "bullish": bull,
-        "bearish": bear,
-        "uncertainty": uncertainty,
-        "directional_bias": directional_bias,
-        "clarity": clarity,
-        "represented_groups": represented,
-    }
-
-
 def build_evidence(
     *,
     structure: dict[str, Any],
@@ -320,13 +291,53 @@ def build_evidence(
     price: float,
     indicators: dict[str, Any] | None = None,
 ) -> tuple[list[Evidence], dict[str, Any]]:
-    evidence = []
-    evidence.extend(structure_evidence(structure))
-    evidence.extend(wave_evidence(hypotheses))
-    evidence.extend(level_evidence(levels, price))
-    evidence.extend(indicator_evidence(indicators or {}))
-    return evidence, summarize_evidence(evidence)
+    result: list[Evidence] = []
+    result.extend(structure_evidence(structure))
+    result.extend(wave_evidence(hypotheses))
+    result.extend(level_evidence(levels, price))
+    result.extend(indicator_evidence(indicators or {}))
+    return result, summarize_evidence(result)
 
 
-def evidence_as_dict(evidence: Iterable[Evidence]) -> list[dict[str, Any]]:
-    return [asdict(item) for item in evidence]
+def summarize_evidence(evidence: Iterable[Evidence]) -> dict[str, Any]:
+    """Bağımsız grupları tek oy kabul ederek yönlü ve belirsizlik skorlarını ayırır."""
+    groups: dict[str, list[Evidence]] = defaultdict(list)
+    for item in evidence:
+        groups[item.independent_group or item.family].append(item)
+    contributions: dict[str, float] = {
+        "bullish": 0.0,
+        "bearish": 0.0,
+        "neutral": 0.0,
+        "uncertainty": 0.0,
+    }
+    group_details: list[dict[str, Any]] = []
+    for group, items in groups.items():
+        representative = max(items, key=lambda item: item.strength * item.confidence * item.freshness)
+        weight = _clamp(representative.strength) * _clamp(representative.confidence) * _clamp(representative.freshness)
+        key = representative.direction.value.lower()
+        contributions[key] += weight
+        group_details.append(
+            {
+                "group": group,
+                "direction": representative.direction.value,
+                "weight": weight,
+                "representative": asdict(representative),
+                "member_count": len(items),
+            }
+        )
+    directional = contributions["bullish"] + contributions["bearish"]
+    bias = (
+        (contributions["bullish"] - contributions["bearish"]) / directional
+        if directional > 0
+        else 0.0
+    )
+    total = sum(contributions.values())
+    uncertainty_share = contributions["uncertainty"] / total if total > 0 else 1.0
+    clarity = max(0.0, 1.0 - uncertainty_share)
+    return {
+        **contributions,
+        "directional_bias": bias,
+        "uncertainty_share": uncertainty_share,
+        "clarity": clarity,
+        "groups": group_details,
+    }
