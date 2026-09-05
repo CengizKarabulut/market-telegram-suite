@@ -60,8 +60,8 @@ def _fetch_kap_news(ticker: Any, symbol: str, limit: int) -> tuple[pd.DataFrame,
                 frame = get_disclosures(symbol, limit=limit)
                 if isinstance(frame, pd.DataFrame) and not frame.empty:
                     return frame, "borsapy/KAP.get_disclosures"
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - probe must fall back on provider drift/network errors
+        print(f"KAP derin geçmiş sorgusu kullanılamadı; Ticker.news fallback: {exc}")
     return ticker.news, "borsapy/Ticker.news_fallback"
 
 
