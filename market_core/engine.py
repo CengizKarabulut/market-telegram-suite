@@ -6,11 +6,15 @@ from typing import Any
 
 import pandas as pd
 
+from .context_evidence import multi_timeframe_evidence, regime_evidence, relative_strength_evidence
 from .elliott import build_wave_hypotheses
-from .evidence import build_evidence
+from .evidence import build_evidence, summarize_evidence
 from .interpretation import build_interpretation
 from .levels import nearest_active_levels, rank_levels, structural_levels, wave_levels
 from .models import MarketState, TechnicalLevel
+from .multi_timeframe import build_multi_timeframe
+from .regime import build_regime
+from .relative_strength import build_relative_strength
 from .scenario import assert_no_completed_condition_is_pending, condition_from_level, pending_conditions
 from .structure import build_structure_state
 
@@ -55,12 +59,15 @@ def build_market_state(
     bar_state: dict[str, Any] | None = None,
     data_quality: dict[str, Any] | None = None,
     indicators: dict[str, Any] | None = None,
+    benchmark_data: pd.DataFrame | None = None,
+    benchmark_name: str = "BENCHMARK",
+    multi_timeframe_states: dict[str, dict[str, Any]] | None = None,
 ) -> MarketState:
     """Tek canonical V3 market state üretir.
 
     Downstream Telegram/görsel katmanları kendi teknik hesabını yapmayacak;
-    structure, Elliott, level, evidence ve interpretation aynı state üzerinden
-    beslenecek.
+    structure, Elliott, level, regime, relative-strength, MTF, evidence ve
+    interpretation aynı state üzerinden beslenecek.
     """
     required = {"Open", "High", "Low", "Close"}
     missing = sorted(required.difference(data.columns))
@@ -97,13 +104,22 @@ def build_market_state(
     if critical:
         limitations.append("Kritik veri kalitesi sorunu: yön ve seviye yorumu hard-gate edildi.")
 
-    evidence, evidence_summary = build_evidence(
+    regime = build_regime(data, indicator_values)
+    relative_strength = build_relative_strength(data, benchmark_data, benchmark_name=benchmark_name)
+    multi_timeframe = build_multi_timeframe(interval, multi_timeframe_states)
+
+    evidence, _ = build_evidence(
         structure=structure_summary,
         hypotheses=waves,
         levels=levels,
         price=price,
         indicators=indicator_values,
     )
+    evidence.extend(regime_evidence(regime))
+    evidence.extend(relative_strength_evidence(relative_strength))
+    evidence.extend(multi_timeframe_evidence(multi_timeframe))
+    evidence_summary = summarize_evidence(evidence)
+
     interpretation = build_interpretation(
         price=price,
         structure=structure_summary,
@@ -113,6 +129,9 @@ def build_market_state(
         evidence=evidence,
         evidence_summary=evidence_summary,
         critical_data_quality=critical,
+        regime=regime,
+        relative_strength=relative_strength,
+        multi_timeframe=multi_timeframe,
     )
 
     return MarketState(
@@ -127,10 +146,13 @@ def build_market_state(
         structure=structure_summary,
         wave_hypotheses=waves,
         levels=levels,
+        regime=regime,
         evidence=evidence,
         evidence_summary=evidence_summary,
         scenarios=scenarios,
         interpretation=interpretation,
+        relative_strength=relative_strength,
+        multi_timeframe=multi_timeframe,
         limitations=limitations,
         confidence={
             "wave_primary": waves[0].confidence if waves else None,
@@ -138,5 +160,8 @@ def build_market_state(
             "critical_data_quality": critical,
             "evidence_clarity": evidence_summary.get("clarity"),
             "directional_bias": evidence_summary.get("directional_bias"),
+            "regime_confidence": regime.get("confidence"),
+            "relative_strength_available": relative_strength.get("available"),
+            "multi_timeframe_available": multi_timeframe.get("available"),
         },
     )
