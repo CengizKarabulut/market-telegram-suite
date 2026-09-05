@@ -109,10 +109,12 @@ def tradingview_row_to_observation(row: Mapping[str, Any]) -> PeerObservation | 
 
     sector = _clean(row.get("sector"))
     industry = _clean(row.get("industry"))
+    company_name = _clean(row.get("description"))
     classification: CompanyClassification = classify_company(
         symbol=symbol,
         sector=sector,
         industry=industry,
+        company_name=company_name,
         source="TradingView Screener",
     )
     fiscal_period = _clean(row.get("fiscal_period_current"))
@@ -151,7 +153,7 @@ def tradingview_row_to_observation(row: Mapping[str, Any]) -> PeerObservation | 
         metric_basis=metric_basis,
         metadata={
             "provider": "TradingView Screener",
-            "company_name": _clean(row.get("description")),
+            "company_name": company_name,
             "sector": sector,
             "industry": industry,
             "classification_confidence": classification.confidence,
@@ -197,6 +199,7 @@ def tradingview_classification_from_frame(
             symbol=normalized,
             sector=_clean(row.get("sector")),
             industry=_clean(row.get("industry")),
+            company_name=_clean(row.get("description")),
             source="TradingView Screener",
         )
     return None
