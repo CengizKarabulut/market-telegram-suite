@@ -7,7 +7,6 @@ from typing import Any
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch
 
-
 CARD_WIDTH = 10.8
 CARD_HEIGHT = 13.5
 CARD_DPI = 100
