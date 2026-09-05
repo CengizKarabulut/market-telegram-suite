@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 import pandas as pd
