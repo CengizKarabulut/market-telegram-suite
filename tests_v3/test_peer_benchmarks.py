@@ -96,6 +96,63 @@ class PeerBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(result["metrics"]["ltv"]["peer_count"], 5)
 
+    def test_declared_metric_basis_must_match(self):
+        rows = [
+            PeerObservation(
+                "T",
+                "IND",
+                SectorType.INDUSTRIAL,
+                {"revenue_growth": 0.20},
+                metric_basis={"revenue_growth": "TTM"},
+            ),
+            PeerObservation(
+                "A",
+                "IND",
+                SectorType.INDUSTRIAL,
+                {"revenue_growth": 0.10},
+                metric_basis={"revenue_growth": "TTM"},
+            ),
+            PeerObservation(
+                "B",
+                "IND",
+                SectorType.INDUSTRIAL,
+                {"revenue_growth": 0.12},
+                metric_basis={"revenue_growth": "TTM"},
+            ),
+            PeerObservation(
+                "C",
+                "IND",
+                SectorType.INDUSTRIAL,
+                {"revenue_growth": 0.13},
+                metric_basis={"revenue_growth": "TTM"},
+            ),
+            PeerObservation(
+                "D",
+                "IND",
+                SectorType.INDUSTRIAL,
+                {"revenue_growth": 0.14},
+                metric_basis={"revenue_growth": "TTM"},
+            ),
+            PeerObservation(
+                "YTD1",
+                "IND",
+                SectorType.INDUSTRIAL,
+                {"revenue_growth": 9.99},
+                metric_basis={"revenue_growth": "CURRENT_PROVIDER_COMPARATIVE:2025Q2"},
+            ),
+        ]
+        result = build_peer_benchmark(
+            target_symbol="T",
+            peer_group="IND",
+            sector_type=SectorType.INDUSTRIAL,
+            observations=rows,
+        )
+        metric = result["metrics"]["revenue_growth"]
+        self.assertTrue(metric["available"])
+        self.assertEqual(metric["peer_count"], 4)
+        self.assertEqual(metric["basis_excluded_count"], 1)
+        self.assertEqual(metric["basis"], "TTM")
+
 
 if __name__ == "__main__":
     unittest.main()
