@@ -18,6 +18,8 @@ def _destination() -> tuple[str, str, str]:
     thread_id = os.getenv("TELEGRAM_MESSAGE_THREAD_ID", "").strip()
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN GitHub Actions Secret olarak tanımlanmalıdır.")
+    if not chat_id:
+        raise RuntimeError("TELEGRAM_CHAT_ID GitHub Actions Secret olarak tanımlanmalıdır.")
     return token, chat_id, thread_id
 
 
@@ -25,19 +27,44 @@ def _caption(report: ResearchReport) -> str:
     score = "—" if report.research_score is None else f"{report.research_score:.0f}/100"
     risk = "—" if report.main_risk is None else f"{report.main_risk.name} ({report.main_risk.score:.0f}/100)"
     financial = report.financial
+    structure = report.technical.get("structure", {})
+    elliott = report.technical.get("elliott", {})
     lines = [
         f"📚 {report.symbol} — Araştırma Özeti",
         f"Genel durum: {score} · veri kapsamı %{round(report.coverage * 100)}",
         f"Bilanço: {financial.get('balance_label', '—')} · Kâr kalitesi: {financial.get('earnings_quality_label', '—')}",
         f"Borç yönü: {financial.get('debt_direction', '—')}",
-        f"Teknik: {report.technical.get('label', '—')} · Ana risk: {risk}",
+        f"Teknik: {report.technical.get('label', '—')} · {structure.get('event', structure.get('bos', '—'))}",
+        f"Elliott bağlamı: {elliott.get('primary', '—')} · güven %{elliott.get('confidence', '—')}",
+        f"Ana risk: {risk}",
         "",
         "Sonraki görseller: temel kart + MA tablosu + çok panelli teknik grafik. Otomatik AL/SAT değildir.",
     ]
     return clip("\n".join(lines), CAPTION_LIMIT)
 
 
-def _send_photo(token: str, chat_id: str, thread_id: str, image_path: Path, caption: str = "") -> dict[str, Any]:
+def _verified_message(response_payload: dict[str, Any], expected_thread_id: str) -> dict[str, Any]:
+    if response_payload.get("ok") is not True:
+        raise RuntimeError("Telegram Bot API ok=true dönmedi.")
+    result = response_payload.get("result")
+    if not isinstance(result, dict) or not isinstance(result.get("message_id"), int):
+        raise RuntimeError("Telegram gönderiminde message_id doğrulanamadı.")
+    if expected_thread_id:
+        actual_thread = result.get("message_thread_id")
+        if str(actual_thread) != str(expected_thread_id):
+            raise RuntimeError(
+                f"Telegram topic doğrulaması başarısız: beklenen={expected_thread_id}, gerçek={actual_thread}."
+            )
+    return response_payload
+
+
+def _send_photo(
+    token: str,
+    chat_id: str,
+    thread_id: str,
+    image_path: Path,
+    caption: str = "",
+) -> dict[str, Any]:
     payload: dict[str, Any] = {"chat_id": chat_id}
     if thread_id:
         payload["message_thread_id"] = thread_id
@@ -51,11 +78,14 @@ def _send_photo(token: str, chat_id: str, thread_id: str, image_path: Path, capt
             timeout=60,
         )
     if not response.ok:
-        raise RuntimeError(f"Telegram araştırma gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}")
+        raise RuntimeError(
+            f"Telegram araştırma gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}"
+        )
     try:
-        return dict(response.json())
-    except ValueError:
-        return {"ok": True}
+        decoded = dict(response.json())
+    except ValueError as exc:
+        raise RuntimeError("Telegram yanıtı JSON olarak çözülemedi.") from exc
+    return _verified_message(decoded, thread_id)
 
 
 def send_research_bundle(
@@ -65,12 +95,30 @@ def send_research_bundle(
     technical_chart: Path,
     report: ResearchReport,
 ) -> tuple[dict[str, Any], ...]:
-    """Send summary, fundamental, MA table and technical indicator chart."""
+    """Send four research images and verify every Telegram message/topic result."""
     token, chat_id, thread_id = _destination()
     results = [
         _send_photo(token, chat_id, thread_id, summary_card, _caption(report)),
-        _send_photo(token, chat_id, thread_id, fundamental_card, f"{report.symbol} · Temel analiz / sektör profili"),
-        _send_photo(token, chat_id, thread_id, moving_average_card, f"{report.symbol} · Günlük MA 5/8/13 · 21/34/55 · 89/144/233"),
-        _send_photo(token, chat_id, thread_id, technical_chart, f"{report.symbol} · Fiyat + Hacim + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR"),
+        _send_photo(
+            token,
+            chat_id,
+            thread_id,
+            fundamental_card,
+            f"{report.symbol} · Temel analiz / sektör profili",
+        ),
+        _send_photo(
+            token,
+            chat_id,
+            thread_id,
+            moving_average_card,
+            f"{report.symbol} · Günlük MA 5/8/13 · 21/34/55 · 89/144/233",
+        ),
+        _send_photo(
+            token,
+            chat_id,
+            thread_id,
+            technical_chart,
+            f"{report.symbol} · Fiyat + Hacim + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR",
+        ),
     ]
     return tuple(results)
