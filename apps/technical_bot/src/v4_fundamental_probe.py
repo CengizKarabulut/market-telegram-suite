@@ -42,13 +42,43 @@ def _save_frame(frame: pd.DataFrame, path: Path) -> dict[str, Any]:
     }
 
 
+def _fetch_kap_news(ticker: Any, symbol: str, limit: int) -> tuple[pd.DataFrame, str]:
+    """Fetch deeper KAP history while keeping a public-property fallback.
+
+    ``Ticker.news`` intentionally returns only the provider default window. The
+    fundamental probe needs several prior financial-report publication times for
+    point-in-time TTM, so it asks the already-instantiated KAP provider for a
+    larger disclosure window. If the provider internals change, the probe fails
+    soft to ``ticker.news`` rather than pretending older filing metadata exists.
+    """
+    try:
+        provider_getter = getattr(ticker, "_get_kap", None)
+        if callable(provider_getter):
+            provider = provider_getter()
+            get_disclosures = getattr(provider, "get_disclosures", None)
+            if callable(get_disclosures):
+                frame = get_disclosures(symbol, limit=limit)
+                if isinstance(frame, pd.DataFrame) and not frame.empty:
+                    return frame, "borsapy/KAP.get_disclosures"
+    except Exception:
+        pass
+    return ticker.news, "borsapy/Ticker.news_fallback"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="V4 gerçek finansal veri kaynak probu")
     parser.add_argument("symbol")
     parser.add_argument("--last-n", type=int, default=8)
     parser.add_argument("--output", default="reports/v4_fundamental_probe")
     parser.add_argument("--financial-group", default="XI_29")
+    parser.add_argument("--kap-limit", type=int, default=120)
+    parser.add_argument("--financial-filing-limit", type=int, default=16)
     args = parser.parse_args()
+
+    if args.kap_limit < 20:
+        parser.error("--kap-limit en az 20 olmalıdır")
+    if args.financial_filing_limit < 1:
+        parser.error("--financial-filing-limit en az 1 olmalıdır")
 
     symbol = args.symbol.strip().upper().removesuffix(".IS").removesuffix(".E")
     target = Path(args.output) / symbol
@@ -97,14 +127,17 @@ def main() -> int:
     ):
         tables[name] = _save_frame(frame, target / f"{name}.csv")
 
-    news = ticker.news
+    news, kap_history_source = _fetch_kap_news(ticker, symbol, args.kap_limit)
     _save_frame(news, target / "kap_news.csv")
     financial_filings: list[dict[str, Any]] = []
     if not news.empty:
-        for _, row in news.iterrows():
+        financial_rows = [
+            row
+            for _, row in news.iterrows()
+            if "finansal rapor" in str(row.get("Title") or "").casefold()
+        ][: args.financial_filing_limit]
+        for row in financial_rows:
             title = str(row.get("Title") or "")
-            if "finansal rapor" not in title.casefold():
-                continue
             url = str(row.get("URL") or "")
             disclosure_id = _disclosure_id(url)
             raw_html = ticker.get_news_content(disclosure_id) if disclosure_id is not None else None
@@ -124,6 +157,8 @@ def main() -> int:
         "source_contract": {
             "financial_values": "borsapy/IsYatirim",
             "publication_metadata": "borsapy/KAP",
+            "kap_history_source": kap_history_source,
+            "kap_history_limit": args.kap_limit,
             "borsapy_ttm_used": False,
             "point_in_time_note": (
                 "Provider TTM/availability is not accepted as canonical; exact KAP published_at "
@@ -142,6 +177,7 @@ def main() -> int:
     print(f"V4 fundamental probe: {symbol}")
     for name, meta in tables.items():
         print(f"{name}: {meta['shape']} · columns={meta['columns']}")
+    print(f"KAP geçmiş kaynağı: {kap_history_source} · satır={len(news)}")
     print(f"KAP finansal rapor kaydı: {len(financial_filings)}")
     for item in financial_filings:
         print(
