@@ -43,19 +43,17 @@ class Pivot:
     index: int
     timestamp: Any
     price: float
-    kind: str  # HIGH | LOW
+    kind: str
     degree: str = "minor"
     strength: float = 0.0
     prominence_atr: float = 0.0
     confirmed: bool = True
-    # Pivot ancak sağ teyit barları tamamlandıktan sonra karar motoru tarafından
-    # kullanılabilir. Bu alan look-ahead bias oluşmasını engeller.
     confirmed_index: int | None = None
 
 
 @dataclass(frozen=True)
 class StructureEvent:
-    kind: str  # BOS_UP | BOS_DOWN | CHOCH_UP | CHOCH_DOWN
+    kind: str
     level: float
     pivot_index: int
     trigger_index: int
@@ -110,13 +108,6 @@ class WaveHypothesis:
 
 @dataclass(frozen=True)
 class Evidence:
-    """Tek bir bağımsız teknik ailenin gözlemini taşır.
-
-    `direction` dört durumlu tutulur. Özellikle UNCERTAINTY hiçbir zaman
-    BEARISH kanıta dönüştürülmez; zaman dilimi ayrışması veya düşük hacim gibi
-    belirsizlikler aşağı yönlü oy değildir.
-    """
-
     family: str
     direction: EvidenceDirection
     state: str
@@ -143,7 +134,9 @@ class MarketState:
     levels: list[TechnicalLevel] = field(default_factory=list)
     regime: dict[str, Any] = field(default_factory=dict)
     evidence: list[Evidence] = field(default_factory=list)
+    evidence_summary: dict[str, Any] = field(default_factory=dict)
     scenarios: list[dict[str, Any]] = field(default_factory=list)
+    interpretation: dict[str, Any] = field(default_factory=dict)
     relative_strength: dict[str, Any] = field(default_factory=dict)
     multi_timeframe: dict[str, Any] = field(default_factory=dict)
     changes: list[str] = field(default_factory=list)
