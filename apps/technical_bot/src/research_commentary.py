@@ -69,8 +69,8 @@ def _balance_paragraph(report: ResearchReport) -> str:
     return (
         f"Bilanço trendi {label.casefold()}"
         + (f" ve puan {score:.0f}/100" if score is not None else "")
-        + f". TTM satış büyümesi {_pct(metrics.get('revenue_growth'))}, faaliyet kârı büyümesi {_pct(metrics.get('operating_profit_growth'))} "
-        f"ve faaliyet marjı değişimi {_num(metrics.get('operating_margin_delta'))} puan; cari oran {_num(metrics.get('current_ratio'), 2)}. "
+        + f". TTM satış büyümesi {_pct(metrics.get('revenue_growth'))}, faaliyet kârı büyümesi {_pct(metrics.get('operating_growth'))} "
+        f"ve faaliyet marjı değişimi {_num(metrics.get('operating_margin_yoy_change_pp'))} puan; cari oran {_num(metrics.get('current_ratio'), 2)}. "
         "Yorum tek çeyrek yerine son sekiz çeyrek/TTM eğilimini esas alıyor; büyüme ile marj, likidite ve borç yönü birlikte okunuyor."
     )
 
@@ -95,8 +95,8 @@ def _earnings_paragraph(report: ResearchReport) -> str:
     return (
         f"Kâr kalitesi {quality.score:.0f}/100 ile {quality.label.casefold()}. CFO/net kâr oranı "
         f"{_num(metrics.get('cfo_net_income'), 2)}x, serbest nakit akışı marjı {_pct(metrics.get('fcf_margin'))} ve tahakkuk oranı "
-        f"{_pct(metrics.get('accrual_ratio'))}. Alacakların satış büyümesinden farkı {_num(metrics.get('receivable_gap'))} puan, "
-        f"stokların satış büyümesinden farkı {_num(metrics.get('inventory_gap'))} puan. Net kârın nakde dönüşmemesi veya işletme sermayesinin "
+        f"{_pct(metrics.get('accrual_ratio'))}. Alacakların satış büyümesinden farkı {_num(metrics.get('receivables_vs_sales_gap'))} puan, "
+        f"stokların satış büyümesinden farkı {_num(metrics.get('inventory_vs_sales_gap'))} puan. Net kârın nakde dönüşmemesi veya işletme sermayesinin "
         "satışlardan hızlı şişmesi kâr kalitesini aşağı çeken temel işaretler olarak ele alınıyor."
     )
 
@@ -113,7 +113,7 @@ def _debt_paragraph(report: ResearchReport) -> str:
     return (
         f"Borç ve nakit tarafında yön {str(financial.get('debt_direction', 'VERİ YETERSİZ')).casefold()}. Net borç/FAVÖK "
         f"{_num(metrics.get('net_debt_ebitda'), 2)}x, net borç/özkaynak {_num(metrics.get('net_debt_equity'), 2)}x, net borç değişimi "
-        f"{_pct(metrics.get('net_debt_change'))} ve faiz karşılama {_num(metrics.get('interest_coverage'), 2)}x. Borcun nominal tutarından çok "
+        f"{_pct(metrics.get('net_debt_yoy_change'))} ve faiz karşılama {_num(metrics.get('interest_coverage'), 2)}x. Borcun nominal tutarından çok "
         "faaliyet kârı ve nakit yaratımı karşısındaki taşınabilirliği ile yönü esas alınıyor."
     )
 
