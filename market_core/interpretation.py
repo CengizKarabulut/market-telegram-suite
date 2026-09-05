@@ -2,14 +2,28 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from .models import Evidence, EvidenceDirection, LevelLifecycle, TechnicalLevel, WaveHypothesis
+from .models import (
+    Evidence,
+    EvidenceDirection,
+    LevelClass,
+    LevelLifecycle,
+    TechnicalLevel,
+    WaveHypothesis,
+)
 
 
-def _nearest(levels: Iterable[TechnicalLevel], price: float, side: str) -> TechnicalLevel | None:
+def _nearest(
+    levels: Iterable[TechnicalLevel],
+    price: float,
+    side: str,
+    *,
+    include_structural: bool = False,
+) -> TechnicalLevel | None:
     eligible = [
         item
         for item in levels
         if item.lifecycle_state not in {LevelLifecycle.STALE, LevelLifecycle.INVALIDATED}
+        and (include_structural or item.level_class != LevelClass.STRUCTURAL)
         and ((side == "ABOVE" and item.value > price) or (side == "BELOW" and item.value < price))
     ]
     return min(eligible, key=lambda item: abs(item.value - price), default=None)
@@ -51,7 +65,7 @@ def _evidence_sentence(summary: dict[str, Any]) -> str:
         direction = "Yönlü kanıt dengesi aşağı tarafta."
     else:
         direction = "Yukarı ve aşağı yönlü kanıtlar birbirine yakın."
-    return f"{direction} Belirsizlik skoru {uncertainty:.2f}; netlik {clarity:.2f}."
+    return f"{direction} Belirsizlik ağırlığı {uncertainty:.2f}; netlik {clarity:.2f}."
 
 
 def _context_sentence(regime: dict[str, Any], relative_strength: dict[str, Any], multi_timeframe: dict[str, Any]) -> str:
@@ -119,11 +133,30 @@ def build_interpretation(
     multi_timeframe = dict(multi_timeframe or {})
     nearest_above = _nearest(levels, price, "ABOVE")
     nearest_below = _nearest(levels, price, "BELOW")
+    structural_above = _nearest(levels, price, "ABOVE", include_structural=True)
+    structural_below = _nearest(levels, price, "BELOW", include_structural=True)
+
     location_parts = [f"Fiyat {price:.2f}."]
     if nearest_below:
-        location_parts.append(f"En yakın alt referans {nearest_below.value:.2f} ({nearest_below.role}, {nearest_below.level_class.value}).")
+        location_parts.append(
+            f"En yakın işlem referansı aşağıda {nearest_below.value:.2f} "
+            f"({nearest_below.role}, {nearest_below.level_class.value})."
+        )
     if nearest_above:
-        location_parts.append(f"En yakın üst referans {nearest_above.value:.2f} ({nearest_above.role}, {nearest_above.level_class.value}).")
+        location_parts.append(
+            f"En yakın işlem referansı yukarıda {nearest_above.value:.2f} "
+            f"({nearest_above.role}, {nearest_above.level_class.value})."
+        )
+    if not nearest_above and structural_above and structural_above.level_class == LevelClass.STRUCTURAL:
+        location_parts.append(
+            f"Yukarıdaki en yakın yapısal referans {structural_above.value:.2f} "
+            f"({structural_above.role}); yakın vadeli tetik değildir."
+        )
+    if not nearest_below and structural_below and structural_below.level_class == LevelClass.STRUCTURAL:
+        location_parts.append(
+            f"Aşağıdaki en yakın yapısal referans {structural_below.value:.2f} "
+            f"({structural_below.role}); yakın vadeli tetik değildir."
+        )
 
     up = [item for item in scenarios if str(item.get("side")) == "UP"]
     down = [item for item in scenarios if str(item.get("side")) == "DOWN"]
