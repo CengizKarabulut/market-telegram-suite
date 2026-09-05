@@ -15,7 +15,12 @@ from .models import MarketState, TechnicalLevel
 from .multi_timeframe import build_multi_timeframe
 from .regime import build_regime
 from .relative_strength import build_relative_strength
-from .scenario import assert_no_completed_condition_is_pending, condition_from_level, pending_conditions
+from .scenario import (
+    assert_no_completed_condition_is_pending,
+    condition_from_level,
+    deduplicate_conditions,
+    pending_conditions,
+)
 from .structure import build_structure_state
 
 
@@ -63,12 +68,7 @@ def build_market_state(
     benchmark_name: str = "BENCHMARK",
     multi_timeframe_states: dict[str, dict[str, Any]] | None = None,
 ) -> MarketState:
-    """Tek canonical V3 market state üretir.
-
-    Downstream Telegram/görsel katmanları kendi teknik hesabını yapmayacak;
-    structure, Elliott, level, regime, relative-strength, MTF, evidence ve
-    interpretation aynı state üzerinden beslenecek.
-    """
+    """Tek canonical V3 market state üretir."""
     required = {"Open", "High", "Low", "Close"}
     missing = sorted(required.difference(data.columns))
     if missing:
@@ -76,7 +76,10 @@ def build_market_state(
     if len(data) < 8:
         raise ValueError("MarketState için en az 8 bar gerekir.")
 
-    price = float(data["Close"].iloc[-1])
+    price = _number(data["Close"].iloc[-1])
+    if not math.isfinite(price):
+        raise ValueError("MarketState için son kapanış fiyatı geçerli olmalıdır.")
+
     indicator_values = dict(indicators or {})
     structure = build_structure_state(data)
     pivots = structure.get("pivots", [])
@@ -89,7 +92,14 @@ def build_market_state(
 
     raw_conditions = [condition_from_level(level, price, side) for level, side in _scenario_levels(active)]
     assert_no_completed_condition_is_pending(raw_conditions, price)
-    scenario_objects = pending_conditions(raw_conditions)
+    scenario_objects = deduplicate_conditions(pending_conditions(raw_conditions))
+
+    quality = dict(data_quality or {})
+    critical = bool(quality.get("critical")) or str(quality.get("state", "")).upper() in {"INVALID", "CRITICAL"}
+    limitations: list[str] = []
+    if critical:
+        limitations.append("Kritik veri kalitesi sorunu: yön ve seviye yorumu hard-gate edildi.")
+        scenario_objects = []
     scenarios = [asdict(item) for item in scenario_objects]
 
     structure_summary = {
@@ -97,12 +107,6 @@ def build_market_state(
         "nearest_levels": active,
         "structural_levels": structural_levels(levels),
     }
-
-    quality = dict(data_quality or {})
-    critical = bool(quality.get("critical")) or str(quality.get("state", "")).upper() in {"INVALID", "CRITICAL"}
-    limitations: list[str] = []
-    if critical:
-        limitations.append("Kritik veri kalitesi sorunu: yön ve seviye yorumu hard-gate edildi.")
 
     regime = build_regime(data, indicator_values)
     relative_strength = build_relative_strength(data, benchmark_data, benchmark_name=benchmark_name)
