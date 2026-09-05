@@ -68,12 +68,14 @@ def _paragraph(reader: dict[str, Any]) -> str:
     seen: set[str] = set()
 
     def append_sentences(value: Any) -> None:
-        for sentence in _sentences(value):
-            normalized = _normalized_sentence(sentence)
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            parts.append(sentence)
+        values = value if isinstance(value, (list, tuple)) else [value]
+        for item in values:
+            for sentence in _sentences(item):
+                normalized = _normalized_sentence(sentence)
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                parts.append(sentence)
 
     append_sentences(reader.get("headline"))
     append_sentences(reader.get("overview"))
