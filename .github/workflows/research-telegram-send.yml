@@ -7,10 +7,6 @@ on:
         description: BIST sembolü
         required: true
         default: ZGYO
-  push:
-    branches: [finalize/research-production]
-    paths:
-      - '.research-telegram-bootstrap'
 
 permissions:
   contents: read
@@ -36,7 +32,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TECHNICAL_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TECHNICAL_TOPIC_ID }}
-          TICKER: ${{ github.event.inputs.ticker || 'ZGYO' }}
+          TICKER: ${{ github.event.inputs.ticker }}
         run: |
           python - <<'PY'
           import json
