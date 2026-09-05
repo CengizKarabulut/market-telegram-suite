@@ -3,7 +3,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from src.stock_dashboard import ScanConfig, calculate_indicators, download_benchmark, download_prices
+from src.stock_dashboard import (
+    ScanConfig,
+    calculate_indicators,
+    download_benchmark,
+    download_prices,
+)
 from src.v3_preview import build_v3_preview, write_preview_json
 
 
