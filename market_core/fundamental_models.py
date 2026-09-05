@@ -11,6 +11,8 @@ class SectorType(str, Enum):
     GYO = "GYO"
     BANK = "BANK"
     HOLDING = "HOLDING"
+    INSURANCE = "INSURANCE"
+    FINANCIAL_NONBANK = "FINANCIAL_NONBANK"
     OTHER = "OTHER"
 
 
