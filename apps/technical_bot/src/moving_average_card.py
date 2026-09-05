@@ -97,7 +97,7 @@ def build_moving_average_snapshot(symbol: str) -> dict[str, Any]:
     return {
         "symbol": ticker,
         "price": price,
-        "history_bars": int(len(frame)),
+        "history_bars": len(frame),
         "rows": rows,
         "summaries": summaries,
     }
