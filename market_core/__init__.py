@@ -32,6 +32,7 @@ from .regime import build_regime
 from .relative_strength import build_relative_strength
 from .report import build_report_contract, format_telegram_preview, interval_label
 from .serialization import market_state_dict, market_state_json, report_json, to_primitive
+from .technical_changes import build_technical_changes
 from .technical_features import build_technical_features
 
 __all__ = [
@@ -52,6 +53,7 @@ __all__ = [
     "build_regime",
     "build_relative_strength",
     "build_report_contract",
+    "build_technical_changes",
     "build_technical_features",
     "format_telegram_preview",
     "interval_label",
