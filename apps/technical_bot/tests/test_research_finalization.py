@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from src.fundamental_analysis import Factor, FundamentalReport
 from src.research_risk import _quality_dimension, _risk_engine
 from src.research_technical import _elliott_context, _structure_event
+from src.research_telegram import _verified_message
 
 
 class ResearchFinalizationTests(unittest.TestCase):
@@ -74,6 +75,16 @@ class ResearchFinalizationTests(unittest.TestCase):
         )
         self.assertEqual(result["primary"], "BELİRSİZ")
         self.assertLess(result["confidence"], 50)
+
+    def test_telegram_result_must_match_requested_topic(self) -> None:
+        payload = {"ok": True, "result": {"message_id": 42, "message_thread_id": 3982}}
+        self.assertIs(_verified_message(payload, "3982"), payload)
+        with self.assertRaises(RuntimeError):
+            _verified_message(payload, "9999")
+
+    def test_telegram_result_requires_message_id(self) -> None:
+        with self.assertRaises(RuntimeError):
+            _verified_message({"ok": True, "result": {}}, "")
 
 
 if __name__ == "__main__":
