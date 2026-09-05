@@ -130,6 +130,7 @@ class MarketState:
     data_quality: dict[str, Any] = field(default_factory=dict)
     indicators: dict[str, Any] = field(default_factory=dict)
     technical_features: dict[str, Any] = field(default_factory=dict)
+    technical_changes: dict[str, Any] = field(default_factory=dict)
     technical_synthesis: dict[str, Any] = field(default_factory=dict)
     structure: dict[str, Any] = field(default_factory=dict)
     wave_hypotheses: list[WaveHypothesis] = field(default_factory=list)
