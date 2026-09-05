@@ -17,11 +17,13 @@ if str(ROOT) not in sys.path:
 
 _market_core = importlib.import_module("market_core")
 _report = importlib.import_module("market_core.report")
+_reader_presentation = importlib.import_module("market_core.reader_presentation")
 _serialization = importlib.import_module("market_core.serialization")
 build_market_state = _market_core.build_market_state
 build_technical_features = _market_core.build_technical_features
 build_report_contract = _report.build_report_contract
-format_telegram_preview = _report.format_telegram_preview
+attach_reader_view = _reader_presentation.attach_reader_view
+format_reader_telegram = _reader_presentation.format_reader_telegram
 market_state_json = _serialization.market_state_json
 report_json = _serialization.report_json
 
@@ -101,8 +103,8 @@ def build_v3_preview(
         scanner_rows=scanner_rows,
         ma_level_rows=ma_level_rows,
     )
-    report = build_report_contract(state)
-    return state, report, format_telegram_preview(report)
+    report = attach_reader_view(state, build_report_contract(state))
+    return state, report, format_reader_telegram(report)
 
 
 def write_preview_json(state: Any, report: dict[str, Any], target: Path, stem: str) -> tuple[Path, Path]:
