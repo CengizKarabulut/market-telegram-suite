@@ -4,8 +4,9 @@ import unittest
 from types import SimpleNamespace
 
 from src.fundamental_analysis import Factor, FundamentalReport
-from src.research_risk import _quality_dimension, _risk_engine
-from src.research_technical import _elliott_context, _structure_event
+from src.research_engine import ResearchDimension
+from src.research_risk import _coverage_gate_dimension, _quality_dimension, _risk_engine
+from src.research_technical import _elliott_context, _structure_event, _structure_score
 from src.research_telegram import _verified_message
 
 
@@ -34,6 +35,13 @@ class ResearchFinalizationTests(unittest.TestCase):
         dimension = _quality_dimension(SimpleNamespace(fundamental=fundamental))
         self.assertEqual(dimension.score, 100.0)
         self.assertEqual(dimension.coverage, 1.0)
+
+    def test_low_coverage_dimension_is_not_scored(self) -> None:
+        dimension = ResearchDimension("Kâr Kalitesi", 0.0, 0.27, "ZAYIF", "Sınırlı veri.")
+        gated = _coverage_gate_dimension(dimension)
+        self.assertIsNone(gated.score)
+        self.assertEqual(gated.label, "VERİ YETERSİZ")
+        self.assertIn("%27", gated.summary)
 
     def test_missing_evidence_does_not_create_fake_risk(self) -> None:
         main, risks = _risk_engine(
@@ -64,6 +72,10 @@ class ResearchFinalizationTests(unittest.TestCase):
         }
         self.assertEqual(_structure_event(structure), "CHoCH AŞAĞI")
 
+    def test_missing_mtf_structure_is_not_neutral_score(self) -> None:
+        self.assertIsNone(_structure_score("—"))
+        self.assertEqual(_structure_score("LH / HL"), 50.0)
+
     def test_elliott_stays_uncertain_with_too_few_confirmed_swings(self) -> None:
         result = _elliott_context(
             [
@@ -83,7 +95,7 @@ class ResearchFinalizationTests(unittest.TestCase):
             _verified_message(payload, "9999")
 
     def test_telegram_result_requires_message_id(self) -> None:
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(TypeError):
             _verified_message({"ok": True, "result": {}}, "")
 
 
