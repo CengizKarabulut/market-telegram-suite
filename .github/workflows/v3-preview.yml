@@ -1,4 +1,4 @@
-name: V3 Gerçek Veri Önizleme
+name: V3/V4 Gerçek Veri Önizleme
 
 on:
   workflow_dispatch:
@@ -35,6 +35,11 @@ on:
           - AUTO
           - BORSAPY
           - YFINANCE
+      external_evidence:
+        description: "Taramabot geçmişi + MA destek/direnç taramasını ekle"
+        required: true
+        default: true
+        type: boolean
       telegram:
         description: "Deneme sonucunu Telegram'a da gönder"
         required: true
@@ -52,29 +57,89 @@ permissions:
 jobs:
   preview:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/technical_bot
+    timeout-minutes: 90
+    env:
+      PREVIEW_SYMBOL: ${{ github.event.inputs.symbol || 'ZGYO' }}
+      PREVIEW_INTERVAL: ${{ github.event.inputs.interval || '1d' }}
+      PREVIEW_PERIOD: ${{ github.event.inputs.period || '2y' }}
+      PREVIEW_PROVIDER: ${{ github.event.inputs.provider || 'AUTO' }}
+      PREVIEW_EXTERNAL: ${{ github.event_name == 'push' || github.event.inputs.external_evidence == 'true' }}
+      PREVIEW_TELEGRAM: ${{ github.event_name == 'push' || github.event.inputs.telegram == 'true' }}
     steps:
-      - uses: actions/checkout@v6
+      - name: Ana repoyu checkout et
+        uses: actions/checkout@v6
+
+      - name: MA reaction scanner checkout
+        if: env.PREVIEW_EXTERNAL == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: CengizKarabulut/ma-reaction-scanner
+          ref: main
+          path: external/ma-reaction-scanner
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: apps/technical_bot/requirements.txt
-      - name: Bağımlılıkları yükle
+          cache-dependency-path: |
+            apps/technical_bot/requirements.txt
+            external/ma-reaction-scanner/requirements.txt
+
+      - name: Teknik bot bağımlılıklarını yükle
+        working-directory: apps/technical_bot
         run: python -m pip install --requirement requirements.txt
-      - name: V3 preview üret ve isteğe bağlı Telegram'a gönder
+
+      - name: MA scanner bağımlılıklarını yükle
+        if: env.PREVIEW_EXTERNAL == 'true'
+        working-directory: external/ma-reaction-scanner
+        run: python -m pip install --requirement requirements.txt
+
+      - name: Taramabot geçmiş sinyal durumunu al
+        if: env.PREVIEW_EXTERNAL == 'true'
+        shell: bash
+        run: |
+          mkdir -p apps/technical_bot/reports/v3_external
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/CengizKarabulut/taramabot/main/state.json \
+            --output apps/technical_bot/reports/v3_external/taramabot_state.json \
+            || echo "Taramabot state.json alınamadı; preview tarama geçmişi olmadan devam edecek."
+
+      - name: Tek hisse MA destek/direnç taramasını çalıştır
+        if: env.PREVIEW_EXTERNAL == 'true'
+        continue-on-error: true
+        working-directory: external/ma-reaction-scanner
+        shell: bash
+        run: |
+          python -m scanner.ma_scan \
+            --universe custom \
+            --asset-class stock \
+            --market BIST \
+            --symbol "$PREVIEW_SYMBOL" \
+            --timeframes all \
+            --source auto \
+            --rank-by level \
+            --output-dir reports/v4_single
+
+      - name: MA watchlist çıktısını preview alanına kopyala
+        if: env.PREVIEW_EXTERNAL == 'true'
+        shell: bash
+        run: |
+          mkdir -p apps/technical_bot/reports/v3_external
+          if [ -f external/ma-reaction-scanner/reports/v4_single/ma_watchlist.csv ]; then
+            cp external/ma-reaction-scanner/reports/v4_single/ma_watchlist.csv \
+              apps/technical_bot/reports/v3_external/ma_watchlist.csv
+          else
+            echo "MA watchlist üretilemedi; preview MA evidence olmadan devam edecek."
+          fi
+
+      - name: V3/V4 preview üret ve isteğe bağlı Telegram'a gönder
+        working-directory: apps/technical_bot
         env:
           PYTHONPATH: ../..
-          PREVIEW_SYMBOL: ${{ github.event.inputs.symbol || 'ZGYO' }}
-          PREVIEW_INTERVAL: ${{ github.event.inputs.interval || '1d' }}
-          PREVIEW_PERIOD: ${{ github.event.inputs.period || '2y' }}
-          PREVIEW_PROVIDER: ${{ github.event.inputs.provider || 'AUTO' }}
-          PREVIEW_TELEGRAM: ${{ github.event_name == 'push' || github.event.inputs.telegram == 'true' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TECHNICAL_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TECHNICAL_TOPIC_ID }}
+        shell: bash
         run: |
           args=(
             "$PREVIEW_SYMBOL"
@@ -83,14 +148,23 @@ jobs:
             --provider "$PREVIEW_PROVIDER"
             --output reports/v3_preview
           )
+          if [ "$PREVIEW_EXTERNAL" = "true" ]; then
+            args+=(
+              --scanner-state reports/v3_external/taramabot_state.json
+              --ma-watchlist reports/v3_external/ma_watchlist.csv
+            )
+          fi
           if [ "$PREVIEW_TELEGRAM" = "true" ]; then
             args+=(--telegram)
           fi
           python -m src.v3_preview_cli "${args[@]}"
+
       - name: Preview artifact yükle
         uses: actions/upload-artifact@v7
         with:
-          name: v3-preview-${{ github.event.inputs.symbol || 'ZGYO' }}-${{ github.event.inputs.interval || '1d' }}-${{ github.run_id }}
-          path: apps/technical_bot/reports/v3_preview/**
+          name: v3-v4-preview-${{ github.event.inputs.symbol || 'ZGYO' }}-${{ github.event.inputs.interval || '1d' }}-${{ github.run_id }}
+          path: |
+            apps/technical_bot/reports/v3_preview/**
+            apps/technical_bot/reports/v3_external/**
           if-no-files-found: error
           retention-days: 7
