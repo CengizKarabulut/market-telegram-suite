@@ -219,7 +219,8 @@ def assemble_ttm(
     annual_candidates = [
         item
         for item in versions.values()
-        if item.statement_type == StatementType.ANNUAL and item.period_end < current.period_end
+        if item.statement_type == StatementType.ANNUAL
+        and prior_ytd_end < item.period_end < current.period_end
     ]
     prior_annual = max(annual_candidates, key=lambda item: item.period_end, default=None)
 
