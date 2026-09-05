@@ -86,6 +86,20 @@ class TradingViewPeerAdapterTests(unittest.TestCase):
         self.assertEqual(insurance.sector_type, SectorType.INSURANCE)
         self.assertEqual(holding.sector_type, SectorType.HOLDING)
 
+    def test_company_description_recovers_gyo_when_industry_is_generic_development(self):
+        observation = tradingview_row_to_observation(
+            {
+                "name": "BIST:ZGYO",
+                "description": "Z GAYRIMENKUL YATIRIM ORTAKLIGI AS",
+                "sector": "Finance",
+                "industry": "Real Estate Development",
+                "price_book_fq": 1.1,
+            }
+        )
+        assert observation is not None
+        self.assertEqual(observation.sector_type, SectorType.GYO)
+        self.assertEqual(observation.peer_group, "ARCHETYPE_GYO")
+
     def test_frame_deduplicates_symbols_and_supports_classification_lookup(self):
         frame = pd.DataFrame(
             [
