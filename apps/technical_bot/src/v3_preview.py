@@ -19,6 +19,7 @@ _market_core = importlib.import_module("market_core")
 _report = importlib.import_module("market_core.report")
 _serialization = importlib.import_module("market_core.serialization")
 build_market_state = _market_core.build_market_state
+build_technical_features = _market_core.build_technical_features
 build_report_contract = _report.build_report_contract
 format_telegram_preview = _report.format_telegram_preview
 market_state_json = _serialization.market_state_json
@@ -42,7 +43,7 @@ def canonical_indicators(data: pd.DataFrame) -> dict[str, float]:
         "RSI": ("RSI",),
         "MACD_HIST": ("MACD_HIST", "MACD Histogram"),
         "SMI": ("SMI",),
-        "RVOL": ("RVOL", "Relative Volume"),
+        "RVOL": ("RVOL", "VOLUME_RATIO", "Relative Volume"),
         "ADX": ("ADX",),
         "ATR": ("ATR",),
         "BB_WIDTH": ("BB_WIDTH", "BB Width"),
@@ -92,6 +93,7 @@ def build_v3_preview(
         symbol=symbol,
         interval=interval,
         indicators=canonical_indicators(data),
+        technical_features=build_technical_features(data),
         data_quality=data_quality_from_attrs(data),
         benchmark_data=benchmark_data,
         benchmark_name=benchmark_name,
