@@ -8,6 +8,7 @@ from typing import Any
 
 import requests
 
+from src.research_commentary import commentary_messages
 from src.research_engine import ResearchReport
 from src.telegram_client import CAPTION_LIMIT, DEFAULT_CHAT_ID, caption_enabled, clip
 
@@ -38,7 +39,7 @@ def _caption(report: ResearchReport) -> str:
         f"Elliott bağlamı: {elliott.get('primary', '—')} · güven %{elliott.get('confidence', '—')}",
         f"Ana risk: {risk}",
         "",
-        "Sonraki görseller: temel kart + MA tablosu + çok panelli teknik grafik. Otomatik AL/SAT değildir.",
+        "Devamında veri-temelli analist yorumu, temel kart, MA tablosu ve teknik grafik yer alır. Otomatik AL/SAT değildir.",
     ]
     return clip("\n".join(lines), CAPTION_LIMIT)
 
@@ -56,6 +57,18 @@ def _verified_message(response_payload: dict[str, Any], expected_thread_id: str)
                 f"Telegram topic doğrulaması başarısız: beklenen={expected_thread_id}, gerçek={actual_thread}."
             )
     return response_payload
+
+
+def _decode_response(response: requests.Response, thread_id: str, *, context: str) -> dict[str, Any]:
+    if not response.ok:
+        raise RuntimeError(
+            f"Telegram {context} gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}"
+        )
+    try:
+        decoded = dict(response.json())
+    except ValueError as exc:
+        raise RuntimeError("Telegram yanıtı JSON olarak çözülemedi.") from exc
+    return _verified_message(decoded, thread_id)
 
 
 def _send_photo(
@@ -77,15 +90,23 @@ def _send_photo(
             files={"photo": (image_path.name, image, "image/png")},
             timeout=60,
         )
-    if not response.ok:
-        raise RuntimeError(
-            f"Telegram araştırma gönderimi başarısız: HTTP {response.status_code} — {response.text[:300]}"
-        )
-    try:
-        decoded = dict(response.json())
-    except ValueError as exc:
-        raise RuntimeError("Telegram yanıtı JSON olarak çözülemedi.") from exc
-    return _verified_message(decoded, thread_id)
+    return _decode_response(response, thread_id, context="araştırma görseli")
+
+
+def _send_text(token: str, chat_id: str, thread_id: str, text: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+    }
+    if thread_id:
+        payload["message_thread_id"] = thread_id
+    response = requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data=payload,
+        timeout=60,
+    )
+    return _decode_response(response, thread_id, context="analist yorumu")
 
 
 def send_research_bundle(
@@ -95,30 +116,38 @@ def send_research_bundle(
     technical_chart: Path,
     report: ResearchReport,
 ) -> tuple[dict[str, Any], ...]:
-    """Send four research images and verify every Telegram message/topic result."""
+    """Send summary, analyst paragraphs and research visuals with topic verification."""
     token, chat_id, thread_id = _destination()
-    results = [
+    results: list[dict[str, Any]] = [
         _send_photo(token, chat_id, thread_id, summary_card, _caption(report)),
-        _send_photo(
-            token,
-            chat_id,
-            thread_id,
-            fundamental_card,
-            f"{report.symbol} · Temel analiz / sektör profili",
-        ),
-        _send_photo(
-            token,
-            chat_id,
-            thread_id,
-            moving_average_card,
-            f"{report.symbol} · Günlük MA 5/8/13 · 21/34/55 · 89/144/233",
-        ),
-        _send_photo(
-            token,
-            chat_id,
-            thread_id,
-            technical_chart,
-            f"{report.symbol} · Fiyat + Hacim + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR",
-        ),
     ]
+    results.extend(
+        _send_text(token, chat_id, thread_id, message)
+        for message in commentary_messages(report)
+    )
+    results.extend(
+        [
+            _send_photo(
+                token,
+                chat_id,
+                thread_id,
+                fundamental_card,
+                f"{report.symbol} · Temel analiz / sektör profili",
+            ),
+            _send_photo(
+                token,
+                chat_id,
+                thread_id,
+                moving_average_card,
+                f"{report.symbol} · Günlük MA 5/8/13 · 21/34/55 · 89/144/233",
+            ),
+            _send_photo(
+                token,
+                chat_id,
+                thread_id,
+                technical_chart,
+                f"{report.symbol} · Fiyat + Hacim + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR",
+            ),
+        ]
+    )
     return tuple(results)
