@@ -6,7 +6,7 @@ on:
       symbols:
         description: "Boşlukla ayrılmış BIST sembolleri"
         required: true
-        default: "ZGYO THYAO AKBNK ANSGR SAHOL"
+        default: "ZGYO THYAO BIMAS AKBNK ANSGR SAHOL ASELS GEDIK"
   push:
     branches:
       - rebuild/v3-market-analysis-engine
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      PROBE_SYMBOLS: ${{ github.event.inputs.symbols || 'ZGYO THYAO AKBNK ANSGR SAHOL' }}
+      PROBE_SYMBOLS: ${{ github.event.inputs.symbols || 'ZGYO THYAO BIMAS AKBNK ANSGR SAHOL ASELS GEDIK' }}
     steps:
       - uses: actions/checkout@v6
 
