@@ -28,6 +28,7 @@ from .scenario import (
     pending_conditions,
 )
 from .structure import build_structure_state
+from .technical_synthesis import build_technical_synthesis
 
 
 def _number(value: Any, default: float = math.nan) -> float:
@@ -94,10 +95,10 @@ def build_market_state(
     """Tek canonical market state üretir.
 
     Dış tarama kaynakları yalnız versioned adapter contract üzerinden alınır.
-    Scanner sinyalleri şimdilik yön skoruna otomatik oy vermez; raporda gözlemsel
+    Scanner sinyalleri doğrudan yön skoruna otomatik oy vermez; raporda gözlemsel
     kanıt olarak tutulur. MA level watchlist verisi ise aynı timeframe için ortak
     Level Engine'e destek/direnç kaynağı olarak eklenebilir. Teknik feature
-    bölümleri de ayrı tutulur; yorum üretir ama burada ikinci kez yön oyu verilmez.
+    bölümleri ayrıca tutulur ve conflict synthesis katmanı uyum/ayrışmayı açıklar.
     """
     required = {"Open", "High", "Low", "Close"}
     missing = sorted(required.difference(data.columns))
@@ -110,8 +111,10 @@ def build_market_state(
     if not math.isfinite(price):
         raise ValueError("MarketState için son kapanış fiyatı geçerli olmalıdır.")
 
-    scanner_evidence = [scan_signal_from_mapping(row) for row in (scanner_rows or [])]
-    ma_level_evidence = [ma_level_from_mapping(row) for row in (ma_level_rows or [])]
+    scanner_objects = [scan_signal_from_mapping(row) for row in (scanner_rows or [])]
+    ma_level_objects = [ma_level_from_mapping(row) for row in (ma_level_rows or [])]
+    scanner_evidence = [asdict(item) for item in scanner_objects]
+    ma_level_evidence = [asdict(item) for item in ma_level_objects]
 
     indicator_values = dict(indicators or {})
     feature_values = dict(technical_features or {})
@@ -122,7 +125,7 @@ def build_market_state(
 
     levels: list[TechnicalLevel] = list(structure.get("levels", []))
     levels.extend(wave_levels(waves, price=price, atr=_atr(data)))
-    levels.extend(ma_levels_for_interval(ma_level_evidence, price=price, interval=interval))
+    levels.extend(ma_levels_for_interval(ma_level_objects, price=price, interval=interval))
     levels = rank_levels(levels, price)
     active = nearest_active_levels(levels, price)
 
@@ -160,6 +163,14 @@ def build_market_state(
     evidence.extend(multi_timeframe_evidence(multi_timeframe))
     evidence_summary = summarize_evidence(evidence)
 
+    technical_synthesis = build_technical_synthesis(
+        structure=structure_summary,
+        technical_features=feature_values,
+        scanner_evidence=scanner_evidence,
+        ma_level_evidence=ma_level_evidence,
+        evidence_summary=evidence_summary,
+    )
+
     interpretation = build_interpretation(
         price=price,
         structure=structure_summary,
@@ -174,6 +185,18 @@ def build_market_state(
         multi_timeframe=multi_timeframe,
     )
 
+    if critical:
+        technical_synthesis = {
+            "state": "DATA_INSUFFICIENT",
+            "headline": "Teknik sentez kritik veri kalitesi nedeniyle durduruldu.",
+            "positives": [],
+            "risks": [],
+            "conflicts": [],
+            "live_scanner_sides": [],
+            "historical_scanner_count": len(scanner_evidence),
+            "data_note": "Kritik veri kalitesi sorunu çözülmeden sentez üretilmez.",
+        }
+
     return MarketState(
         symbol=symbol,
         timestamp=data.index[-1],
@@ -184,6 +207,7 @@ def build_market_state(
         data_quality=quality,
         indicators=indicator_values,
         technical_features=feature_values,
+        technical_synthesis=technical_synthesis,
         structure=structure_summary,
         wave_hypotheses=waves,
         levels=levels,
@@ -194,8 +218,8 @@ def build_market_state(
         interpretation=interpretation,
         relative_strength=relative_strength,
         multi_timeframe=multi_timeframe,
-        scanner_evidence=[asdict(item) for item in scanner_evidence],
-        ma_level_evidence=[asdict(item) for item in ma_level_evidence],
+        scanner_evidence=scanner_evidence,
+        ma_level_evidence=ma_level_evidence,
         limitations=limitations,
         confidence={
             "wave_primary": waves[0].confidence if waves else None,
