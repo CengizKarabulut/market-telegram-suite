@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.original_indicators import build_indicator_frame, moving_averages, rsi
+from src.original_indicators import build_indicator_frame, moving_averages, rsi, rsi_divergences
 
 
 class OriginalIndicatorTests(unittest.TestCase):
@@ -28,6 +28,7 @@ class OriginalIndicatorTests(unittest.TestCase):
         data, divergences = build_indicator_frame(self.frame())
         expected = {
             "RSI14",
+            "RSI_MA14",
             "SMI",
             "SMI_SIGNAL",
             "MACD",
@@ -40,9 +41,12 @@ class OriginalIndicatorTests(unittest.TestCase):
             "BB_LOWER",
             "AlphaTrend",
             "AlphaTrendLag2",
+            "AlphaTrendBuy",
+            "AlphaTrendSell",
         }
         self.assertTrue(expected.issubset(data.columns))
         self.assertTrue(data["RSI14"].dropna().between(0, 100).all())
+        self.assertTrue(np.isfinite(data["RSI_MA14"].dropna().iloc[-1]))
         self.assertTrue((data["BB_UPPER"].dropna() >= data.loc[data["BB_UPPER"].dropna().index, "BB_MID"]).all())
         self.assertTrue((data["BB_LOWER"].dropna() <= data.loc[data["BB_LOWER"].dropna().index, "BB_MID"]).all())
         self.assertGreater(data["ATR14"].dropna().iloc[-1], 0)
@@ -55,6 +59,23 @@ class OriginalIndicatorTests(unittest.TestCase):
         frame["Low"] = frame["Close"] - 1.0
         result = rsi(frame, 14)
         self.assertAlmostEqual(float(result.dropna().iloc[-1]), 100.0, places=6)
+
+    def test_divergence_retains_previous_pivot_for_original_line(self) -> None:
+        frame = self.frame(40)
+        osc = pd.Series(50.0, index=frame.index)
+        # Two confirmed oscillator pivot lows 10 bars apart: RSI higher low,
+        # while price makes a lower low -> regular bullish divergence.
+        osc.iloc[10] = 20.0
+        osc.iloc[20] = 30.0
+        frame.loc[frame.index[10], "Low"] = 90.0
+        frame.loc[frame.index[20], "Low"] = 85.0
+        points = rsi_divergences(frame, osc, left=2, right=2, range_lower=5, range_upper=60)
+        bullish = [point for point in points if point.kind == "Regular Bullish"]
+        self.assertTrue(bullish)
+        latest = bullish[-1]
+        self.assertEqual(latest.previous_index, frame.index[10])
+        self.assertAlmostEqual(float(latest.previous_rsi), 20.0)
+        self.assertEqual(latest.index, frame.index[20])
 
     def test_daily_ma_set_contains_all_requested_periods(self) -> None:
         averages = moving_averages(self.frame())
