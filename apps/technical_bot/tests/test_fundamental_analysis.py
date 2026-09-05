@@ -8,15 +8,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.bot_runner_fundamental import _validate_ticker
-from src.fundamental_analysis import (
-    Factor,
-    FundamentalReport,
-    _classify,
-    _clean_multiple,
-    build_fundamental_report,
-)
-from src.fundamental_card import render_fundamental_card
+import src.bot_runner_fundamental as bot_runner_fundamental
+import src.fundamental_analysis as fundamental_analysis
+import src.fundamental_card as fundamental_card
 
 
 PERIODS = ["2026/06", "2026/03", "2025/12", "2025/09", "2025/06", "2025/03", "2024/12", "2024/09"]
@@ -61,20 +55,20 @@ class FakeTicker:
 
 class FundamentalAnalysisTests(unittest.TestCase):
     def test_profile_classification(self) -> None:
-        self.assertEqual(_classify("GARAN", "Financial Services"), "BANK")
-        self.assertEqual(_classify("ZGYO", ""), "GYO")
-        self.assertEqual(_classify("THYAO", "Airlines"), "GENERIC")
+        self.assertEqual(fundamental_analysis._classify("GARAN", "Financial Services"), "BANK")
+        self.assertEqual(fundamental_analysis._classify("ZGYO", ""), "GYO")
+        self.assertEqual(fundamental_analysis._classify("THYAO", "Airlines"), "GENERIC")
 
     def test_provider_sentinel_is_missing(self) -> None:
-        self.assertIsNone(_clean_multiple(-100.0))
-        self.assertEqual(_clean_multiple(7.5), 7.5)
+        self.assertIsNone(fundamental_analysis._clean_multiple(-100.0))
+        self.assertEqual(fundamental_analysis._clean_multiple(7.5), 7.5)
 
     def test_garan_builds_bank_specific_factors(self) -> None:
         fake_module = types.SimpleNamespace(Ticker=FakeTicker)
         original = sys.modules.get("borsapy")
         sys.modules["borsapy"] = fake_module
         try:
-            report = build_fundamental_report("GARAN")
+            report = fundamental_analysis.build_fundamental_report("GARAN")
         finally:
             if original is None:
                 sys.modules.pop("borsapy", None)
@@ -91,7 +85,7 @@ class FundamentalAnalysisTests(unittest.TestCase):
         self.assertIn("resmi SYR değildir", report.note)
 
     def test_mobile_card_renders_png(self) -> None:
-        report = FundamentalReport(
+        report = fundamental_analysis.FundamentalReport(
             symbol="GARAN",
             company_name="Garanti Bankası",
             price=191.4,
@@ -100,11 +94,11 @@ class FundamentalAnalysisTests(unittest.TestCase):
             overall_score=3.42,
             coverage=0.88,
             factors=(
-                Factor("Gelir / Gider Yapısı", 4.5, 1.0, "Net faiz %+24.0"),
-                Factor("Büyüme", 2.4, 1.0, "Kredi %+18.0"),
-                Factor("Kârlılık", 3.8, 1.0, "ROE %+28.0"),
-                Factor("Sermaye Gücü", 3.1, 0.8, "Özk./aktif %+11.0"),
-                Factor("Bilanço Yapısı", 3.3, 1.0, "Kredi/mevduat 0.90x"),
+                fundamental_analysis.Factor("Gelir / Gider Yapısı", 4.5, 1.0, "Net faiz %+24.0"),
+                fundamental_analysis.Factor("Büyüme", 2.4, 1.0, "Kredi %+18.0"),
+                fundamental_analysis.Factor("Kârlılık", 3.8, 1.0, "ROE %+28.0"),
+                fundamental_analysis.Factor("Sermaye Gücü", 3.1, 0.8, "Özk./aktif %+11.0"),
+                fundamental_analysis.Factor("Bilanço Yapısı", 3.3, 1.0, "Kredi/mevduat 0.90x"),
             ),
             positives=("Kârlılık: güçlü görünüm (3.8/5).",),
             risks=("Büyüme: izlenmeli (2.4/5).",),
@@ -112,16 +106,16 @@ class FundamentalAnalysisTests(unittest.TestCase):
             note="Sermaye Gücü resmi SYR değildir.",
         )
         with tempfile.TemporaryDirectory() as directory:
-            path = render_fundamental_card(report, Path(directory) / "garanti.png")
+            path = fundamental_card.render_fundamental_card(report, Path(directory) / "garanti.png")
             self.assertTrue(path.exists())
             self.assertGreater(path.stat().st_size, 10_000)
 
     def test_temel_command_ticker_validation(self) -> None:
-        self.assertEqual(_validate_ticker(["garan"]), ("GARAN", None))
-        ticker, error = _validate_ticker([])
+        self.assertEqual(bot_runner_fundamental._validate_ticker(["garan"]), ("GARAN", None))
+        ticker, error = bot_runner_fundamental._validate_ticker([])
         self.assertIsNone(ticker)
         self.assertIn("Sembol belirtilmedi", str(error))
-        ticker, error = _validate_ticker(["GARAN", "4h"])
+        ticker, error = bot_runner_fundamental._validate_ticker(["GARAN", "4h"])
         self.assertIsNone(ticker)
         self.assertIn("zaman diliminden bağımsız", str(error))
 
