@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 
-import requests
-
 from src import bot_runner as base
+
+import requests
 
 
 V4_WORKFLOW_FILE = os.getenv("V4_WORKFLOW_FILE", "v4-equity-report.yml")
