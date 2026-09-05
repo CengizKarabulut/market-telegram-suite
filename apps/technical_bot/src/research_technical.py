@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
-
 from src import research_engine as core
 from src.original_indicators import build_indicator_frame
 from src.research_engine import LevelZone
@@ -18,7 +16,11 @@ def _technical_analysis(symbol: str) -> tuple[dict[str, Any], tuple[LevelZone, .
     prepared = core._prepare_prices(stock.history(period="2y", interval="1d"))
     daily, divergences = build_indicator_frame(prepared, include_hidden_divergence=False)
     daily = daily.dropna(subset=["ATR14"]).copy()
-    if len(daily) < 240:
+    # The longest visual MA (233) is optional and may legitimately be unavailable
+    # for recently listed shares. Core technical indicators only need a much
+    # shorter history, so fail closed only when market-structure context itself
+    # would be unreliable.
+    if len(daily) < 80:
         raise RuntimeError("Insufficient daily history for technical research")
 
     pivot_frame = prepared.dropna(subset=["ATR"])
@@ -35,10 +37,10 @@ def _technical_analysis(symbol: str) -> tuple[dict[str, Any], tuple[LevelZone, .
     if alpha is None or alpha_lag2 is None:
         alpha_score = None
         alpha_state = "VERİ YETERSİZ"
-    elif price > alpha and alpha > alpha_lag2:
+    elif price > alpha > alpha_lag2:
         alpha_score = 90.0
         alpha_state = "FİYAT ÜSTÜNDE / YÜKSELEN"
-    elif price < alpha and alpha < alpha_lag2:
+    elif price < alpha < alpha_lag2:
         alpha_score = 10.0
         alpha_state = "FİYAT ALTINDA / DÜŞEN"
     else:
