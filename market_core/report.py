@@ -20,6 +20,14 @@ INTERVAL_LABELS = {
     "1mo": "aylık",
 }
 
+TECHNICAL_SECTION_LABELS = {
+    "trend_and_averages": "Trend ve Ortalamalar",
+    "momentum": "Momentum",
+    "participation": "Hacim / Katılım",
+    "trend_systems": "Trend Sistemleri",
+    "volatility": "Volatilite",
+}
+
 
 def interval_label(interval: str) -> str:
     return INTERVAL_LABELS.get(str(interval).lower(), str(interval))
@@ -137,6 +145,12 @@ def _ma_level_payload(state: MarketState) -> list[dict[str, Any]]:
     return rows[:12]
 
 
+def _technical_sections(state: MarketState) -> dict[str, Any]:
+    features = state.technical_features or {}
+    sections = features.get("sections") if features.get("available") else {}
+    return dict(sections or {})
+
+
 def build_report_contract(state: MarketState) -> dict[str, Any]:
     """Presentation/Telegram/PNG katmanlarının ortak rapor sözleşmesini üretir."""
     label = interval_label(state.interval)
@@ -162,6 +176,7 @@ def build_report_contract(state: MarketState) -> dict[str, Any]:
                 "multi_timeframe": bool(state.multi_timeframe.get("available")),
                 "scanner_evidence": bool(state.scanner_evidence),
                 "ma_level_evidence": bool(state.ma_level_evidence),
+                "technical_features": bool(state.technical_features.get("available")),
             },
             "headline": interpretation.get("headline"),
             "summary": _summary_text(state),
@@ -181,6 +196,7 @@ def build_report_contract(state: MarketState) -> dict[str, Any]:
                     else None
                 ),
             },
+            "technical_sections": _technical_sections(state),
             "location": {
                 "text": interpretation.get("location"),
                 "nearest_support": _level_payload(nearest_below) if nearest_below else None,
@@ -257,6 +273,23 @@ def _ma_label(item: dict[str, Any]) -> str:
     return f"• {timeframe} {side}: {zone}" + (f" · {suffix}" if suffix else "")
 
 
+def _technical_section_lines(report: dict[str, Any]) -> list[str]:
+    sections = report.get("technical_sections") or {}
+    lines: list[str] = []
+    for key in (
+        "trend_and_averages",
+        "momentum",
+        "participation",
+        "trend_systems",
+        "volatility",
+    ):
+        section = sections.get(key) or {}
+        interpretation = str(section.get("interpretation") or "").strip()
+        if interpretation:
+            lines.append(f"• {TECHNICAL_SECTION_LABELS[key]}: {interpretation}")
+    return lines
+
+
 def format_telegram_preview(report: dict[str, Any]) -> str:
     """Yeni presentation sözleşmesinden kompakt, interval-aware Telegram metni."""
     if not report.get("availability", {}).get("analysis", True):
@@ -275,7 +308,7 @@ def format_telegram_preview(report: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         change_text = "—"
     lines = [
-        f"{symbol} — V3 Teknik Durum ({label})",
+        f"{symbol} — V4 Teknik Durum ({label})",
         f"Fiyat: {price} · Değişim: {change_text}",
         "",
         str(report.get("headline") or ""),
@@ -291,6 +324,12 @@ def format_telegram_preview(report: dict[str, Any]) -> str:
         value = current.get(key)
         if value:
             lines.append(f"{title}: {value}")
+
+    technical_lines = _technical_section_lines(report)
+    if technical_lines:
+        lines.append("")
+        lines.append("Teknik bölüm yorumları:")
+        lines.extend(technical_lines)
 
     scanner = report.get("scanner_evidence") or []
     if scanner:
