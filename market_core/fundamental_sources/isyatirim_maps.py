@@ -37,6 +37,7 @@ ISYATIRIM_XI29_GYO_ROW_MAP = CanonicalRowMap(
     income_statement={
         "revenue": ("Satış Gelirleri",),
         "gross_profit": ("BRÜT KAR (ZARAR)",),
+        "other_operating_income": ("Esas Faaliyetlerden Diğer Gelirler",),
         "ebit": ("FAALİYET KARI (ZARARI)",),
         "profit_before_tax": (
             "SÜRDÜRÜLEN FAALİYETLER VERGİ ÖNCESİ KARI (ZARARI)",
