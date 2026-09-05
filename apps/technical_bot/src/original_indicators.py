@@ -1,9 +1,13 @@
 """Pine-faithful indicator calculations used by the research chart.
 
 The implementations mirror the user-supplied TradingView scripts and defaults:
-RSI(14) with Wilder RMA + regular divergence, SMI(10,3,3), AlphaTrend(14,1),
-MACD(12,26,9 EMA), OBV, ATR(14 RMA) and price Bollinger Bands (20,2).
-AlphaTrend BUY/SELL labels are intentionally not exposed by the report layer.
+RSI(14) with Wilder RMA, RSI SMA(14) smoothing and regular divergence (5/5,
+5-60); SMI(10,3,3); AlphaTrend(14,1) volume-aware MFI branch;
+MACD(12,26,9 EMA); OBV; ATR(14 RMA); and price Bollinger Bands (20,2).
+
+AlphaTrend BUY/SELL conditions are calculated exactly but remain hidden by the
+report renderer because this project deliberately does not publish automatic
+AL/SAT labels.
 """
 
 from __future__ import annotations
@@ -20,6 +24,9 @@ class DivergencePoint:
     index: object
     rsi: float
     price: float
+    previous_index: object | None = None
+    previous_rsi: float | None = None
+    previous_price: float | None = None
 
 
 def _series(values: pd.Series) -> pd.Series:
@@ -27,13 +34,13 @@ def _series(values: pd.Series) -> pd.Series:
 
 
 def tv_ema(values: pd.Series, length: int) -> pd.Series:
-    """TradingView-style EMA: alpha=2/(n+1), recursive from first non-NaN."""
+    """TradingView-style recursive EMA."""
     source = _series(values)
     return source.ewm(span=length, adjust=False, min_periods=1).mean()
 
 
 def tv_rma(values: pd.Series, length: int) -> pd.Series:
-    """Wilder RMA seeded with the first length-value SMA."""
+    """Wilder RMA seeded with the first complete length-value SMA."""
     source = _series(values)
     out = pd.Series(np.nan, index=source.index, dtype=float)
     if length <= 0:
@@ -81,17 +88,17 @@ def true_range(frame: pd.DataFrame) -> pd.Series:
 
 
 def rsi(frame: pd.DataFrame, length: int = 14) -> pd.Series:
+    """User-supplied TradingView RSI formula: Wilder RMA of gains/losses."""
     close = _series(frame["Close"])
     change = close.diff()
     up = tv_rma(change.clip(lower=0.0), length)
-    down = tv_rma((-change.clip(upper=0.0)), length)
+    down = tv_rma(-change.clip(upper=0.0), length)
     ratio = up / down.replace(0.0, np.nan)
     result = 100.0 - (100.0 / (1.0 + ratio))
     result = result.where(down != 0.0, 100.0)
     result = result.where(up != 0.0, 0.0)
     both_zero = (up == 0.0) & (down == 0.0)
-    result = result.where(~both_zero, 0.0)
-    return result
+    return result.where(~both_zero, 0.0)
 
 
 def _pivot_flags(values: pd.Series, left: int, right: int, mode: str) -> pd.Series:
@@ -122,7 +129,7 @@ def rsi_divergences(
     range_upper: int = 60,
     include_hidden: bool = False,
 ) -> tuple[DivergencePoint, ...]:
-    """Mirror TradingView RSI Divergence defaults; regular divergences are on."""
+    """Mirror the supplied TradingView RSI divergence pivot/valuewhen logic."""
     oscillator = rsi(frame) if rsi_values is None else _series(rsi_values)
     lows = _series(frame["Low"])
     highs = _series(frame["High"])
@@ -144,9 +151,29 @@ def rsi_divergences(
                 price_now = float(lows.iloc[i])
                 price_prev = float(lows.iloc[previous_low])
                 if price_now < price_prev and osc_now > osc_prev:
-                    points.append(DivergencePoint("Regular Bullish", oscillator.index[i], osc_now, price_now))
+                    points.append(
+                        DivergencePoint(
+                            "Regular Bullish",
+                            oscillator.index[i],
+                            osc_now,
+                            price_now,
+                            oscillator.index[previous_low],
+                            osc_prev,
+                            price_prev,
+                        )
+                    )
                 elif include_hidden and price_now > price_prev and osc_now < osc_prev:
-                    points.append(DivergencePoint("Hidden Bullish", oscillator.index[i], osc_now, price_now))
+                    points.append(
+                        DivergencePoint(
+                            "Hidden Bullish",
+                            oscillator.index[i],
+                            osc_now,
+                            price_now,
+                            oscillator.index[previous_low],
+                            osc_prev,
+                            price_prev,
+                        )
+                    )
         previous_low = i
 
     for i in high_indices:
@@ -158,15 +185,41 @@ def rsi_divergences(
                 price_now = float(highs.iloc[i])
                 price_prev = float(highs.iloc[previous_high])
                 if price_now > price_prev and osc_now < osc_prev:
-                    points.append(DivergencePoint("Regular Bearish", oscillator.index[i], osc_now, price_now))
+                    points.append(
+                        DivergencePoint(
+                            "Regular Bearish",
+                            oscillator.index[i],
+                            osc_now,
+                            price_now,
+                            oscillator.index[previous_high],
+                            osc_prev,
+                            price_prev,
+                        )
+                    )
                 elif include_hidden and price_now < price_prev and osc_now > osc_prev:
-                    points.append(DivergencePoint("Hidden Bearish", oscillator.index[i], osc_now, price_now))
+                    points.append(
+                        DivergencePoint(
+                            "Hidden Bearish",
+                            oscillator.index[i],
+                            osc_now,
+                            price_now,
+                            oscillator.index[previous_high],
+                            osc_prev,
+                            price_prev,
+                        )
+                    )
         previous_high = i
 
     return tuple(sorted(points, key=lambda point: point.index))
 
 
-def smi(frame: pd.DataFrame, length_k: int = 10, length_d: int = 3, length_ema: int = 3) -> tuple[pd.Series, pd.Series]:
+def smi(
+    frame: pd.DataFrame,
+    length_k: int = 10,
+    length_d: int = 3,
+    length_ema: int = 3,
+) -> tuple[pd.Series, pd.Series]:
+    """User-supplied TradingView SMI 10/3/3 double-EMA formula."""
     high = _series(frame["High"])
     low = _series(frame["Low"])
     close = _series(frame["Close"])
@@ -181,14 +234,18 @@ def smi(frame: pd.DataFrame, length_k: int = 10, length_d: int = 3, length_ema: 
     return value, signal
 
 
-def macd(frame: pd.DataFrame, fast: int = 12, slow: int = 26, signal_length: int = 9) -> tuple[pd.Series, pd.Series, pd.Series]:
+def macd(
+    frame: pd.DataFrame,
+    fast: int = 12,
+    slow: int = 26,
+    signal_length: int = 9,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
     close = _series(frame["Close"])
     fast_ma = tv_ema(close, fast)
     slow_ma = tv_ema(close, slow)
     line = fast_ma - slow_ma
     signal = tv_ema(line, signal_length)
-    histogram = line - signal
-    return line, signal, histogram
+    return line, signal, line - signal
 
 
 def obv(frame: pd.DataFrame) -> pd.Series:
@@ -202,7 +259,11 @@ def atr(frame: pd.DataFrame, length: int = 14) -> pd.Series:
     return tv_rma(true_range(frame), length)
 
 
-def bollinger(frame: pd.DataFrame, length: int = 20, mult: float = 2.0) -> tuple[pd.Series, pd.Series, pd.Series]:
+def bollinger(
+    frame: pd.DataFrame,
+    length: int = 20,
+    mult: float = 2.0,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
     """TradingView default price Bollinger Bands: SMA20 ± 2 population stdev."""
     close = _series(frame["Close"])
     basis = close.rolling(length, min_periods=length).mean()
@@ -225,8 +286,7 @@ def money_flow_index(frame: pd.DataFrame, length: int = 14) -> pd.Series:
     ratio = pos_sum / neg_sum.replace(0.0, np.nan)
     result = 100.0 - 100.0 / (1.0 + ratio)
     result = result.where(neg_sum != 0.0, 100.0)
-    result = result.where(pos_sum != 0.0, 0.0)
-    return result
+    return result.where(pos_sum != 0.0, 0.0)
 
 
 def alpha_trend(
@@ -259,23 +319,49 @@ def alpha_trend(
     lag2 = values.shift(2)
     buy = (values > lag2) & (values.shift(1) <= lag2.shift(1))
     sell = (values < lag2) & (values.shift(1) >= lag2.shift(1))
-    return pd.DataFrame({"AlphaTrend": values, "AlphaTrendLag2": lag2, "AlphaTrendBuy": buy, "AlphaTrendSell": sell})
+    return pd.DataFrame(
+        {
+            "AlphaTrend": values,
+            "AlphaTrendLag2": lag2,
+            "AlphaTrendBuy": buy,
+            "AlphaTrendSell": sell,
+        }
+    )
 
 
-def moving_averages(frame: pd.DataFrame, periods: tuple[int, ...] = (5, 8, 13, 21, 34, 55, 89, 144, 233)) -> pd.DataFrame:
+def moving_averages(
+    frame: pd.DataFrame,
+    periods: tuple[int, ...] = (5, 8, 13, 21, 34, 55, 89, 144, 233),
+) -> pd.DataFrame:
     close = _series(frame["Close"])
-    return pd.DataFrame({f"MA{period}": close.rolling(period, min_periods=period).mean() for period in periods}, index=frame.index)
+    return pd.DataFrame(
+        {f"MA{period}": close.rolling(period, min_periods=period).mean() for period in periods},
+        index=frame.index,
+    )
 
 
-def build_indicator_frame(frame: pd.DataFrame, *, include_hidden_divergence: bool = False) -> tuple[pd.DataFrame, tuple[DivergencePoint, ...]]:
+def build_indicator_frame(
+    frame: pd.DataFrame,
+    *,
+    include_hidden_divergence: bool = False,
+) -> tuple[pd.DataFrame, tuple[DivergencePoint, ...]]:
     out = frame.copy()
     out["RSI14"] = rsi(out, 14)
-    divergences = rsi_divergences(out, out["RSI14"], include_hidden=include_hidden_divergence)
+    # The supplied standard RSI has maTypeInput="SMA" and maLengthInput=14.
+    out["RSI_MA14"] = out["RSI14"].rolling(14, min_periods=14).mean()
+    divergences = rsi_divergences(
+        out,
+        out["RSI14"],
+        left=5,
+        right=5,
+        range_lower=5,
+        range_upper=60,
+        include_hidden=include_hidden_divergence,
+    )
     out["SMI"], out["SMI_SIGNAL"] = smi(out, 10, 3, 3)
     out["MACD"], out["MACD_SIGNAL"], out["MACD_HIST"] = macd(out, 12, 26, 9)
     out["OBV"] = obv(out)
     out["ATR14"] = atr(out, 14)
     out["BB_MID"], out["BB_UPPER"], out["BB_LOWER"] = bollinger(out, 20, 2.0)
-    alpha = alpha_trend(out, 14, 1.0, False)
-    out = out.join(alpha)
+    out = out.join(alpha_trend(out, 14, 1.0, False))
     return out, divergences
