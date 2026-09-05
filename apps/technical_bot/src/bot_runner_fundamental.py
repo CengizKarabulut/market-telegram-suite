@@ -17,7 +17,7 @@ from src.fundamental_quality import apply_coverage_policy
 from src.fundamental_telegram import send_fundamental_card
 from src.research_card import render_research_card
 from src.research_chart import render_research_chart
-from src.research_engine import build_research_report
+from src.research_risk import build_research_report
 from src.research_telegram import send_research_bundle
 from src.telegram_bot import VALID_TICKER
 
