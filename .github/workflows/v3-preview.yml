@@ -35,6 +35,11 @@ on:
           - AUTO
           - BORSAPY
           - YFINANCE
+  push:
+    branches:
+      - rebuild/v3-market-analysis-engine
+    paths:
+      - ".v3-preview-trigger"
 
 permissions:
   contents: read
@@ -57,17 +62,21 @@ jobs:
       - name: V3 preview üret
         env:
           PYTHONPATH: ../..
+          PREVIEW_SYMBOL: ${{ github.event.inputs.symbol || 'ZGYO' }}
+          PREVIEW_INTERVAL: ${{ github.event.inputs.interval || '1d' }}
+          PREVIEW_PERIOD: ${{ github.event.inputs.period || '2y' }}
+          PREVIEW_PROVIDER: ${{ github.event.inputs.provider || 'AUTO' }}
         run: >-
           python -m src.v3_preview_cli
-          "${{ inputs.symbol }}"
-          --interval "${{ inputs.interval }}"
-          --period "${{ inputs.period }}"
-          --provider "${{ inputs.provider }}"
+          "$PREVIEW_SYMBOL"
+          --interval "$PREVIEW_INTERVAL"
+          --period "$PREVIEW_PERIOD"
+          --provider "$PREVIEW_PROVIDER"
           --output reports/v3_preview
       - name: Preview artifact yükle
         uses: actions/upload-artifact@v7
         with:
-          name: v3-preview-${{ inputs.symbol }}-${{ inputs.interval }}-${{ github.run_id }}
+          name: v3-preview-${{ github.event.inputs.symbol || 'ZGYO' }}-${{ github.event.inputs.interval || '1d' }}-${{ github.run_id }}
           path: apps/technical_bot/reports/v3_preview/**
           if-no-files-found: error
           retention-days: 7
