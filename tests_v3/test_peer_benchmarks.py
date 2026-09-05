@@ -1,7 +1,11 @@
 import unittest
 
 from market_core.fundamental_models import SectorType
-from market_core.peer_benchmarks import PeerObservation, build_peer_benchmark
+from market_core.peer_benchmarks import (
+    PeerObservation,
+    build_hierarchical_peer_benchmark,
+    build_peer_benchmark,
+)
 
 
 class PeerBenchmarkTests(unittest.TestCase):
@@ -152,6 +156,27 @@ class PeerBenchmarkTests(unittest.TestCase):
         self.assertEqual(metric["peer_count"], 4)
         self.assertEqual(metric["basis_excluded_count"], 1)
         self.assertEqual(metric["basis"], "TTM")
+
+    def test_hierarchical_benchmark_explicitly_falls_back_to_broad_sector(self):
+        rows = [
+            PeerObservation("T", "AIRLINES", SectorType.INDUSTRIAL, {"roe": 0.20}),
+            PeerObservation("A", "AIRLINES", SectorType.INDUSTRIAL, {"roe": 0.15}),
+            PeerObservation("B", "AIRLINES", SectorType.INDUSTRIAL, {"roe": 0.16}),
+            PeerObservation("C", "MACHINERY", SectorType.INDUSTRIAL, {"roe": 0.11}),
+            PeerObservation("D", "MACHINERY", SectorType.INDUSTRIAL, {"roe": 0.12}),
+            PeerObservation("E", "RETAIL", SectorType.INDUSTRIAL, {"roe": 0.13}),
+            PeerObservation("F", "RETAIL", SectorType.INDUSTRIAL, {"roe": 0.14}),
+        ]
+        result = build_hierarchical_peer_benchmark(
+            target_symbol="T",
+            peer_group="AIRLINES",
+            sector_type=SectorType.INDUSTRIAL,
+            observations=rows,
+        )
+        self.assertFalse(result["industry_benchmark"]["metrics"]["roe"]["available"])
+        self.assertTrue(result["metrics"]["roe"]["available"])
+        self.assertEqual(result["metrics"]["roe"]["scope"], "BROAD_SECTOR_FALLBACK")
+        self.assertIn("roe", result["fallback_metrics"])
 
 
 if __name__ == "__main__":
