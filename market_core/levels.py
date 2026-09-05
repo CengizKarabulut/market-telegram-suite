@@ -114,6 +114,19 @@ def structural_levels(levels: Iterable[TechnicalLevel]) -> list[TechnicalLevel]:
     ]
 
 
+def _wave_is_actionable(hypothesis: WaveHypothesis) -> bool:
+    """Tamamlanmış sayımların eski invalidation/targetlarını canlı tetik yapma.
+
+    `COMPLETE_OR_EXTENDING` gibi açıkça uzama ihtimali taşıyan durumlar canlı
+    kabul edilir. Saf `ABC_COMPLETE` / `5_COMPLETE` sayımları ise yalnız tarihsel
+    bağlamdır ve ortak Level Engine'e aktif seviye üretmez.
+    """
+    status = str(hypothesis.active_wave or "").upper()
+    if "DEVELOPING" in status or "EXTENDING" in status:
+        return True
+    return "COMPLETE" not in status
+
+
 def wave_levels(
     hypotheses: Iterable[WaveHypothesis],
     price: float,
@@ -122,7 +135,7 @@ def wave_levels(
     """Elliott invalidation ve hedef bölgelerini ortak level modeline çevirir."""
     result: list[TechnicalLevel] = []
     for hypothesis in hypotheses:
-        if not hypothesis.hard_rule_valid:
+        if not hypothesis.hard_rule_valid or not _wave_is_actionable(hypothesis):
             continue
         if hypothesis.invalidation_level is not None:
             value = float(hypothesis.invalidation_level)
