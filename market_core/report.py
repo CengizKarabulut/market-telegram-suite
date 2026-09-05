@@ -220,14 +220,25 @@ def _fmt_number(value: Any, digits: int = 2) -> str:
 
 
 def _scanner_label(item: dict[str, Any]) -> str:
-    side = {"BUY": "AL adayı", "SELL": "SAT adayı", "NEUTRAL": "nötr"}.get(
-        str(item.get("side", "NEUTRAL")), str(item.get("side", ""))
-    )
+    state = str(item.get("state") or "").upper()
+    side = str(item.get("side", "NEUTRAL"))
+    if state == "HISTORICAL":
+        side_label = {
+            "BUY": "geçmiş AL sinyali",
+            "SELL": "geçmiş SAT sinyali",
+            "NEUTRAL": "geçmiş nötr kayıt",
+        }.get(side, "geçmiş tarama kaydı")
+    else:
+        side_label = {"BUY": "AL adayı", "SELL": "SAT adayı", "NEUTRAL": "nötr"}.get(side, side)
+        if state and state not in {"NEW", "ACTIVE", "CONFIRMED"}:
+            side_label = f"{side_label} · {state.lower()}"
     code = item.get("scanner_code") or item.get("scanner_name") or "Tarama"
     timeframe = interval_label(str(item.get("timeframe") or ""))
     age = item.get("age_bars")
     age_text = f" · {age} bar önce" if age is not None else ""
-    return f"• {timeframe} {code}: {side}{age_text}"
+    current_unknown = bool((item.get("data_quality") or {}).get("current_match_unknown"))
+    current_text = " · güncel eşleşme ayrıca teyit edilmeli" if current_unknown else ""
+    return f"• {timeframe} {code}: {side_label}{age_text}{current_text}"
 
 
 def _ma_label(item: dict[str, Any]) -> str:
