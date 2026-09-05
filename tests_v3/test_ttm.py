@@ -21,12 +21,15 @@ class TTMTests(unittest.TestCase):
         capex: float,
         flow_basis: str | None = None,
         scale: float = 1.0,
-        inflation_accounting: str | None = "TMS29",
+        inflation_accounting: str | None = None,
+        price_level_date: str | None = None,
         restatement_id: str | None = None,
     ) -> FinancialSnapshot:
         metadata = {}
         if flow_basis is not None:
             metadata["flow_basis"] = flow_basis
+        if price_level_date is not None:
+            metadata["price_level_date"] = price_level_date
         return FinancialSnapshot(
             symbol="ZGYO",
             sector_type=SectorType.GYO,
@@ -54,6 +57,7 @@ class TTMTests(unittest.TestCase):
             ocf=18.0,
             capex=5.0,
             scale=1_000.0,
+            inflation_accounting="TMS29",
         )
         result = assemble_ttm(
             [annual],
@@ -218,6 +222,138 @@ class TTMTests(unittest.TestCase):
         )
         self.assertFalse(result.available)
         self.assertIn("enflasyon muhasebesi", (result.reason or "").lower())
+
+    def test_tms29_interim_requires_explicit_price_level_date(self) -> None:
+        prior_ytd = self._snapshot(
+            period_end=datetime(2025, 6, 30, tzinfo=UTC),
+            published_at=datetime(2026, 8, 10, 18, 32, tzinfo=UTC),
+            statement_type=StatementType.QUARTERLY,
+            revenue=40.0,
+            net_income=6.0,
+            ocf=5.0,
+            capex=1.0,
+            flow_basis="CUMULATIVE_YTD",
+            inflation_accounting="TMS29",
+        )
+        annual = self._snapshot(
+            period_end=datetime(2025, 12, 31, tzinfo=UTC),
+            published_at=datetime(2026, 3, 2, 22, 44, tzinfo=UTC),
+            statement_type=StatementType.ANNUAL,
+            revenue=100.0,
+            net_income=20.0,
+            ocf=18.0,
+            capex=5.0,
+            inflation_accounting="TMS29",
+        )
+        current = self._snapshot(
+            period_end=datetime(2026, 6, 30, tzinfo=UTC),
+            published_at=datetime(2026, 8, 10, 18, 32, tzinfo=UTC),
+            statement_type=StatementType.QUARTERLY,
+            revenue=60.0,
+            net_income=12.0,
+            ocf=10.0,
+            capex=3.0,
+            flow_basis="CUMULATIVE_YTD",
+            inflation_accounting="TMS29",
+        )
+        result = assemble_ttm(
+            [prior_ytd, annual, current],
+            symbol="ZGYO",
+            as_of=datetime(2026, 8, 11, tzinfo=UTC),
+        )
+        self.assertFalse(result.available)
+        self.assertIn("price_level_date", result.reason or "")
+
+    def test_tms29_interim_requires_matching_price_level_dates(self) -> None:
+        prior_ytd = self._snapshot(
+            period_end=datetime(2025, 6, 30, tzinfo=UTC),
+            published_at=datetime(2026, 8, 10, 18, 32, tzinfo=UTC),
+            statement_type=StatementType.QUARTERLY,
+            revenue=40.0,
+            net_income=6.0,
+            ocf=5.0,
+            capex=1.0,
+            flow_basis="CUMULATIVE_YTD",
+            inflation_accounting="TMS29",
+            price_level_date="2026-06-30",
+        )
+        annual = self._snapshot(
+            period_end=datetime(2025, 12, 31, tzinfo=UTC),
+            published_at=datetime(2026, 3, 2, 22, 44, tzinfo=UTC),
+            statement_type=StatementType.ANNUAL,
+            revenue=100.0,
+            net_income=20.0,
+            ocf=18.0,
+            capex=5.0,
+            inflation_accounting="TMS29",
+            price_level_date="2025-12-31",
+        )
+        current = self._snapshot(
+            period_end=datetime(2026, 6, 30, tzinfo=UTC),
+            published_at=datetime(2026, 8, 10, 18, 32, tzinfo=UTC),
+            statement_type=StatementType.QUARTERLY,
+            revenue=60.0,
+            net_income=12.0,
+            ocf=10.0,
+            capex=3.0,
+            flow_basis="CUMULATIVE_YTD",
+            inflation_accounting="TMS29",
+            price_level_date="2026-06-30",
+        )
+        result = assemble_ttm(
+            [prior_ytd, annual, current],
+            symbol="ZGYO",
+            as_of=datetime(2026, 8, 11, tzinfo=UTC),
+        )
+        self.assertFalse(result.available)
+        self.assertIn("baz tarih", (result.reason or "").lower())
+
+    def test_tms29_interim_succeeds_with_common_price_level_date(self) -> None:
+        common_basis = "2026-06-30"
+        prior_ytd = self._snapshot(
+            period_end=datetime(2025, 6, 30, tzinfo=UTC),
+            published_at=datetime(2026, 8, 10, 18, 32, tzinfo=UTC),
+            statement_type=StatementType.QUARTERLY,
+            revenue=40.0,
+            net_income=6.0,
+            ocf=5.0,
+            capex=1.0,
+            flow_basis="CUMULATIVE_YTD",
+            inflation_accounting="TMS29",
+            price_level_date=common_basis,
+        )
+        annual = self._snapshot(
+            period_end=datetime(2025, 12, 31, tzinfo=UTC),
+            published_at=datetime(2026, 8, 10, 18, 32, tzinfo=UTC),
+            statement_type=StatementType.ANNUAL,
+            revenue=100.0,
+            net_income=20.0,
+            ocf=18.0,
+            capex=5.0,
+            inflation_accounting="TMS29",
+            price_level_date=common_basis,
+        )
+        current = self._snapshot(
+            period_end=datetime(2026, 6, 30, tzinfo=UTC),
+            published_at=datetime(2026, 8, 10, 18, 32, tzinfo=UTC),
+            statement_type=StatementType.QUARTERLY,
+            revenue=60.0,
+            net_income=12.0,
+            ocf=10.0,
+            capex=3.0,
+            flow_basis="CUMULATIVE_YTD",
+            inflation_accounting="TMS29",
+            price_level_date=common_basis,
+        )
+        result = assemble_ttm(
+            [prior_ytd, annual, current],
+            symbol="ZGYO",
+            as_of=datetime(2026, 8, 11, tzinfo=UTC),
+        )
+        self.assertTrue(result.available)
+        self.assertEqual(result.quality["price_level_date"], common_basis)
+        for component in result.components:
+            self.assertEqual(component["price_level_date"], common_basis)
 
 
 if __name__ == "__main__":
