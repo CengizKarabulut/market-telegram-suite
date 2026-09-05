@@ -5,7 +5,12 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from src.original_indicators import build_indicator_frame, moving_averages, rsi, rsi_divergences
+from src.original_indicators import (
+    build_indicator_frame,
+    moving_averages,
+    rsi,
+    rsi_divergences,
+)
 
 
 class OriginalIndicatorTests(unittest.TestCase):
@@ -63,8 +68,6 @@ class OriginalIndicatorTests(unittest.TestCase):
     def test_divergence_retains_previous_pivot_for_original_line(self) -> None:
         frame = self.frame(40)
         osc = pd.Series(50.0, index=frame.index)
-        # Two confirmed oscillator pivot lows 10 bars apart: RSI higher low,
-        # while price makes a lower low -> regular bullish divergence.
         osc.iloc[10] = 20.0
         osc.iloc[20] = 30.0
         frame.loc[frame.index[10], "Low"] = 90.0
