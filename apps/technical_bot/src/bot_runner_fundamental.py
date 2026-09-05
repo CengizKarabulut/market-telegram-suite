@@ -15,6 +15,7 @@ from src.fundamental_analysis import build_fundamental_report
 from src.fundamental_card import render_fundamental_card
 from src.fundamental_quality import apply_coverage_policy
 from src.fundamental_telegram import send_fundamental_card
+from src.moving_average_card import render_moving_average_card
 from src.research_card import render_research_card
 from src.research_chart import render_research_chart
 from src.research_risk import build_research_report
@@ -68,12 +69,15 @@ def handle_research(chat_id: int, args: list[str]) -> None:
 
     summary_image = render_research_card(report, target / f"{ticker}_arastirma.png")
     fundamental_image = render_fundamental_card(report.fundamental, target / f"{ticker}_temel.png")
+    ma_image, ma_snapshot = render_moving_average_card(ticker, target / f"{ticker}_ortalamalar.png")
     technical_image = render_research_chart(ticker, report, target / f"{ticker}_teknik_yapi.png")
+    payload = report.to_dict()
+    payload["moving_averages"] = ma_snapshot
     Path(target / f"{ticker}_arastirma.json").write_text(
-        json.dumps(report.to_dict(), ensure_ascii=False, indent=2, default=str) + "\n",
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n",
         encoding="utf-8",
     )
-    send_research_bundle(summary_image, fundamental_image, technical_image, report)
+    send_research_bundle(summary_image, fundamental_image, ma_image, technical_image, report)
 
 
 def execute(command, intervals: set[str]) -> None:
@@ -88,7 +92,7 @@ def execute(command, intervals: set[str]) -> None:
 
 def main() -> None:
     fundamental_help = "/temel SEMBOL — sektör uyarlamalı temel analiz ve radar kartı"
-    research_help = "/analiz SEMBOL — temel + bilanço + değerleme + teknik yapı + kritik seviyeler + risk"
+    research_help = "/analiz SEMBOL — temel + bilanço + değerleme + MA tablosu + teknik yapı + risk"
     addition = ""
     if fundamental_help not in base.HELP_TEXT:
         addition += fundamental_help + "\n"
