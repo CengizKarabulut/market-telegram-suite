@@ -8,6 +8,7 @@ from src import bot_runner as base
 
 
 V4_WORKFLOW_FILE = os.getenv("V4_WORKFLOW_FILE", "v4-equity-report.yml")
+ORIGINAL_EXECUTE = base.execute
 APP_HELP_TEXT = (
     base.HELP_TEXT.replace(
         "Kullanılabilir komutlar:\n",
@@ -64,19 +65,18 @@ def execute(command, intervals: set[str]) -> None:
         _, message = dispatch_equity(ticker, interval)
         base.reply(command.chat_id, message)
         return
-    base.execute(command, intervals)
+    ORIGINAL_EXECUTE(command, intervals)
 
 
 def main() -> None:
     # Aynı Telegram getUpdates dinleyicisini kullanıyoruz; ikinci bir listener
     # açılmadığı için Telegram update çakışması oluşmaz.
     base.HELP_TEXT = APP_HELP_TEXT
-    original_execute = base.execute
     try:
         base.execute = execute
         base.main()
     finally:
-        base.execute = original_execute
+        base.execute = ORIGINAL_EXECUTE
 
 
 if __name__ == "__main__":
