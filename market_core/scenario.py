@@ -51,6 +51,47 @@ def condition_from_level(level: TechnicalLevel, price: float, side: str) -> Scen
     )
 
 
+def _same_trigger(left: ScenarioCondition, right: ScenarioCondition, tolerance: float) -> bool:
+    if left.side != right.side or left.trigger_type != right.trigger_type:
+        return False
+    if left.level is not None and right.level is not None:
+        return abs(left.level - right.level) <= tolerance
+    if left.zone is not None and right.zone is not None:
+        return (
+            abs(left.zone[0] - right.zone[0]) <= tolerance
+            and abs(left.zone[1] - right.zone[1]) <= tolerance
+        )
+    return False
+
+
+def deduplicate_conditions(
+    conditions: list[ScenarioCondition],
+    *,
+    tolerance: float = 1e-6,
+) -> list[ScenarioCondition]:
+    """Aynı fiyat koşulunu üreten confluence kaynaklarını tek senaryoda toplar.
+
+    Bir swing low ile Elliott invalidation aynı fiyata denk gelirse Telegram'da
+    aynı cümle iki kez gösterilmez. En yüksek öncelikli koşul temsilci kalır;
+    kaynak alanı audit için birleşik tutulur.
+    """
+    ordered = sorted(conditions, key=lambda item: item.priority, reverse=True)
+    unique: list[ScenarioCondition] = []
+    for condition in ordered:
+        duplicate = next(
+            (item for item in unique if _same_trigger(item, condition, tolerance)),
+            None,
+        )
+        if duplicate is None:
+            unique.append(condition)
+            continue
+        sources = sorted(set(duplicate.source.split("+") + condition.source.split("+")))
+        duplicate.source = "+".join(source for source in sources if source)
+        duplicate.id = f"CONFLUENCE:{duplicate.side}:{duplicate.level if duplicate.level is not None else duplicate.zone}"
+        duplicate.priority = max(duplicate.priority, condition.priority)
+    return unique
+
+
 def pending_conditions(conditions: list[ScenarioCondition]) -> list[ScenarioCondition]:
     """Sunum katmanına yalnız gerçekten gelecekte beklenen koşulları verir."""
     return [item for item in conditions if item.state == ScenarioState.PENDING]
