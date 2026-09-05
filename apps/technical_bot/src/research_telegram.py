@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 
-from src.research_commentary import commentary_messages
+from src.research_commentary_rich import commentary_messages
 from src.research_engine import ResearchReport
 from src.telegram_client import CAPTION_LIMIT, DEFAULT_CHAT_ID, caption_enabled, clip
 
@@ -39,7 +39,7 @@ def _caption(report: ResearchReport) -> str:
         f"Elliott bağlamı: {elliott.get('primary', '—')} · güven %{elliott.get('confidence', '—')}",
         f"Ana risk: {risk}",
         "",
-        "Devamında veri-temelli analist yorumu, temel kart, MA tablosu ve teknik grafik yer alır. Otomatik AL/SAT değildir.",
+        "Önce dört görsel, ardından bölüm bölüm analist yorumu gelir. Otomatik AL/SAT değildir.",
     ]
     return clip("\n".join(lines), CAPTION_LIMIT)
 
@@ -116,38 +116,34 @@ def send_research_bundle(
     technical_chart: Path,
     report: ResearchReport,
 ) -> tuple[dict[str, Any], ...]:
-    """Send summary, analyst paragraphs and research visuals with topic verification."""
+    """Send four visuals first, then analyst paragraphs, with topic verification."""
     token, chat_id, thread_id = _destination()
     results: list[dict[str, Any]] = [
         _send_photo(token, chat_id, thread_id, summary_card, _caption(report)),
+        _send_photo(
+            token,
+            chat_id,
+            thread_id,
+            fundamental_card,
+            f"{report.symbol} · Temel analiz / sektör profili",
+        ),
+        _send_photo(
+            token,
+            chat_id,
+            thread_id,
+            moving_average_card,
+            f"{report.symbol} · Günlük MA 5/8/13 · 21/34/55 · 89/144/233",
+        ),
+        _send_photo(
+            token,
+            chat_id,
+            thread_id,
+            technical_chart,
+            f"{report.symbol} · Fiyat + Hacim + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR",
+        ),
     ]
     results.extend(
         _send_text(token, chat_id, thread_id, message)
         for message in commentary_messages(report)
-    )
-    results.extend(
-        [
-            _send_photo(
-                token,
-                chat_id,
-                thread_id,
-                fundamental_card,
-                f"{report.symbol} · Temel analiz / sektör profili",
-            ),
-            _send_photo(
-                token,
-                chat_id,
-                thread_id,
-                moving_average_card,
-                f"{report.symbol} · Günlük MA 5/8/13 · 21/34/55 · 89/144/233",
-            ),
-            _send_photo(
-                token,
-                chat_id,
-                thread_id,
-                technical_chart,
-                f"{report.symbol} · Fiyat + Hacim + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR",
-            ),
-        ]
     )
     return tuple(results)
