@@ -16,6 +16,7 @@ class PeerObservation:
     peer_group: str
     sector_type: SectorType
     metrics: Mapping[str, float | None]
+    metric_basis: Mapping[str, str] = field(default_factory=dict)
     as_of: datetime | None = None
     period_end: datetime | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -58,13 +59,7 @@ def _percentile_rank(value: float, peers: list[float]) -> float:
     return (less + 0.5 * equal) / len(peers)
 
 
-def _position(
-    value: float,
-    *,
-    q1: float,
-    med: float,
-    q3: float,
-) -> str:
+def _position(value: float, *, q1: float, med: float, q3: float) -> str:
     if value >= q3:
         return "TOP_QUARTILE"
     if value > med:
@@ -110,22 +105,27 @@ def _benchmark_one_metric(
     target_value: float | None,
     peer_values: list[float],
     rule: SectorMetricRule,
+    basis: str | None,
+    basis_excluded_count: int,
 ) -> dict[str, Any]:
     if target_value is None:
         return {
             "available": False,
             "reason": "Hedef şirket metriği mevcut değil.",
             "peer_count": len(peer_values),
+            "basis": basis,
         }
     if len(peer_values) < rule.minimum_peers:
         return {
             "available": False,
             "reason": (
                 f"Sağlıklı karşılaştırma için en az {rule.minimum_peers} eş şirket gerekli; "
-                f"{len(peer_values)} bulundu."
+                f"uyumlu bazda {len(peer_values)} bulundu."
             ),
             "peer_count": len(peer_values),
+            "basis_excluded_count": basis_excluded_count,
             "target_value": target_value,
+            "basis": basis,
         }
 
     q1 = _quantile(peer_values, 0.25)
@@ -138,6 +138,8 @@ def _benchmark_one_metric(
         "available": True,
         "target_value": target_value,
         "peer_count": len(peer_values),
+        "basis_excluded_count": basis_excluded_count,
+        "basis": basis,
         "peer_mean": mean(peer_values),
         "peer_median": med,
         "peer_q1": q1,
@@ -159,13 +161,15 @@ def build_peer_benchmark(
     sector_type: SectorType,
     observations: Iterable[PeerObservation],
     target_metrics: Mapping[str, float | None] | None = None,
+    target_metric_basis: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Compare a company with same-group peers using robust distribution stats.
 
-    The target company is excluded from peer statistics so its own value cannot
-    pull the sector average/median toward itself. Median and quartiles are the
-    primary interpretation anchors; mean is exposed only as a secondary
-    reference because BIST ratios often contain strong outliers.
+    The target company is excluded from peer statistics. Metrics are compared
+    only when their declared basis matches the target (for example TTM with TTM,
+    current-YTD with current-YTD). Median and quartiles are the primary anchors;
+    mean is exposed only as a secondary reference because BIST ratios can carry
+    strong outliers.
     """
     symbol = target_symbol.strip().upper()
     group = peer_group.strip()
@@ -181,21 +185,31 @@ def build_peer_benchmark(
     ]
     target_row = next((item for item in rows if item.symbol.strip().upper() == symbol), None)
     metrics = dict(target_metrics or (target_row.metrics if target_row is not None else {}))
+    bases = dict(target_metric_basis or (target_row.metric_basis if target_row is not None else {}))
     peers = [item for item in rows if item.symbol.strip().upper() != symbol]
     profile = profile_for_sector(sector_type)
 
     metric_results: dict[str, dict[str, Any]] = {}
     for rule in profile.metric_rules:
         target_value = _finite(metrics.get(rule.metric))
-        peer_values = [
-            value
-            for item in peers
-            if (value := _finite(item.metrics.get(rule.metric))) is not None
-        ]
+        target_basis = str(bases.get(rule.metric) or "").strip() or None
+        peer_values: list[float] = []
+        basis_excluded_count = 0
+        for item in peers:
+            value = _finite(item.metrics.get(rule.metric))
+            if value is None:
+                continue
+            peer_basis = str(item.metric_basis.get(rule.metric) or "").strip() or None
+            if target_basis is not None and peer_basis != target_basis:
+                basis_excluded_count += 1
+                continue
+            peer_values.append(value)
         metric_results[rule.metric] = _benchmark_one_metric(
             target_value=target_value,
             peer_values=peer_values,
             rule=rule,
+            basis=target_basis,
+            basis_excluded_count=basis_excluded_count,
         )
 
     favourable = [
@@ -252,6 +266,7 @@ def build_peer_benchmark(
             "primary_location_statistic": "MEDIAN_AND_QUARTILES",
             "mean_is_secondary_reference": True,
             "peer_group_must_be_same_business_context": True,
+            "metric_basis_must_match_when_declared": True,
         },
     }
 
