@@ -15,6 +15,7 @@ from market_core.models import (
 from market_core.scenario import (
     assert_no_completed_condition_is_pending,
     condition_from_level,
+    deduplicate_conditions,
     pending_conditions,
 )
 from market_core.structure import classify_structure, swing_level_from_pivot
@@ -133,6 +134,28 @@ class LevelEngineTests(unittest.TestCase):
         target = next(item for item in levels if item.source == "ELLIOTT_TARGET")
         self.assertEqual(target.zone_low, 22.4)
         self.assertEqual(target.zone_high, 23.1)
+
+    def test_same_price_confluence_becomes_one_scenario(self) -> None:
+        swing = TechnicalLevel(
+            value=19.19,
+            source="SWING_LOW",
+            role="SUPPORT",
+            priority=0.58,
+        )
+        wave = TechnicalLevel(
+            value=19.19,
+            source="ELLIOTT_INVALIDATION",
+            role="WAVE_INVALIDATION",
+            priority=0.60,
+        )
+        conditions = [
+            condition_from_level(swing, price=21.0, side="DOWN"),
+            condition_from_level(wave, price=21.0, side="DOWN"),
+        ]
+        unique = deduplicate_conditions(conditions)
+        self.assertEqual(len(unique), 1)
+        self.assertIn("SWING_LOW", unique[0].source)
+        self.assertIn("ELLIOTT_INVALIDATION", unique[0].source)
 
 
 class ElliottTests(unittest.TestCase):
