@@ -52,6 +52,11 @@ def _zone_text(zone: LevelZone) -> str:
 
 
 def _panel(ax: plt.Axes) -> None:
+    # Text and separator lines use data coordinates, so pin them explicitly.
+    # Without fixed limits matplotlib autoscaling can move the first rows outside
+    # the intended card even though the background patch uses axes coordinates.
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
     ax.axis("off")
     ax.add_patch(
         FancyBboxPatch(
@@ -83,8 +88,6 @@ def render_research_card(report: ResearchReport, output: Path) -> Path:
     fig.text(0.94, 0.915, _stars(report.research_score), fontsize=18, color=TEAL, ha="right")
     fig.text(0.94, 0.882, f"Veri kapsamı %{round(report.coverage * 100)}", fontsize=8.7, color=MUTED, ha="right")
 
-    # Give the five dimensions a dedicated tall panel. The fifth row is kept
-    # well above the risk card so long summaries can never be hidden behind it.
     dimensions_ax = fig.add_axes([0.055, 0.455, 0.89, 0.395])
     _panel(dimensions_ax)
     dimensions_ax.text(0.035, 0.955, "BEŞ BOYUTLU OKUMA", fontsize=10.5, color=TEAL, fontweight="bold", va="top")
