@@ -48,6 +48,9 @@ class Pivot:
     strength: float = 0.0
     prominence_atr: float = 0.0
     confirmed: bool = True
+    # Pivot ancak sağ teyit barları tamamlandıktan sonra karar motoru tarafından
+    # kullanılabilir. Bu alan look-ahead bias oluşmasını engeller.
+    confirmed_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,8 @@ class StructureEvent:
     trigger_index: int
     trigger_price: float
     confirmed: bool = True
+    prior_bias: str = "TRANSITION"
+    pivot_confirmed_index: int | None = None
 
 
 @dataclass
@@ -79,6 +84,8 @@ class TechnicalLevel:
     priority: float = 0.0
     actionability: float = 0.0
     confidence: float = 0.0
+    first_break_index: int | None = None
+    last_transition_index: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
