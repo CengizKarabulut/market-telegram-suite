@@ -115,6 +115,42 @@ BANK_PROFILE = SectorProfile(
 )
 
 
+INSURANCE_PROFILE = SectorProfile(
+    code="INSURANCE",
+    label="Sigorta / emeklilik",
+    metric_rules=(
+        _rule("roe", "Özkaynak kârlılığı", "HIGHER_BETTER"),
+        _rule("premium_growth", "Prim üretimi büyümesi", "HIGHER_BETTER"),
+        _rule("combined_ratio", "Bileşik rasyo", "LOWER_BETTER"),
+        _rule("loss_ratio", "Hasar/prim oranı", "LOWER_BETTER"),
+        _rule("solvency_ratio", "Sermaye yeterlilik/solvency oranı", "HIGHER_BETTER"),
+        _rule("investment_income_share", "Yatırım gelirlerinin kârdaki payı", "CONTEXTUAL"),
+        _rule("price_to_book", "Fiyat/defter değeri", "CONTEXTUAL"),
+    ),
+    notes=(
+        "Sigorta şirketlerinde net borç/FAVÖK ve sanayi tipi işletme sermayesi oranları temel kıyas değildir.",
+    ),
+)
+
+
+FINANCIAL_NONBANK_PROFILE = SectorProfile(
+    code="FINANCIAL_NONBANK",
+    label="Banka dışı finansal kuruluş",
+    metric_rules=(
+        _rule("roe", "Özkaynak kârlılığı", "HIGHER_BETTER"),
+        _rule("roa", "Aktif kârlılığı", "HIGHER_BETTER"),
+        _rule("net_interest_margin", "Net faiz/finansman marjı", "HIGHER_BETTER"),
+        _rule("cost_to_income", "Maliyet/gelir oranı", "LOWER_BETTER"),
+        _rule("npl_ratio", "Takipteki alacak oranı", "LOWER_BETTER"),
+        _rule("capital_adequacy_ratio", "Sermaye yeterlilik oranı", "HIGHER_BETTER"),
+        _rule("price_to_book", "Fiyat/defter değeri", "CONTEXTUAL"),
+    ),
+    notes=(
+        "Aracı kurum, finansal kiralama, faktoring ve benzeri şirketlerde iş modeline özel alt grup mümkün olduğunda geniş finansal sektör ortalaması yerine o grup kullanılmalıdır.",
+    ),
+)
+
+
 HOLDING_PROFILE = SectorProfile(
     code="HOLDING",
     label="Holding",
@@ -141,6 +177,8 @@ SECTOR_PROFILES: Mapping[SectorType, SectorProfile] = {
     SectorType.GYO: GYO_PROFILE,
     SectorType.BANK: BANK_PROFILE,
     SectorType.HOLDING: HOLDING_PROFILE,
+    SectorType.INSURANCE: INSURANCE_PROFILE,
+    SectorType.FINANCIAL_NONBANK: FINANCIAL_NONBANK_PROFILE,
     SectorType.INDUSTRIAL: INDUSTRIAL_PROFILE,
     SectorType.OTHER: GENERAL_PROFILE,
 }
@@ -152,10 +190,12 @@ def profile_for_sector(sector_type: SectorType) -> SectorProfile:
 
 __all__ = [
     "BANK_PROFILE",
+    "FINANCIAL_NONBANK_PROFILE",
     "GENERAL_PROFILE",
     "GYO_PROFILE",
     "HOLDING_PROFILE",
     "INDUSTRIAL_PROFILE",
+    "INSURANCE_PROFILE",
     "MetricDirection",
     "SectorMetricRule",
     "SectorProfile",
