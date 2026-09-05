@@ -46,6 +46,7 @@ from .serialization import market_state_dict, market_state_json, report_json, to
 from .technical_changes import build_technical_changes
 from .technical_features import build_technical_features
 from .ttm import TTMResult, assemble_ttm
+from .valuation import ValuationState, build_daily_valuation
 
 __all__ = [
     "Evidence",
@@ -65,8 +66,10 @@ __all__ = [
     "StructureEvent",
     "TTMResult",
     "TechnicalLevel",
+    "ValuationState",
     "WaveHypothesis",
     "assemble_ttm",
+    "build_daily_valuation",
     "build_fundamental_metrics",
     "build_market_state",
     "build_multi_timeframe",
