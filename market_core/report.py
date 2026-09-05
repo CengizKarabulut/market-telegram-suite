@@ -106,7 +106,12 @@ def _role_changes(levels: list[TechnicalLevel]) -> list[dict[str, Any]]:
             LevelLifecycle.REJECTED,
         }
     ]
-    changed.sort(key=lambda item: (item.age_bars if item.age_bars is not None else 10**9, -item.priority))
+    changed.sort(
+        key=lambda item: (
+            item.age_bars if item.age_bars is not None else 10**9,
+            -item.priority,
+        )
+    )
     return [_level_payload(level) for level in changed[:6]]
 
 
@@ -116,7 +121,10 @@ def _summary_text(state: MarketState) -> str:
         return str(synthesis["headline"])
     interpretation = state.interpretation or {}
     if not interpretation.get("available", True):
-        return str(interpretation.get("headline") or "Teknik yorum veri kalitesi nedeniyle kullanılamıyor.")
+        return str(
+            interpretation.get("headline")
+            or "Teknik yorum veri kalitesi nedeniyle kullanılamıyor."
+        )
     pieces = [str(interpretation.get("headline") or "").strip()]
     if interpretation.get("current_state"):
         pieces.append(str(interpretation["current_state"]).strip())
@@ -140,7 +148,8 @@ def _ma_level_payload(state: MarketState) -> list[dict[str, Any]]:
     rows.sort(
         key=lambda item: (
             abs(float(item.get("distance_atr")))
-            if item.get("distance_atr") is not None and math.isfinite(float(item.get("distance_atr")))
+            if item.get("distance_atr") is not None
+            and math.isfinite(float(item.get("distance_atr")))
             else math.inf,
             -float(item.get("zone_score") or 0.0),
         )
@@ -173,24 +182,28 @@ def build_report_contract(state: MarketState) -> dict[str, Any]:
             "price": state.price,
             "change_pct": state.change_pct,
             "availability": {
-                "analysis": not quality_blocked and bool(interpretation.get("available", True)),
+                "analysis": not quality_blocked
+                and bool(interpretation.get("available", True)),
                 "wave": bool(state.wave_hypotheses),
                 "relative_strength": bool(state.relative_strength.get("available")),
                 "multi_timeframe": bool(state.multi_timeframe.get("available")),
                 "scanner_evidence": bool(state.scanner_evidence),
                 "ma_level_evidence": bool(state.ma_level_evidence),
                 "technical_features": bool(state.technical_features.get("available")),
+                "technical_changes": bool(state.technical_changes.get("available")),
             },
             "headline": interpretation.get("headline"),
             "summary": _summary_text(state),
             "technical_synthesis": state.technical_synthesis,
+            "technical_changes": state.technical_changes,
             "current_state": {
                 "structure": interpretation.get("current_state"),
                 "structure_price_position": state.structure.get("price_position"),
                 "regime": state.regime.get("state") if state.regime else None,
                 "evidence": interpretation.get("evidence"),
                 "relative_strength": (
-                    f"{state.relative_strength.get('state')} ({state.relative_strength.get('benchmark')})"
+                    f"{state.relative_strength.get('state')} "
+                    f"({state.relative_strength.get('benchmark')})"
                     if state.relative_strength.get("available")
                     else None
                 ),
@@ -203,8 +216,12 @@ def build_report_contract(state: MarketState) -> dict[str, Any]:
             "technical_sections": _technical_sections(state),
             "location": {
                 "text": interpretation.get("location"),
-                "nearest_support": _level_payload(nearest_below) if nearest_below else None,
-                "nearest_resistance": _level_payload(nearest_above) if nearest_above else None,
+                "nearest_support": (
+                    _level_payload(nearest_below) if nearest_below else None
+                ),
+                "nearest_resistance": (
+                    _level_payload(nearest_above) if nearest_above else None
+                ),
             },
             "scanner_evidence": _scanner_payload(state),
             "ma_support_resistance": _ma_level_payload(state),
@@ -249,20 +266,31 @@ def _scanner_label(item: dict[str, Any]) -> str:
             "NEUTRAL": "geçmiş nötr kayıt",
         }.get(side, "geçmiş tarama kaydı")
     else:
-        side_label = {"BUY": "AL adayı", "SELL": "SAT adayı", "NEUTRAL": "nötr"}.get(side, side)
+        side_label = {
+            "BUY": "AL adayı",
+            "SELL": "SAT adayı",
+            "NEUTRAL": "nötr",
+        }.get(side, side)
         if state and state not in {"NEW", "ACTIVE", "CONFIRMED"}:
             side_label = f"{side_label} · {state.lower()}"
     code = item.get("scanner_code") or item.get("scanner_name") or "Tarama"
     timeframe = interval_label(str(item.get("timeframe") or ""))
     age = item.get("age_bars")
     age_text = f" · {age} bar önce" if age is not None else ""
-    current_unknown = bool((item.get("data_quality") or {}).get("current_match_unknown"))
+    current_unknown = bool(
+        (item.get("data_quality") or {}).get("current_match_unknown")
+    )
     current_text = " · güncel eşleşme ayrıca teyit edilmeli" if current_unknown else ""
     return f"• {timeframe} {code}: {side_label}{age_text}{current_text}"
 
 
 def _ma_label(item: dict[str, Any]) -> str:
-    side = "destek" if item.get("side") == "SUPPORT" else "direnç" if item.get("side") == "RESISTANCE" else "seviye"
+    if item.get("side") == "SUPPORT":
+        side = "destek"
+    elif item.get("side") == "RESISTANCE":
+        side = "direnç"
+    else:
+        side = "seviye"
     timeframe = interval_label(str(item.get("timeframe") or ""))
     low = item.get("zone_low")
     high = item.get("zone_high")
@@ -294,11 +322,34 @@ def _technical_section_lines(report: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _technical_change_lines(report: dict[str, Any], limit: int = 6) -> list[str]:
+    changes = report.get("technical_changes") or {}
+    if not changes.get("available"):
+        return []
+    lines: list[str] = []
+    headline = str(changes.get("headline") or "").strip()
+    if headline:
+        lines.append(headline)
+    for event in (changes.get("events") or [])[:limit]:
+        message = str(event.get("message") or "").strip()
+        if not message:
+            continue
+        effect = str(event.get("effect") or "NEUTRAL")
+        prefix = {
+            "POSITIVE": "İyileşme",
+            "NEGATIVE": "Bozulma",
+            "NEUTRAL": "Değişim",
+        }.get(effect, "Değişim")
+        lines.append(f"• {prefix}: {message}")
+    return lines
+
+
 def format_telegram_preview(report: dict[str, Any]) -> str:
     """Yeni presentation sözleşmesinden kompakt, interval-aware Telegram metni."""
     if not report.get("availability", {}).get("analysis", True):
         return (
-            f"{report.get('symbol', '—')} · {report.get('interval_label', report.get('interval', ''))}\n"
+            f"{report.get('symbol', '—')} · "
+            f"{report.get('interval_label', report.get('interval', ''))}\n"
             f"{report.get('headline') or 'Teknik yorum kullanılamıyor.'}"
         )
 
@@ -335,6 +386,12 @@ def format_telegram_preview(report: dict[str, Any]) -> str:
         lines.append("Teknik bölüm yorumları:")
         lines.extend(technical_lines)
 
+    change_lines = _technical_change_lines(report)
+    if change_lines:
+        lines.append("")
+        lines.append("Bugün / son barda ne değişti?:")
+        lines.extend(change_lines)
+
     scanner = report.get("scanner_evidence") or []
     if scanner:
         lines.append("")
@@ -364,33 +421,44 @@ def format_telegram_preview(report: dict[str, Any]) -> str:
         lines.append("")
         lines.append("Birleşik yakın seviyeler:")
         if support:
-            lines.append(f"• Alt referans {_fmt_number(support['value'])} — {support['role']}")
+            lines.append(
+                f"• Alt referans {_fmt_number(support['value'])} — {support['role']}"
+            )
         if resistance:
-            lines.append(f"• Üst referans {_fmt_number(resistance['value'])} — {resistance['role']}")
+            lines.append(
+                f"• Üst referans {_fmt_number(resistance['value'])} — "
+                f"{resistance['role']}"
+            )
 
     wave = report.get("wave", {}).get("primary")
     if wave:
         lines.append("")
+        confidence = float(wave.get("confidence") or 0) * 100
         lines.append(
-            f"Elliott bağlamı: {wave.get('pattern_type')} / {wave.get('direction')} · güven %{float(wave.get('confidence') or 0) * 100:.0f}"
+            f"Elliott bağlamı: {wave.get('pattern_type')} / {wave.get('direction')} "
+            f"· güven %{confidence:.0f}"
         )
 
     scenarios = report.get("scenarios", {})
     if scenarios.get("up"):
         lines.append("")
         lines.append("Yukarı senaryo:")
-        lines.extend(f"• {item['confirmation_rule']}" for item in scenarios["up"][:3])
+        lines.extend(
+            f"• {item['confirmation_rule']}" for item in scenarios["up"][:3]
+        )
     if scenarios.get("down"):
         lines.append("")
         lines.append("Aşağı senaryo:")
-        lines.extend(f"• {item['confirmation_rule']}" for item in scenarios["down"][:3])
+        lines.extend(
+            f"• {item['confirmation_rule']}" for item in scenarios["down"][:3]
+        )
 
-    changes = report.get("role_changes", [])
-    if changes:
+    role_changes = report.get("role_changes", [])
+    if role_changes:
         lines.append("")
         lines.append("Rol değiştiren seviyeler:")
         lines.extend(
             f"• {_fmt_number(item['value'])} — {item['role']} ({item['lifecycle']})"
-            for item in changes[:3]
+            for item in role_changes[:3]
         )
     return "\n".join(line for line in lines if line is not None).strip()
