@@ -50,11 +50,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOT_WORKFLOW_FILE: technical-bot.yml
           SCAN_WORKFLOW_FILE: technical-scan.yml
+          V4_WORKFLOW_FILE: v4-equity-report.yml
           BOT_RUN_MINUTES: "50"
           BOT_LONG_POLL_SECONDS: "25"
           BOT_SELF_RESTART: "1"
           BOT_DRIVES_SCAN: "1"
-        run: python -m src.bot_runner
+        run: python -m src.bot_runner_v4
       - name: Durum dosyalarını sakla
         if: always()
         uses: actions/cache/save@v4
