@@ -129,6 +129,7 @@ class MarketState:
     bar_state: dict[str, Any] = field(default_factory=dict)
     data_quality: dict[str, Any] = field(default_factory=dict)
     indicators: dict[str, Any] = field(default_factory=dict)
+    technical_features: dict[str, Any] = field(default_factory=dict)
     structure: dict[str, Any] = field(default_factory=dict)
     wave_hypotheses: list[WaveHypothesis] = field(default_factory=list)
     levels: list[TechnicalLevel] = field(default_factory=list)
