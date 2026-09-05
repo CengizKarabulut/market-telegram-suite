@@ -92,7 +92,19 @@ def wave_evidence(hypotheses: list[WaveHypothesis]) -> list[Evidence]:
             )
         ]
     primary = hypotheses[0]
-    direction = EvidenceDirection.BULLISH if primary.direction == "UP" else EvidenceDirection.BEARISH
+    completed = "COMPLETE" in str(primary.active_wave).upper()
+    direction = (
+        EvidenceDirection.NEUTRAL
+        if completed
+        else EvidenceDirection.BULLISH
+        if primary.direction == "UP"
+        else EvidenceDirection.BEARISH
+    )
+    reason = (
+        f"Primary Elliott hipotezi {primary.direction} yönünde tamamlanmış yapı; yönlü oy değil bağlam olarak tutulur."
+        if completed
+        else f"Primary Elliott hipotezi {primary.direction} yönünde; güven {primary.confidence:.2f}."
+    )
     result = [
         Evidence(
             family="wave",
@@ -101,13 +113,19 @@ def wave_evidence(hypotheses: list[WaveHypothesis]) -> list[Evidence]:
             strength=_clamp(primary.confidence),
             confidence=_clamp(primary.confidence),
             independent_group="elliott",
-            reason=f"Primary Elliott hipotezi {primary.direction} yönünde; güven {primary.confidence:.2f}.",
+            reason=reason,
             metadata={"wave_id": primary.id, "rank": primary.alternate_rank},
         )
     ]
     if len(hypotheses) > 1:
         alternate = hypotheses[1]
-        if alternate.direction != primary.direction and alternate.confidence >= primary.confidence - 0.15:
+        alternate_completed = "COMPLETE" in str(alternate.active_wave).upper()
+        if (
+            not completed
+            and not alternate_completed
+            and alternate.direction != primary.direction
+            and alternate.confidence >= primary.confidence - 0.15
+        ):
             result.append(
                 Evidence(
                     family="wave_alternate",
@@ -124,7 +142,6 @@ def wave_evidence(hypotheses: list[WaveHypothesis]) -> list[Evidence]:
 
 
 def _location_direction(level: TechnicalLevel) -> EvidenceDirection:
-    """Konumu tek başına yön oyu saymaz; yalnız lifecycle rolü yön bilgisi taşır."""
     role = level.role.upper()
     if level.lifecycle_state == LevelLifecycle.RECLAIMED and "SUPPORT" in role:
         return EvidenceDirection.BULLISH
@@ -224,7 +241,7 @@ def indicator_evidence(indicators: dict[str, Any]) -> list[Evidence]:
                 independent_group="momentum",
                 reason="Momentum göstergelerinin canonical değerleri sağlanmadı.",
             )
-        )
+        ]
 
     rvol = _number(indicators.get("RVOL"))
     if rvol is None:
