@@ -54,21 +54,35 @@ def _evidence_sentence(summary: dict[str, Any]) -> str:
     return f"{direction} Belirsizlik skoru {uncertainty:.2f}; netlik {clarity:.2f}."
 
 
+def _context_sentence(regime: dict[str, Any], relative_strength: dict[str, Any], multi_timeframe: dict[str, Any]) -> str:
+    parts = [f"Rejim: {regime.get('state', '—')}." ]
+    if relative_strength.get("available"):
+        parts.append(
+            f"Göreceli güç: {relative_strength.get('state', 'MIXED')} ({relative_strength.get('benchmark', 'benchmark')})."
+        )
+    else:
+        parts.append("Göreceli güç: benchmark verisi yok.")
+    if multi_timeframe.get("available"):
+        parts.append(f"Çoklu zaman dilimi: {multi_timeframe.get('state', '—')}.")
+    else:
+        parts.append("Çoklu zaman dilimi: ek interval state'i yok.")
+    return " ".join(parts)
+
+
 def _changed_roles(levels: Iterable[TechnicalLevel]) -> list[str]:
     result: list[str] = []
     for level in levels:
         if level.lifecycle_state == LevelLifecycle.BROKEN_DOWN and level.role == "FORMER_SUPPORT_RECLAIM":
-            result.append(
-                f"{level.value:.2f} eski desteği aşağı kırılmış; artık yeniden kazanım/direnç referansıdır."
-            )
+            result.append(f"{level.value:.2f} eski desteği aşağı kırılmış; artık yeniden kazanım/direnç referansıdır.")
+        elif level.lifecycle_state == LevelLifecycle.REJECTED and "SUPPORT" in level.role:
+            result.append(f"{level.value:.2f} çevresinde eski destek geri kazanılamamış/reddedilmiş durumda.")
         elif level.lifecycle_state == LevelLifecycle.BROKEN_UP and level.role == "FORMER_RESISTANCE_RETEST":
-            result.append(
-                f"{level.value:.2f} eski direnci yukarı kırılmış; artık geri test/destek referansıdır."
-            )
+            result.append(f"{level.value:.2f} eski direnci yukarı kırılmış; artık geri test/destek referansıdır.")
+        elif level.lifecycle_state == LevelLifecycle.TESTED and "RETEST_HELD" in level.role:
+            result.append(f"{level.value:.2f} kırılım sonrası geri testte korunmuş durumda.")
         elif level.lifecycle_state == LevelLifecycle.RECLAIMED:
             result.append(f"{level.value:.2f} seviyesi kırılım sonrası yeniden kazanılmış durumda.")
-    # En güncel/yakın rolleri presentation için sınırlı tut.
-    return result[-4:]
+    return result[-5:]
 
 
 def build_interpretation(
@@ -81,12 +95,11 @@ def build_interpretation(
     evidence: list[Evidence],
     evidence_summary: dict[str, Any],
     critical_data_quality: bool = False,
+    regime: dict[str, Any] | None = None,
+    relative_strength: dict[str, Any] | None = None,
+    multi_timeframe: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Canonical state'ten yeni seviye hesaplamadan analist görünümü üretir.
-
-    Bu katman yalnız var olan state'i açıklar. Teknik seviye icat etmez ve
-    gerçekleşmiş koşulları gelecek senaryosu olarak sunmaz.
-    """
+    """Canonical state'ten yeni teknik hesap yapmadan analist görünümü üretir."""
     if critical_data_quality:
         return {
             "available": False,
@@ -94,23 +107,23 @@ def build_interpretation(
             "current_state": "Kritik veri sürekliliği/kalitesi sorunu çözülmeden yön ve seviye yorumu üretilmez.",
             "location": None,
             "wave": None,
+            "context": None,
             "evidence": None,
             "up_scenario": [],
             "down_scenario": [],
             "role_changes": [],
         }
 
+    regime = dict(regime or {})
+    relative_strength = dict(relative_strength or {})
+    multi_timeframe = dict(multi_timeframe or {})
     nearest_above = _nearest(levels, price, "ABOVE")
     nearest_below = _nearest(levels, price, "BELOW")
     location_parts = [f"Fiyat {price:.2f}."]
     if nearest_below:
-        location_parts.append(
-            f"En yakın alt referans {nearest_below.value:.2f} ({nearest_below.role}, {nearest_below.level_class.value})."
-        )
+        location_parts.append(f"En yakın alt referans {nearest_below.value:.2f} ({nearest_below.role}, {nearest_below.level_class.value}).")
     if nearest_above:
-        location_parts.append(
-            f"En yakın üst referans {nearest_above.value:.2f} ({nearest_above.role}, {nearest_above.level_class.value})."
-        )
+        location_parts.append(f"En yakın üst referans {nearest_above.value:.2f} ({nearest_above.role}, {nearest_above.level_class.value}).")
 
     up = [item for item in scenarios if str(item.get("side")) == "UP"]
     down = [item for item in scenarios if str(item.get("side")) == "DOWN"]
@@ -119,7 +132,7 @@ def build_interpretation(
     if clarity < 0.35:
         headline = "Yön teyidi zayıf; yapı ve senaryo seviyeleri izlenmeli."
     elif bias > 0.25:
-        headline = "Teknik kanıt dengesi yukarı eğilimli, ancak teyit seviyeleri belirleyici."
+        headline = "Teknik kanıt dengesi yukarı eğilimli; teyit seviyeleri belirleyici."
     elif bias < -0.25:
         headline = "Teknik kanıt dengesi aşağı eğilimli; toparlanma için geri kazanım seviyeleri önemli."
     else:
@@ -131,6 +144,7 @@ def build_interpretation(
         "current_state": _structure_sentence(structure),
         "location": " ".join(location_parts),
         "wave": _wave_sentence(waves),
+        "context": _context_sentence(regime, relative_strength, multi_timeframe),
         "evidence": _evidence_sentence(evidence_summary),
         "up_scenario": [item.get("confirmation_rule") for item in up],
         "down_scenario": [item.get("confirmation_rule") for item in down],
