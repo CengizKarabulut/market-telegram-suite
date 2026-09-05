@@ -108,6 +108,26 @@ class WaveHypothesis:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class Evidence:
+    """Tek bir bağımsız teknik ailenin gözlemini taşır.
+
+    `direction` dört durumlu tutulur. Özellikle UNCERTAINTY hiçbir zaman
+    BEARISH kanıta dönüştürülmez; zaman dilimi ayrışması veya düşük hacim gibi
+    belirsizlikler aşağı yönlü oy değildir.
+    """
+
+    family: str
+    direction: EvidenceDirection
+    state: str
+    strength: float
+    confidence: float
+    freshness: float = 1.0
+    independent_group: str = ""
+    reason: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass
 class MarketState:
     symbol: str
@@ -122,7 +142,7 @@ class MarketState:
     wave_hypotheses: list[WaveHypothesis] = field(default_factory=list)
     levels: list[TechnicalLevel] = field(default_factory=list)
     regime: dict[str, Any] = field(default_factory=dict)
-    evidence: list[dict[str, Any]] = field(default_factory=list)
+    evidence: list[Evidence] = field(default_factory=list)
     scenarios: list[dict[str, Any]] = field(default_factory=list)
     relative_strength: dict[str, Any] = field(default_factory=dict)
     multi_timeframe: dict[str, Any] = field(default_factory=dict)
