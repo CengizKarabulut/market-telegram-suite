@@ -17,7 +17,6 @@ from src.stock_dashboard import (
 )
 from src.v3_preview import build_v3_preview, write_preview_json
 from src.v3_telegram import send_v3_preview
-from src.v4_reader_card import render_reader_card
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,22 +30,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--scanner-state",
         default="",
-        help="Taramabot state.json; yalnız geçmişte yayımlanmış sinyalleri HISTORICAL olarak ekler.",
+        help="Geçmiş teknik tarama state.json dosyası; kayıtlar HISTORICAL olarak eklenir.",
     )
     parser.add_argument(
         "--scanner-snapshot",
         default="",
-        help="Versioned/current scanner snapshot JSON; varsa güncel tarama satırlarını ekler.",
+        help="Versioned/current scanner snapshot JSON; varsa güncel teknik tarama satırlarını ekler.",
     )
     parser.add_argument(
         "--ma-watchlist",
         default="",
-        help="ma-reaction-scanner ma_watchlist.csv dosyası.",
+        help="Gözlemsel hareketli ortalama destek/direnç watchlist CSV dosyası.",
     )
     parser.add_argument(
         "--telegram",
         action="store_true",
-        help="Üretilen V3/V4 metin + kartı teknik Telegram hedefine gönderir.",
+        help="Üretilen sade analist paragrafını teknik Telegram hedefine gönderir.",
     )
     return parser.parse_args()
 
@@ -86,19 +85,19 @@ def main() -> int:
     scanner_state = _existing(args.scanner_state)
     if scanner_state is not None:
         scanner_rows.extend(load_taramabot_state_rows(scanner_state, symbol=ticker))
-        print(f"V4 external evidence: {len(scanner_rows)} taramabot geçmiş sinyali yüklendi.")
+        print(f"V4 external evidence: {len(scanner_rows)} geçmiş teknik tarama kaydı yüklendi.")
 
     scanner_snapshot = _existing(args.scanner_snapshot)
     if scanner_snapshot is not None:
         current_rows = load_scanner_snapshot_rows(scanner_snapshot, symbol=ticker)
         scanner_rows = current_rows + scanner_rows
-        print(f"V4 external evidence: {len(current_rows)} güncel scanner snapshot satırı yüklendi.")
+        print(f"V4 external evidence: {len(current_rows)} güncel teknik tarama satırı yüklendi.")
 
     ma_rows = []
     ma_watchlist = _existing(args.ma_watchlist)
     if ma_watchlist is not None:
         ma_rows = load_ma_watchlist_rows(ma_watchlist, symbol=ticker)
-        print(f"V4 external evidence: {len(ma_rows)} MA destek/direnç bölgesi yüklendi.")
+        print(f"V4 external evidence: {len(ma_rows)} gözlemsel destek/direnç bölgesi yüklendi.")
 
     state, report, text = build_v3_preview(
         data,
@@ -113,22 +112,19 @@ def main() -> int:
     state_path, report_path = write_preview_json(state, report, target, ticker)
     text_path = target / f"{ticker}_telegram_v3.txt"
     text_path.write_text(text + "\n", encoding="utf-8")
-    card_path = render_reader_card(report, target / f"{ticker}_card_v3.png")
 
     if args.telegram:
         send_v3_preview(
             text,
-            card_path,
             symbol=ticker,
             interval_label=str(report.get("interval_label") or args.interval),
         )
-        print("Telegram: V3/V4 preview metni ve kartı gönderildi.")
+        print("Telegram: V3/V4 sade analist paragrafı gönderildi.")
 
     print(text)
     print(f"\nMarketState: {state_path}")
     print(f"Report: {report_path}")
     print(f"Telegram preview: {text_path}")
-    print(f"V3/V4 card: {card_path}")
     return 0
 
 
