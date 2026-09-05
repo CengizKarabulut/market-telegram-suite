@@ -45,11 +45,12 @@ jobs:
 
           from src.fundamental_analysis import build_fundamental_report
           from src.fundamental_card import render_fundamental_card
+          from src.fundamental_quality import apply_coverage_policy
 
           ticker = os.environ.get('TICKER', 'GARAN').strip().upper() or 'GARAN'
           out = Path('reports/fundamental-smoke')
           out.mkdir(parents=True, exist_ok=True)
-          report = build_fundamental_report(ticker)
+          report = apply_coverage_policy(build_fundamental_report(ticker))
           png = render_fundamental_card(report, out / f'{ticker}_temel.png')
           (out / f'{ticker}_temel.json').write_text(
               json.dumps(report.to_dict(), ensure_ascii=False, indent=2) + '\n',
