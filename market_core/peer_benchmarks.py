@@ -131,6 +131,7 @@ def _benchmark_one_metric(
 
     q1 = _quantile(peer_values, 0.25)
     med = median(peer_values)
+    avg = mean(peer_values)
     q3 = _quantile(peer_values, 0.75)
     position = _position(target_value, q1=q1, med=med, q3=q3)
     favourability = _favourability(position, rule)
@@ -141,12 +142,14 @@ def _benchmark_one_metric(
         "peer_count": len(peer_values),
         "basis_excluded_count": basis_excluded_count,
         "basis": basis,
-        "peer_mean": mean(peer_values),
+        "peer_mean": avg,
         "peer_median": med,
         "peer_q1": q1,
         "peer_q3": q3,
         "peer_min": min(peer_values),
         "peer_max": max(peer_values),
+        "delta_to_median": target_value - med,
+        "delta_to_mean": target_value - avg,
         "percentile_rank": _percentile_rank(target_value, peer_values),
         "position": position,
         "direction": rule.direction,
@@ -287,6 +290,11 @@ def build_peer_benchmark(
     }
 
 
+def _provider_sector_key(item: PeerObservation) -> str | None:
+    text = str(item.metadata.get("sector") or "").strip()
+    return text.casefold() if text else None
+
+
 def build_hierarchical_peer_benchmark(
     *,
     target_symbol: str,
@@ -296,22 +304,65 @@ def build_hierarchical_peer_benchmark(
     target_metrics: Mapping[str, float | None] | None = None,
     target_metric_basis: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Prefer same-industry peers and visibly fall back to the broader archetype.
+    """Use industry, provider-sector and broad-archetype peers in that order.
 
-    The fallback is metric-by-metric and never silent. A metric sourced from the
-    broader sector/archetype is labelled ``BROAD_SECTOR_FALLBACK`` so user-facing
-    commentary can say e.g. "havayolu grubunda veri yetersiz; geniş sanayi/hizmet
-    karşılaştırması kullanıldı" rather than presenting it as the same peer set.
+    Fallback is metric-by-metric and never silent. A THYAO-like company can first
+    be compared with airlines, then (if the airline sample is too small) with its
+    provider sector such as transportation, and only as a last resort with the
+    broad INDUSTRIAL archetype. When provider-sector metadata is absent, the
+    older industry -> broad-archetype behaviour is preserved.
     """
     rows = list(observations)
+    symbol = target_symbol.strip().upper()
     exact = build_peer_benchmark(
-        target_symbol=target_symbol,
+        target_symbol=symbol,
         peer_group=peer_group,
         sector_type=sector_type,
         observations=rows,
         target_metrics=target_metrics,
         target_metric_basis=target_metric_basis,
     )
+
+    target_row = next(
+        (
+            item
+            for item in rows
+            if item.symbol.strip().upper() == symbol and item.sector_type == sector_type
+        ),
+        None,
+    )
+    provider_sector_key = _provider_sector_key(target_row) if target_row is not None else None
+    provider_sector_label = (
+        str(target_row.metadata.get("sector") or "").strip()
+        if target_row is not None and provider_sector_key
+        else None
+    )
+    if provider_sector_key:
+        provider_group = f"PROVIDER_SECTOR::{provider_sector_key}"
+        provider_rows = [
+            replace(item, peer_group=provider_group)
+            for item in rows
+            if item.sector_type == sector_type and _provider_sector_key(item) == provider_sector_key
+        ]
+        provider_sector = build_peer_benchmark(
+            target_symbol=symbol,
+            peer_group=provider_group,
+            sector_type=sector_type,
+            observations=provider_rows,
+            target_metrics=target_metrics,
+            target_metric_basis=target_metric_basis,
+        )
+    else:
+        provider_group = None
+        provider_sector = {
+            "available": False,
+            "reason": "Provider sektör metadata'sı yok; orta kademe karşılaştırma atlandı.",
+            "metrics": {},
+            "synthesis": {
+                "state": "INSUFFICIENT_PEER_DATA",
+                "headline": "Provider sektör karşılaştırması kullanılamıyor.",
+            },
+        }
 
     broad_group = f"BROAD_{sector_type.value}"
     broad_rows = [
@@ -320,7 +371,7 @@ def build_hierarchical_peer_benchmark(
         if item.sector_type == sector_type
     ]
     broad = build_peer_benchmark(
-        target_symbol=target_symbol,
+        target_symbol=symbol,
         peer_group=broad_group,
         sector_type=sector_type,
         observations=broad_rows,
@@ -329,29 +380,48 @@ def build_hierarchical_peer_benchmark(
     )
 
     effective_metrics: dict[str, dict[str, Any]] = {}
-    all_names = set(exact.get("metrics", {})) | set(broad.get("metrics", {}))
+    all_names = (
+        set(exact.get("metrics", {}))
+        | set(provider_sector.get("metrics", {}))
+        | set(broad.get("metrics", {}))
+    )
     for name in sorted(all_names):
         exact_metric = dict((exact.get("metrics") or {}).get(name) or {})
+        provider_metric = dict((provider_sector.get("metrics") or {}).get(name) or {})
         broad_metric = dict((broad.get("metrics") or {}).get(name) or {})
         if exact_metric.get("available"):
             exact_metric["scope"] = "INDUSTRY_PEER_GROUP"
             exact_metric["benchmark_group"] = peer_group
             effective_metrics[name] = exact_metric
+        elif provider_metric.get("available"):
+            provider_metric["scope"] = "PROVIDER_SECTOR_FALLBACK"
+            provider_metric["benchmark_group"] = provider_group
+            provider_metric["benchmark_label"] = provider_sector_label
+            provider_metric["fallback_reason"] = exact_metric.get("reason")
+            effective_metrics[name] = provider_metric
         elif broad_metric.get("available"):
             broad_metric["scope"] = "BROAD_SECTOR_FALLBACK"
             broad_metric["benchmark_group"] = broad_group
-            broad_metric["fallback_reason"] = exact_metric.get("reason")
+            broad_metric["fallback_reason"] = (
+                provider_metric.get("reason") or exact_metric.get("reason")
+            )
             effective_metrics[name] = broad_metric
         else:
             effective_metrics[name] = {
                 **exact_metric,
                 "scope": "UNAVAILABLE",
+                "provider_sector_reason": provider_metric.get("reason"),
                 "broad_sector_reason": broad_metric.get("reason"),
             }
 
     effective_synthesis = _synthesis(effective_metrics)
     available_count = sum(bool(item.get("available")) for item in effective_metrics.values())
-    fallback_metrics = [
+    provider_fallback_metrics = [
+        name
+        for name, item in effective_metrics.items()
+        if item.get("scope") == "PROVIDER_SECTOR_FALLBACK"
+    ]
+    broad_fallback_metrics = [
         name
         for name, item in effective_metrics.items()
         if item.get("scope") == "BROAD_SECTOR_FALLBACK"
@@ -359,17 +429,23 @@ def build_hierarchical_peer_benchmark(
 
     return {
         "available": available_count > 0,
-        "symbol": target_symbol.strip().upper(),
+        "symbol": symbol,
         "sector_type": sector_type.value,
         "preferred_peer_group": peer_group,
+        "provider_sector": provider_sector_label,
         "industry_benchmark": exact,
+        "provider_sector_benchmark": provider_sector,
         "broad_sector_benchmark": broad,
         "metrics": effective_metrics,
         "synthesis": effective_synthesis,
-        "fallback_metrics": fallback_metrics,
+        "provider_sector_fallback_metrics": provider_fallback_metrics,
+        "broad_sector_fallback_metrics": broad_fallback_metrics,
+        "fallback_metrics": provider_fallback_metrics + broad_fallback_metrics,
         "quality": {
             "industry_first": True,
-            "broad_sector_fallback_is_explicit": True,
+            "provider_sector_second": True,
+            "broad_archetype_last": True,
+            "fallback_is_explicit": True,
             "fallback_is_metric_specific": True,
             "metric_basis_must_match_when_declared": True,
         },
