@@ -51,9 +51,13 @@ def _collapse_alternating(pivots: list[dict[str, Any]]) -> list[dict[str, Any]]:
             result.append(pivot)
             continue
         previous = result[-1]
-        if pivot["type"] == "high" and float(pivot["price"]) >= float(previous["price"]):
-            result[-1] = pivot
-        elif pivot["type"] == "low" and float(pivot["price"]) <= float(previous["price"]):
+        if (
+            pivot["type"] == "high"
+            and float(pivot["price"]) >= float(previous["price"])
+        ) or (
+            pivot["type"] == "low"
+            and float(pivot["price"]) <= float(previous["price"])
+        ):
             result[-1] = pivot
     return result
 
