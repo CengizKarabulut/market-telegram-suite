@@ -62,9 +62,14 @@ GENERAL_PROFILE = SectorProfile(
             "Nakit dönüşümü",
             "HIGHER_BETTER",
         ),
+        _rule("pe", "F/K", "CONTEXTUAL"),
+        _rule("price_to_book", "Fiyat/defter değeri", "CONTEXTUAL"),
+        _rule("ev_to_ebitda", "FD/FAVÖK", "CONTEXTUAL"),
+        _rule("price_to_sales", "Fiyat/satışlar", "CONTEXTUAL"),
     ),
     notes=(
         "Genel profil yalnızca aynı iş modeli için daha özel profil bulunamadığında kullanılır.",
+        "Çarpanların sektör medyanının altında olması otomatik olarak ucuzluk anlamına gelmez; büyüme, kârlılık ve bilanço kalitesiyle birlikte okunur.",
     ),
 )
 
@@ -88,10 +93,12 @@ GYO_PROFILE = SectorProfile(
         ),
         _rule("price_to_nav", "Fiyat/NAD", "CONTEXTUAL"),
         _rule("nav_discount", "NAD iskontosu", "CONTEXTUAL"),
+        _rule("price_to_book", "Fiyat/defter değeri", "CONTEXTUAL"),
     ),
     notes=(
         "GYO karşılaştırmasında düşük LTV tek başına yeterli değildir; kira üretimi, nakit dönüşümü ve NAD birlikte değerlendirilir.",
         "Değerleme kazancı yüksekliği doğrudan kötü sayılmaz; sürdürülebilir faaliyet gelirinin yerini ne ölçüde aldığı ayrıca yorumlanır.",
+        "NAD güvenilir biçimde bulunamıyorsa fiyat/defter yalnız ikincil, bağlamsal bir karşılaştırma olarak kullanılır.",
     ),
 )
 
@@ -108,6 +115,7 @@ BANK_PROFILE = SectorProfile(
         _rule("cost_to_income", "Maliyet/gelir oranı", "LOWER_BETTER"),
         _rule("loan_to_deposit", "Kredi/mevduat oranı", "CONTEXTUAL"),
         _rule("price_to_book", "Fiyat/defter değeri", "CONTEXTUAL"),
+        _rule("pe", "F/K", "CONTEXTUAL"),
     ),
     notes=(
         "Bankalarda sanayi şirketlerine ait net borç/FAVÖK gibi oranlar kullanılmaz.",
@@ -126,6 +134,7 @@ INSURANCE_PROFILE = SectorProfile(
         _rule("solvency_ratio", "Sermaye yeterlilik/solvency oranı", "HIGHER_BETTER"),
         _rule("investment_income_share", "Yatırım gelirlerinin kârdaki payı", "CONTEXTUAL"),
         _rule("price_to_book", "Fiyat/defter değeri", "CONTEXTUAL"),
+        _rule("pe", "F/K", "CONTEXTUAL"),
     ),
     notes=(
         "Sigorta şirketlerinde net borç/FAVÖK ve sanayi tipi işletme sermayesi oranları temel kıyas değildir.",
@@ -144,6 +153,7 @@ FINANCIAL_NONBANK_PROFILE = SectorProfile(
         _rule("npl_ratio", "Takipteki alacak oranı", "LOWER_BETTER"),
         _rule("capital_adequacy_ratio", "Sermaye yeterlilik oranı", "HIGHER_BETTER"),
         _rule("price_to_book", "Fiyat/defter değeri", "CONTEXTUAL"),
+        _rule("pe", "F/K", "CONTEXTUAL"),
     ),
     notes=(
         "Aracı kurum, finansal kiralama, faktoring ve benzeri şirketlerde iş modeline özel alt grup mümkün olduğunda geniş finansal sektör ortalaması yerine o grup kullanılmalıdır.",
@@ -159,6 +169,8 @@ HOLDING_PROFILE = SectorProfile(
         _rule("holding_net_debt_to_nav", "Holding net borç/NAD", "LOWER_BETTER"),
         _rule("roe", "Özkaynak kârlılığı", "HIGHER_BETTER"),
         _rule("cash_dividend_income_share", "Temettü gelir payı", "CONTEXTUAL"),
+        _rule("price_to_book", "Fiyat/defter değeri", "CONTEXTUAL"),
+        _rule("pe", "F/K", "CONTEXTUAL"),
     ),
     notes=(
         "Holdinglerde konsolide FAVÖK tek başına ekonomik borçluluğu temsil etmeyebilir; holding-seviyesi net borç tercih edilir.",
