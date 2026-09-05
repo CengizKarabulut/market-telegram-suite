@@ -31,6 +31,7 @@ class PeerBenchmarkTests(unittest.TestCase):
         self.assertEqual(ltv["peer_count"], 5)
         self.assertEqual(ltv["position"], "BOTTOM_QUARTILE")
         self.assertEqual(ltv["favourability"], "FAVOURABLE")
+        self.assertAlmostEqual(ltv["delta_to_median"], 0.03 - 0.35)
         self.assertTrue(result["quality"]["target_excluded_from_peer_stats"])
 
     def test_mean_is_exposed_but_quartiles_drive_location(self):
@@ -52,6 +53,7 @@ class PeerBenchmarkTests(unittest.TestCase):
         self.assertGreater(metric["peer_mean"], metric["peer_median"])
         self.assertEqual(metric["position"], "TOP_QUARTILE")
         self.assertEqual(metric["favourability"], "UNFAVOURABLE")
+        self.assertAlmostEqual(metric["delta_to_median"], 0.6)
 
     def test_insufficient_peer_count_fails_closed(self):
         rows = [
@@ -176,7 +178,72 @@ class PeerBenchmarkTests(unittest.TestCase):
         self.assertFalse(result["industry_benchmark"]["metrics"]["roe"]["available"])
         self.assertTrue(result["metrics"]["roe"]["available"])
         self.assertEqual(result["metrics"]["roe"]["scope"], "BROAD_SECTOR_FALLBACK")
-        self.assertIn("roe", result["fallback_metrics"])
+        self.assertIn("roe", result["broad_sector_fallback_metrics"])
+
+    def test_hierarchical_benchmark_uses_provider_sector_before_broad_archetype(self):
+        rows = [
+            PeerObservation(
+                "T",
+                "AIRLINES",
+                SectorType.INDUSTRIAL,
+                {"roe": 0.20},
+                metadata={"sector": "Transportation", "industry": "Airlines"},
+            ),
+            PeerObservation(
+                "A",
+                "AIRLINES",
+                SectorType.INDUSTRIAL,
+                {"roe": 0.15},
+                metadata={"sector": "Transportation", "industry": "Airlines"},
+            ),
+            PeerObservation(
+                "B",
+                "AIRLINES",
+                SectorType.INDUSTRIAL,
+                {"roe": 0.16},
+                metadata={"sector": "Transportation", "industry": "Airlines"},
+            ),
+            PeerObservation(
+                "C",
+                "SHIPPING",
+                SectorType.INDUSTRIAL,
+                {"roe": 0.11},
+                metadata={"sector": "Transportation", "industry": "Marine Shipping"},
+            ),
+            PeerObservation(
+                "D",
+                "LOGISTICS",
+                SectorType.INDUSTRIAL,
+                {"roe": 0.12},
+                metadata={"sector": "Transportation", "industry": "Logistics"},
+            ),
+            PeerObservation(
+                "E",
+                "RAIL",
+                SectorType.INDUSTRIAL,
+                {"roe": 0.13},
+                metadata={"sector": "Transportation", "industry": "Railroads"},
+            ),
+            PeerObservation(
+                "F",
+                "RETAIL",
+                SectorType.INDUSTRIAL,
+                {"roe": 0.40},
+                metadata={"sector": "Retail Trade", "industry": "Food Retail"},
+            ),
+        ]
+        result = build_hierarchical_peer_benchmark(
+            target_symbol="T",
+            peer_group="AIRLINES",
+            sector_type=SectorType.INDUSTRIAL,
+            observations=rows,
+        )
+        metric = result["metrics"]["roe"]
+        self.assertEqual(metric["scope"], "PROVIDER_SECTOR_FALLBACK")
+        self.assertEqual(metric["benchmark_label"], "Transportation")
+        self.assertEqual(metric["peer_count"], 5)
+        self.assertIn("roe", result["provider_sector_fallback_metrics"])
+        self.assertNotIn("roe", result["broad_sector_fallback_metrics"])
 
 
 if __name__ == "__main__":
