@@ -28,6 +28,7 @@ from .scenario import (
     pending_conditions,
 )
 from .structure import build_structure_state
+from .technical_changes import build_technical_changes
 from .technical_synthesis import build_technical_synthesis
 
 
@@ -163,6 +164,12 @@ def build_market_state(
     evidence.extend(multi_timeframe_evidence(multi_timeframe))
     evidence_summary = summarize_evidence(evidence)
 
+    technical_changes = build_technical_changes(
+        data,
+        current_features=feature_values,
+        structure=structure_summary,
+    )
+
     technical_synthesis = build_technical_synthesis(
         structure=structure_summary,
         technical_features=feature_values,
@@ -186,6 +193,13 @@ def build_market_state(
     )
 
     if critical:
+        technical_changes = {
+            "available": False,
+            "state": "DATA_INSUFFICIENT",
+            "headline": "Teknik değişim analizi kritik veri kalitesi nedeniyle durduruldu.",
+            "events": [],
+            "directional_counts": {"positive": 0, "negative": 0, "neutral": 0},
+        }
         technical_synthesis = {
             "state": "DATA_INSUFFICIENT",
             "headline": "Teknik sentez kritik veri kalitesi nedeniyle durduruldu.",
@@ -207,6 +221,7 @@ def build_market_state(
         data_quality=quality,
         indicators=indicator_values,
         technical_features=feature_values,
+        technical_changes=technical_changes,
         technical_synthesis=technical_synthesis,
         structure=structure_summary,
         wave_hypotheses=waves,
@@ -233,5 +248,6 @@ def build_market_state(
             "scanner_evidence_available": bool(scanner_evidence),
             "ma_level_evidence_available": bool(ma_level_evidence),
             "technical_features_available": bool(feature_values.get("available")),
+            "technical_changes_available": bool(technical_changes.get("available")),
         },
     )
