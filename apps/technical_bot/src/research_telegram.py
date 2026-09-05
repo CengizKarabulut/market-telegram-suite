@@ -32,7 +32,7 @@ def _caption(report: ResearchReport) -> str:
         f"Borç yönü: {financial.get('debt_direction', '—')}",
         f"Teknik: {report.technical.get('label', '—')} · Ana risk: {risk}",
         "",
-        "Sonraki görseller: sektör uyarlamalı temel kart + teknik yapı grafiği. Otomatik AL/SAT değildir.",
+        "Sonraki görseller: temel kart + MA tablosu + çok panelli teknik grafik. Otomatik AL/SAT değildir.",
     ]
     return clip("\n".join(lines), CAPTION_LIMIT)
 
@@ -61,14 +61,16 @@ def _send_photo(token: str, chat_id: str, thread_id: str, image_path: Path, capt
 def send_research_bundle(
     summary_card: Path,
     fundamental_card: Path,
+    moving_average_card: Path,
     technical_chart: Path,
     report: ResearchReport,
 ) -> tuple[dict[str, Any], ...]:
-    """Send the summary first, then the fundamental and technical visuals."""
+    """Send summary, fundamental, MA table and technical indicator chart."""
     token, chat_id, thread_id = _destination()
     results = [
         _send_photo(token, chat_id, thread_id, summary_card, _caption(report)),
         _send_photo(token, chat_id, thread_id, fundamental_card, f"{report.symbol} · Temel analiz / sektör profili"),
-        _send_photo(token, chat_id, thread_id, technical_chart, f"{report.symbol} · Teknik yapı ve aktif kritik seviyeler"),
+        _send_photo(token, chat_id, thread_id, moving_average_card, f"{report.symbol} · Günlük MA 5/8/13 · 21/34/55 · 89/144/233"),
+        _send_photo(token, chat_id, thread_id, technical_chart, f"{report.symbol} · Fiyat + Hacim + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR"),
     ]
     return tuple(results)
