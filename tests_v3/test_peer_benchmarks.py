@@ -29,7 +29,7 @@ class PeerBenchmarkTests(unittest.TestCase):
         self.assertEqual(ltv["favourability"], "FAVOURABLE")
         self.assertTrue(result["quality"]["target_excluded_from_peer_stats"])
 
-    def test_mean_is_exposed_but_median_drives_location(self):
+    def test_mean_is_exposed_but_quartiles_drive_location(self):
         rows = [
             PeerObservation("T", "IND", SectorType.INDUSTRIAL, {"net_debt_to_ebitda": 2.0}),
             PeerObservation("A", "IND", SectorType.INDUSTRIAL, {"net_debt_to_ebitda": 1.0}),
@@ -46,7 +46,7 @@ class PeerBenchmarkTests(unittest.TestCase):
         )
         metric = result["metrics"]["net_debt_to_ebitda"]
         self.assertGreater(metric["peer_mean"], metric["peer_median"])
-        self.assertEqual(metric["position"], "ABOVE_MEDIAN")
+        self.assertEqual(metric["position"], "TOP_QUARTILE")
         self.assertEqual(metric["favourability"], "UNFAVOURABLE")
 
     def test_insufficient_peer_count_fails_closed(self):
