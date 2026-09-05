@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from market_core.company_classification import classify_company
+from market_core.corporate_events import build_corporate_event_timeline
 from market_core.fundamental_models import SectorType
 from market_core.fundamental_period import (
     PeriodComparative,
@@ -206,6 +207,16 @@ def main() -> int:
 
     news, kap_history_source = _fetch_kap_news(ticker, symbol, args.kap_limit)
     _save_frame(news, target / "kap_news.csv")
+    corporate_events = build_corporate_event_timeline(
+        news.to_dict(orient="records") if not news.empty else [],
+        source=kap_history_source,
+        limit=min(args.kap_limit, 40),
+    )
+    (target / "corporate_events.json").write_text(
+        json.dumps(corporate_events, ensure_ascii=False, indent=2, default=_json_default) + "\n",
+        encoding="utf-8",
+    )
+
     financial_filings: list[dict[str, Any]] = []
     parsed_filings = []
     if not news.empty:
@@ -360,6 +371,7 @@ def main() -> int:
         },
         "tables": tables,
         "financial_filings": financial_filings,
+        "corporate_events": corporate_events,
         "current_analysis": current_analysis,
     }
     output = target / "probe.json"
@@ -378,6 +390,8 @@ def main() -> int:
     for name, meta in tables.items():
         print(f"{name}: {meta['shape']} · columns={meta['columns']}")
     print(f"KAP geçmiş kaynağı: {kap_history_source} · satır={len(news)}")
+    print(f"KAP olay zaman çizelgesi: {corporate_events.get('event_count', 0)} kayıt")
+    print(f"KAP olay kategorileri: {corporate_events.get('category_counts', {})}")
     print(f"KAP finansal rapor kaydı: {len(financial_filings)}")
     print(f"Cari canonical analiz: {current_analysis.get('available')}")
     if current_analysis.get("available"):
