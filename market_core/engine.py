@@ -7,13 +7,11 @@ from typing import Any
 import pandas as pd
 
 from .elliott import build_wave_hypotheses
+from .evidence import build_evidence
+from .interpretation import build_interpretation
 from .levels import nearest_active_levels, rank_levels, structural_levels, wave_levels
 from .models import MarketState, TechnicalLevel
-from .scenario import (
-    assert_no_completed_condition_is_pending,
-    condition_from_level,
-    pending_conditions,
-)
+from .scenario import assert_no_completed_condition_is_pending, condition_from_level, pending_conditions
 from .structure import build_structure_state
 
 
@@ -40,9 +38,8 @@ def _change_pct(data: pd.DataFrame) -> float:
     return (current / previous - 1.0) * 100 if previous else 0.0
 
 
-def _scenario_levels(level_map: dict[str, list[TechnicalLevel]]) -> list:
-    """Yakın aktif seviyelerden iki yönlü, gerçekleşmemiş senaryolar üretir."""
-    conditions = []
+def _scenario_levels(level_map: dict[str, list[TechnicalLevel]]) -> list[tuple[TechnicalLevel, str]]:
+    conditions: list[tuple[TechnicalLevel, str]] = []
     for level in level_map.get("above", []):
         conditions.append((level, "UP"))
     for level in level_map.get("below", []):
@@ -59,12 +56,11 @@ def build_market_state(
     data_quality: dict[str, Any] | None = None,
     indicators: dict[str, Any] | None = None,
 ) -> MarketState:
-    """V3 çekirdeğinin ilk uçtan uca canonical state üreticisi.
+    """Tek canonical V3 market state üretir.
 
-    Girdi veri çerçevesinin en az OHLC kolonlarını içermesi beklenir. ATR varsa
-    pivot prominence ve seviye mesafelerinde kullanılır. Bu fonksiyon yorum
-    metni veya Telegram çıktısı üretmez; bütün downstream katmanlar aynı state'i
-    okuyacaktır.
+    Downstream Telegram/görsel katmanları kendi teknik hesabını yapmayacak;
+    structure, Elliott, level, evidence ve interpretation aynı state üzerinden
+    beslenecek.
     """
     required = {"Open", "High", "Low", "Close"}
     missing = sorted(required.difference(data.columns))
@@ -74,6 +70,7 @@ def build_market_state(
         raise ValueError("MarketState için en az 8 bar gerekir.")
 
     price = float(data["Close"].iloc[-1])
+    indicator_values = dict(indicators or {})
     structure = build_structure_state(data)
     pivots = structure.get("pivots", [])
     waves = build_wave_hypotheses(pivots, timeframe=interval)
@@ -83,15 +80,11 @@ def build_market_state(
     levels = rank_levels(levels, price)
     active = nearest_active_levels(levels, price)
 
-    raw_conditions = [
-        condition_from_level(level, price, side)
-        for level, side in _scenario_levels(active)
-    ]
+    raw_conditions = [condition_from_level(level, price, side) for level, side in _scenario_levels(active)]
     assert_no_completed_condition_is_pending(raw_conditions, price)
-    scenarios = pending_conditions(raw_conditions)
+    scenario_objects = pending_conditions(raw_conditions)
+    scenarios = [asdict(item) for item in scenario_objects]
 
-    # Structure dict içinde dataclass nesneleri korunur; JSON/presentation katmanı
-    # ihtiyaç duyduğunda serialize eder. Burada ayrıca hızlı tüketim için özet var.
     structure_summary = {
         **structure,
         "nearest_levels": active,
@@ -102,7 +95,25 @@ def build_market_state(
     critical = bool(quality.get("critical")) or str(quality.get("state", "")).upper() in {"INVALID", "CRITICAL"}
     limitations: list[str] = []
     if critical:
-        limitations.append("Kritik veri kalitesi sorunu: yorum ve yön çıkarımı presentation katmanında kapatılmalıdır.")
+        limitations.append("Kritik veri kalitesi sorunu: yön ve seviye yorumu hard-gate edildi.")
+
+    evidence, evidence_summary = build_evidence(
+        structure=structure_summary,
+        hypotheses=waves,
+        levels=levels,
+        price=price,
+        indicators=indicator_values,
+    )
+    interpretation = build_interpretation(
+        price=price,
+        structure=structure_summary,
+        waves=waves,
+        levels=levels,
+        scenarios=scenarios,
+        evidence=evidence,
+        evidence_summary=evidence_summary,
+        critical_data_quality=critical,
+    )
 
     return MarketState(
         symbol=symbol,
@@ -112,15 +123,20 @@ def build_market_state(
         change_pct=_change_pct(data),
         bar_state=dict(bar_state or {}),
         data_quality=quality,
-        indicators=dict(indicators or {}),
+        indicators=indicator_values,
         structure=structure_summary,
         wave_hypotheses=waves,
         levels=levels,
-        scenarios=[asdict(item) for item in scenarios],
+        evidence=evidence,
+        evidence_summary=evidence_summary,
+        scenarios=scenarios,
+        interpretation=interpretation,
         limitations=limitations,
         confidence={
             "wave_primary": waves[0].confidence if waves else None,
             "structure_available": structure.get("state") != "INSUFFICIENT",
             "critical_data_quality": critical,
+            "evidence_clarity": evidence_summary.get("clarity"),
+            "directional_bias": evidence_summary.get("directional_bias"),
         },
     )
