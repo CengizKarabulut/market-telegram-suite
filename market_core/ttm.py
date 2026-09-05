@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Iterable
 
 from .fundamental_models import FinancialSnapshot, StatementType
 
 
 CUMULATIVE_YTD = "CUMULATIVE_YTD"
+PRICE_LEVEL_DATE = "price_level_date"
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,43 @@ def _normalized_block(snapshot: FinancialSnapshot, name: str) -> dict[str, float
     return result
 
 
+def _canonical_basis_date(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+    iso_prefix = cleaned[:10]
+    try:
+        return date.fromisoformat(iso_prefix).isoformat()
+    except ValueError:
+        return cleaned
+
+
+def _price_level_date(snapshot: FinancialSnapshot) -> tuple[str | None, bool]:
+    """Return canonical TMS29 purchasing-power date and metadata conflict flag."""
+    primary = _canonical_basis_date(snapshot.metadata.get(PRICE_LEVEL_DATE))
+    legacy = _canonical_basis_date(snapshot.metadata.get("restatement_basis_date"))
+    if primary is not None and legacy is not None and primary != legacy:
+        return None, True
+    return primary or legacy, False
+
+
+def _inflation_accounting_active(snapshot: FinancialSnapshot) -> bool:
+    value = str(snapshot.inflation_accounting or "").strip().upper()
+    if not value or value in {"NONE", "NO", "FALSE", "N/A", "NOT_APPLICABLE"}:
+        return False
+    if value.startswith("NO_") or value.startswith("NO "):
+        return False
+    return any(token in value for token in ("TMS29", "IAS29", "INFLATION", "ENFLASYON"))
+
+
 def _component(snapshot: FinancialSnapshot, role: str) -> dict[str, Any]:
+    price_level_date, conflict = _price_level_date(snapshot)
     return {
         "role": role,
         "period_end": snapshot.period_end,
@@ -53,6 +90,8 @@ def _component(snapshot: FinancialSnapshot, role: str) -> dict[str, Any]:
         "restatement_id": snapshot.restatement_id,
         "source": snapshot.source,
         "scale": snapshot.scale,
+        "price_level_date": price_level_date,
+        "price_level_date_conflict": conflict,
     }
 
 
@@ -101,6 +140,27 @@ def _compatibility_reason(snapshots: list[FinancialSnapshot]) -> str | None:
             return f"TTM bileşenlerinin {key} metadata'sı uyumlu değil."
         if known and None in values:
             return f"TTM bileşenlerinden bazılarında {key} metadata'sı eksik."
+
+    if any(_inflation_accounting_active(item) for item in snapshots):
+        price_level_dates: list[str] = []
+        for item in snapshots:
+            price_level_date, conflict = _price_level_date(item)
+            if conflict:
+                return (
+                    "TMS29 TTM bileşeninde price_level_date ile restatement_basis_date "
+                    "birbiriyle çelişiyor."
+                )
+            if price_level_date is None:
+                return (
+                    "TMS29 ara dönem TTM için tüm bileşenlerde ortak satın alma gücü "
+                    "bazını gösteren price_level_date metadata'sı zorunludur."
+                )
+            price_level_dates.append(price_level_date)
+        if len(set(price_level_dates)) != 1:
+            return (
+                "TMS29 TTM bileşenlerinin satın alma gücü/restatement baz tarihleri "
+                "uyumlu değil."
+            )
     return None
 
 
@@ -150,6 +210,10 @@ def assemble_ttm(
     Ara dönemlerde ``metadata['flow_basis'] == 'CUMULATIVE_YTD'`` açıkça
     belirtilmek zorundadır. Motor Türkiye'deki kümülatif raporlama alışkanlığını
     varsaymaz; provider adapter bu semantiği canonical snapshot'a yazmalıdır.
+
+    TMS29/IAS29 uygulanan ara dönem köprülerinde üç bileşenin de aynı satın alma
+    gücü bazında olduğu ayrıca kanıtlanmalıdır. ``price_level_date`` olmadan veya
+    tarihler farklıyken nominal toplama/çıkarma yapılmaz.
     """
     if as_of.tzinfo is None:
         raise ValueError("as_of timezone-aware olmalıdır.")
@@ -183,6 +247,7 @@ def assemble_ttm(
         current = max(versions.values(), key=lambda item: item.period_end)
 
     if current.statement_type == StatementType.ANNUAL:
+        price_level_date, _ = _price_level_date(current)
         return TTMResult(
             symbol=normalized_symbol,
             as_of=as_of,
@@ -197,6 +262,7 @@ def assemble_ttm(
                 "point_in_time": True,
                 "normalized_scale": 1.0,
                 "flow_basis": "ANNUAL",
+                "price_level_date": price_level_date,
             },
         )
 
@@ -281,6 +347,7 @@ def assemble_ttm(
         prior_cash,
         block_name="cash_flow",
     )
+    price_level_date, _ = _price_level_date(current)
 
     return TTMResult(
         symbol=normalized_symbol,
@@ -302,5 +369,6 @@ def assemble_ttm(
             "normalized_scale": 1.0,
             "flow_basis": CUMULATIVE_YTD,
             "partial_line_items_allowed": True,
+            "price_level_date": price_level_date,
         },
     )
