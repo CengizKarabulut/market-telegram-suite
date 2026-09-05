@@ -15,7 +15,6 @@ from src.research_engine import LevelZone, ResearchReport
 
 BG = "#0b1220"
 PANEL = "#111a2b"
-PANEL_2 = "#0f1928"
 TEXT = "#eef4fb"
 MUTED = "#8fa2b8"
 GRID = "#223047"
@@ -72,7 +71,7 @@ def render_research_card(report: ResearchReport, output: Path) -> Path:
     """Render an overlap-safe dark summary card."""
     output.parent.mkdir(parents=True, exist_ok=True)
     plt.rcParams["font.family"] = "DejaVu Sans"
-    fig = plt.figure(figsize=(9.0, 13.2), dpi=140, facecolor=BG)
+    fig = plt.figure(figsize=(9.0, 13.8), dpi=140, facecolor=BG)
 
     price = "—" if report.price is None else f"{report.price:,.2f} TL"
     score = "—" if report.research_score is None else f"{report.research_score:.0f}/100"
@@ -84,22 +83,24 @@ def render_research_card(report: ResearchReport, output: Path) -> Path:
     fig.text(0.94, 0.915, _stars(report.research_score), fontsize=18, color=TEAL, ha="right")
     fig.text(0.94, 0.882, f"Veri kapsamı %{round(report.coverage * 100)}", fontsize=8.7, color=MUTED, ha="right")
 
-    dimensions_ax = fig.add_axes([0.055, 0.505, 0.89, 0.345])
+    # Give the five dimensions a dedicated tall panel. The fifth row is kept
+    # well above the risk card so long summaries can never be hidden behind it.
+    dimensions_ax = fig.add_axes([0.055, 0.455, 0.89, 0.395])
     _panel(dimensions_ax)
     dimensions_ax.text(0.035, 0.955, "BEŞ BOYUTLU OKUMA", fontsize=10.5, color=TEAL, fontweight="bold", va="top")
-    row_top = 0.84
-    row_gap = 0.164
+    row_top = 0.82
+    row_gap = 0.155
     for index, dimension in enumerate(report.dimensions):
         y = row_top - index * row_gap
         number = "—" if dimension.score is None else f"{dimension.score:.0f}/100"
-        dimensions_ax.text(0.035, y, dimension.name, fontsize=11.7, fontweight="bold", color=TEXT, va="center")
-        dimensions_ax.text(0.53, y, number, fontsize=10.8, fontweight="bold", color=_colour(dimension.score), va="center")
-        dimensions_ax.text(0.965, y, dimension.label, fontsize=8.9, color=_colour(dimension.score), ha="right", va="center")
-        dimensions_ax.text(0.035, y - 0.052, _wrap(dimension.summary, 86), fontsize=7.7, color=MUTED, va="top")
+        dimensions_ax.text(0.035, y, dimension.name, fontsize=11.4, fontweight="bold", color=TEXT, va="center")
+        dimensions_ax.text(0.53, y, number, fontsize=10.6, fontweight="bold", color=_colour(dimension.score), va="center")
+        dimensions_ax.text(0.965, y, dimension.label, fontsize=8.7, color=_colour(dimension.score), ha="right", va="center")
+        dimensions_ax.text(0.035, y - 0.045, _wrap(dimension.summary, 88), fontsize=7.5, color=MUTED, va="top")
         if index < len(report.dimensions) - 1:
-            dimensions_ax.plot([0.035, 0.965], [y - 0.095, y - 0.095], color=GRID, linewidth=0.65)
+            dimensions_ax.plot([0.035, 0.965], [y - 0.085, y - 0.085], color=GRID, linewidth=0.65)
 
-    risk_ax = fig.add_axes([0.055, 0.382, 0.89, 0.095])
+    risk_ax = fig.add_axes([0.055, 0.335, 0.89, 0.09])
     _panel(risk_ax)
     if report.main_risk is None:
         risk_ax.text(0.035, 0.68, "ANA RİSK", fontsize=10.7, color=MUTED, fontweight="bold")
@@ -109,7 +110,7 @@ def render_research_card(report: ResearchReport, output: Path) -> Path:
         risk_ax.text(0.965, 0.69, f"{report.main_risk.score:.0f}/100", fontsize=11.4, color=RED, fontweight="bold", ha="right")
         risk_ax.text(0.035, 0.25, _wrap(report.main_risk.evidence, 105), fontsize=8.2, color=TEXT, va="center")
 
-    levels_ax = fig.add_axes([0.055, 0.185, 0.89, 0.165])
+    levels_ax = fig.add_axes([0.055, 0.145, 0.89, 0.155])
     _panel(levels_ax)
     levels_ax.text(0.035, 0.89, "KRİTİK SEVİYELER", fontsize=10.7, fontweight="bold", color=TEAL, va="top")
     y = 0.66
@@ -130,15 +131,15 @@ def render_research_card(report: ResearchReport, output: Path) -> Path:
     financial = report.financial
     fig.text(
         0.06,
-        0.145,
+        0.112,
         f"Bilanço {financial.get('balance_label', '—')}   ·   Kâr kalitesi {financial.get('earnings_quality_label', '—')}   ·   Borç {financial.get('debt_direction', '—')}",
         fontsize=8.8,
         color=TEXT,
     )
-    fig.text(0.06, 0.109, _wrap(report.note, 116), fontsize=7.6, color=MUTED, va="top")
+    fig.text(0.06, 0.082, _wrap(report.note, 116), fontsize=7.4, color=MUTED, va="top")
     fig.text(
         0.5,
-        0.035,
+        0.025,
         "Teknik + bilanço + değerleme + şirket kalitesi + risk · otomatik AL/SAT değildir",
         fontsize=7.7,
         color=MUTED,
