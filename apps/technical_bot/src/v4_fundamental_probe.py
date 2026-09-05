@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from market_core.fundamental_sources import parse_kap_financial_report_html  # noqa: E402
+from market_core.fundamental_sources import (
+    parse_kap_financial_report_html,
+)
 
 
 def _json_default(value: Any) -> str:
