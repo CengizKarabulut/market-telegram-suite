@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from statistics import mean, median
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from .fundamental_models import SectorType
 from .sector_profiles import SectorMetricRule, profile_for_sector
@@ -85,12 +86,12 @@ def _favourability(position: str, rule: SectorMetricRule) -> str:
 
 def _comment(label: str, position: str, favourability: str) -> str:
     where = {
-        "TOP_QUARTILE": "sektörün üst çeyreğinde",
-        "ABOVE_MEDIAN": "sektör medyanının üzerinde",
-        "AT_MEDIAN": "sektör medyanı civarında",
-        "BELOW_MEDIAN": "sektör medyanının altında",
-        "BOTTOM_QUARTILE": "sektörün alt çeyreğinde",
-    }.get(position, "sektör dağılımı içinde")
+        "TOP_QUARTILE": "karşılaştırma grubunun üst çeyreğinde",
+        "ABOVE_MEDIAN": "karşılaştırma grubu medyanının üzerinde",
+        "AT_MEDIAN": "karşılaştırma grubu medyanı civarında",
+        "BELOW_MEDIAN": "karşılaştırma grubu medyanının altında",
+        "BOTTOM_QUARTILE": "karşılaştırma grubunun alt çeyreğinde",
+    }.get(position, "karşılaştırma dağılımı içinde")
     suffix = {
         "FAVOURABLE": "; bu metrikte göreli görünüm olumlu.",
         "UNFAVOURABLE": "; bu metrikte göreli görünüm zayıf.",
@@ -154,6 +155,49 @@ def _benchmark_one_metric(
     }
 
 
+def _synthesis(metric_results: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    favourable = [
+        name
+        for name, result in metric_results.items()
+        if result.get("available") and result.get("favourability") == "FAVOURABLE"
+    ]
+    unfavourable = [
+        name
+        for name, result in metric_results.items()
+        if result.get("available") and result.get("favourability") == "UNFAVOURABLE"
+    ]
+    contextual = [
+        name
+        for name, result in metric_results.items()
+        if result.get("available") and result.get("favourability") == "CONTEXTUAL"
+    ]
+    available_count = sum(bool(result.get("available")) for result in metric_results.values())
+
+    if available_count == 0:
+        state = "INSUFFICIENT_PEER_DATA"
+        headline = "Sektör/eş şirket karşılaştırması için yeterli ortak metrik yok."
+    elif favourable and unfavourable:
+        state = "MIXED"
+        headline = "Şirket karşılaştırma grubuna göre bazı metriklerde güçlü, bazılarında zayıf ayrışıyor."
+    elif favourable and not unfavourable:
+        state = "RELATIVELY_FAVOURABLE"
+        headline = "Mevcut karşılaştırılabilir metriklerde şirket grubuna göre olumlu ayrışıyor."
+    elif unfavourable and not favourable:
+        state = "RELATIVELY_UNFAVOURABLE"
+        headline = "Mevcut karşılaştırılabilir metriklerde şirket grubuna göre zayıf ayrışıyor."
+    else:
+        state = "NEUTRAL_OR_CONTEXTUAL"
+        headline = "Karşılaştırma belirgin tek yönlü üstünlük veya zayıflık göstermiyor."
+
+    return {
+        "state": state,
+        "headline": headline,
+        "favourable_metrics": favourable,
+        "unfavourable_metrics": unfavourable,
+        "contextual_metrics": contextual,
+    }
+
+
 def build_peer_benchmark(
     *,
     target_symbol: str,
@@ -184,8 +228,16 @@ def build_peer_benchmark(
         if item.peer_group.strip() == group and item.sector_type == sector_type
     ]
     target_row = next((item for item in rows if item.symbol.strip().upper() == symbol), None)
-    metrics = dict(target_metrics or (target_row.metrics if target_row is not None else {}))
-    bases = dict(target_metric_basis or (target_row.metric_basis if target_row is not None else {}))
+    metrics = dict(
+        target_metrics
+        if target_metrics is not None
+        else (target_row.metrics if target_row is not None else {})
+    )
+    bases = dict(
+        target_metric_basis
+        if target_metric_basis is not None
+        else (target_row.metric_basis if target_row is not None else {})
+    )
     peers = [item for item in rows if item.symbol.strip().upper() != symbol]
     profile = profile_for_sector(sector_type)
 
@@ -212,38 +264,8 @@ def build_peer_benchmark(
             basis_excluded_count=basis_excluded_count,
         )
 
-    favourable = [
-        name
-        for name, result in metric_results.items()
-        if result.get("available") and result.get("favourability") == "FAVOURABLE"
-    ]
-    unfavourable = [
-        name
-        for name, result in metric_results.items()
-        if result.get("available") and result.get("favourability") == "UNFAVOURABLE"
-    ]
-    contextual = [
-        name
-        for name, result in metric_results.items()
-        if result.get("available") and result.get("favourability") == "CONTEXTUAL"
-    ]
+    synthesis = _synthesis(metric_results)
     available_count = sum(bool(result.get("available")) for result in metric_results.values())
-
-    if available_count == 0:
-        state = "INSUFFICIENT_PEER_DATA"
-        headline = "Sektör/eş şirket karşılaştırması için yeterli ortak metrik yok."
-    elif favourable and unfavourable:
-        state = "MIXED"
-        headline = "Şirket sektörüne göre bazı metriklerde güçlü, bazı metriklerde zayıf ayrışıyor."
-    elif favourable and not unfavourable:
-        state = "RELATIVELY_FAVOURABLE"
-        headline = "Mevcut karşılaştırılabilir metriklerde şirket sektörüne göre olumlu ayrışıyor."
-    elif unfavourable and not favourable:
-        state = "RELATIVELY_UNFAVOURABLE"
-        headline = "Mevcut karşılaştırılabilir metriklerde şirket sektörüne göre zayıf ayrışıyor."
-    else:
-        state = "NEUTRAL_OR_CONTEXTUAL"
-        headline = "Sektör karşılaştırması belirgin tek yönlü üstünlük veya zayıflık göstermiyor."
 
     return {
         "available": available_count > 0,
@@ -254,13 +276,7 @@ def build_peer_benchmark(
         "profile_label": profile.label,
         "peer_company_count": len(peers),
         "metrics": metric_results,
-        "synthesis": {
-            "state": state,
-            "headline": headline,
-            "favourable_metrics": favourable,
-            "unfavourable_metrics": unfavourable,
-            "contextual_metrics": contextual,
-        },
+        "synthesis": synthesis,
         "quality": {
             "target_excluded_from_peer_stats": True,
             "primary_location_statistic": "MEDIAN_AND_QUARTILES",
@@ -271,4 +287,97 @@ def build_peer_benchmark(
     }
 
 
-__all__ = ["PeerObservation", "build_peer_benchmark"]
+def build_hierarchical_peer_benchmark(
+    *,
+    target_symbol: str,
+    peer_group: str,
+    sector_type: SectorType,
+    observations: Iterable[PeerObservation],
+    target_metrics: Mapping[str, float | None] | None = None,
+    target_metric_basis: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Prefer same-industry peers and visibly fall back to the broader archetype.
+
+    The fallback is metric-by-metric and never silent. A metric sourced from the
+    broader sector/archetype is labelled ``BROAD_SECTOR_FALLBACK`` so user-facing
+    commentary can say e.g. "havayolu grubunda veri yetersiz; geniş sanayi/hizmet
+    karşılaştırması kullanıldı" rather than presenting it as the same peer set.
+    """
+    rows = list(observations)
+    exact = build_peer_benchmark(
+        target_symbol=target_symbol,
+        peer_group=peer_group,
+        sector_type=sector_type,
+        observations=rows,
+        target_metrics=target_metrics,
+        target_metric_basis=target_metric_basis,
+    )
+
+    broad_group = f"BROAD_{sector_type.value}"
+    broad_rows = [
+        replace(item, peer_group=broad_group)
+        for item in rows
+        if item.sector_type == sector_type
+    ]
+    broad = build_peer_benchmark(
+        target_symbol=target_symbol,
+        peer_group=broad_group,
+        sector_type=sector_type,
+        observations=broad_rows,
+        target_metrics=target_metrics,
+        target_metric_basis=target_metric_basis,
+    )
+
+    effective_metrics: dict[str, dict[str, Any]] = {}
+    all_names = set(exact.get("metrics", {})) | set(broad.get("metrics", {}))
+    for name in sorted(all_names):
+        exact_metric = dict((exact.get("metrics") or {}).get(name) or {})
+        broad_metric = dict((broad.get("metrics") or {}).get(name) or {})
+        if exact_metric.get("available"):
+            exact_metric["scope"] = "INDUSTRY_PEER_GROUP"
+            exact_metric["benchmark_group"] = peer_group
+            effective_metrics[name] = exact_metric
+        elif broad_metric.get("available"):
+            broad_metric["scope"] = "BROAD_SECTOR_FALLBACK"
+            broad_metric["benchmark_group"] = broad_group
+            broad_metric["fallback_reason"] = exact_metric.get("reason")
+            effective_metrics[name] = broad_metric
+        else:
+            effective_metrics[name] = {
+                **exact_metric,
+                "scope": "UNAVAILABLE",
+                "broad_sector_reason": broad_metric.get("reason"),
+            }
+
+    effective_synthesis = _synthesis(effective_metrics)
+    available_count = sum(bool(item.get("available")) for item in effective_metrics.values())
+    fallback_metrics = [
+        name
+        for name, item in effective_metrics.items()
+        if item.get("scope") == "BROAD_SECTOR_FALLBACK"
+    ]
+
+    return {
+        "available": available_count > 0,
+        "symbol": target_symbol.strip().upper(),
+        "sector_type": sector_type.value,
+        "preferred_peer_group": peer_group,
+        "industry_benchmark": exact,
+        "broad_sector_benchmark": broad,
+        "metrics": effective_metrics,
+        "synthesis": effective_synthesis,
+        "fallback_metrics": fallback_metrics,
+        "quality": {
+            "industry_first": True,
+            "broad_sector_fallback_is_explicit": True,
+            "fallback_is_metric_specific": True,
+            "metric_basis_must_match_when_declared": True,
+        },
+    }
+
+
+__all__ = [
+    "PeerObservation",
+    "build_hierarchical_peer_benchmark",
+    "build_peer_benchmark",
+]
