@@ -11,6 +11,7 @@ on:
     branches: [main]
     paths:
       - 'apps/technical_bot/src/fundamental_*.py'
+      - 'apps/technical_bot/src/research_theme.py'
       - 'apps/technical_bot/tests/test_fundamental_analysis.py'
       - '.github/workflows/fundamental-card-smoke.yml'
 
@@ -43,10 +44,14 @@ jobs:
           import os
           from pathlib import Path
 
+          import matplotlib.image as mpimg
+
           from src.fundamental_analysis import build_fundamental_report
           from src.fundamental_card import render_fundamental_card
           from src.fundamental_quality import apply_coverage_policy
+          from src.research_theme import apply_white_theme
 
+          apply_white_theme()
           ticker = os.environ.get('TICKER', 'GARAN').strip().upper() or 'GARAN'
           out = Path('reports/fundamental-smoke')
           out.mkdir(parents=True, exist_ok=True)
@@ -68,6 +73,9 @@ jobs:
               raise SystemExit(f'Bank fundamental coverage too low: {report.coverage:.0%}')
           if png.stat().st_size < 10_000:
               raise SystemExit('Rendered card is unexpectedly small')
+          corner = mpimg.imread(png)[2, 2, :3]
+          if float(corner.min()) < 0.94:
+              raise SystemExit(f'Fundamental card background is not white: {corner}')
           PY
       - name: Smoke çıktısını sakla
         uses: actions/upload-artifact@v7
