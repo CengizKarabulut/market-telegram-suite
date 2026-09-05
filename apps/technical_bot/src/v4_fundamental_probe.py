@@ -4,7 +4,7 @@ import argparse
 import json
 import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from market_core.company_classification import classify_company
+from market_core.company_classification import CompanyClassification, classify_company
 from market_core.corporate_events import build_corporate_event_timeline
 from market_core.fundamental_models import SectorType
 from market_core.fundamental_period import (
@@ -100,6 +100,50 @@ def _prior_comparative_column(column: str) -> str | None:
     return None
 
 
+def _company_name(info: Mapping[str, Any]) -> str | None:
+    for key in ("longName", "shortName", "companyName", "name"):
+        value = str(info.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _external_classification(path: str | None, symbol: str) -> CompanyClassification | None:
+    if not path:
+        return None
+    source = Path(path)
+    if not source.exists():
+        print(f"Sınıflama dosyası bulunamadı; provider metadata kullanılacak: {source}")
+        return None
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Sınıflama dosyası okunamadı; provider metadata kullanılacak: {exc}")
+        return None
+    block = payload.get("classification") if isinstance(payload, Mapping) else None
+    if not isinstance(block, Mapping):
+        return None
+    block_symbol = str(block.get("symbol") or symbol).strip().upper()
+    if block_symbol and block_symbol != symbol:
+        print(f"Sınıflama sembolü uyuşmuyor ({block_symbol} != {symbol}); dosya yok sayıldı.")
+        return None
+    raw_sector_type = str(block.get("sector_type") or "").strip().upper()
+    try:
+        sector_type = SectorType(raw_sector_type)
+    except ValueError:
+        return None
+    metadata = block.get("metadata") if isinstance(block.get("metadata"), Mapping) else {}
+    return classify_company(
+        symbol=symbol,
+        sector=str(metadata.get("sector") or "") or None,
+        industry=str(metadata.get("industry") or "") or None,
+        company_name=str(metadata.get("company_name") or "") or None,
+        source="peer_classification_file",
+        explicit_sector_type=sector_type,
+        explicit_peer_group=str(block.get("peer_group") or "") or None,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="V4 çok sektörlü gerçek finansal veri probu")
     parser.add_argument("symbol")
@@ -110,6 +154,11 @@ def main() -> int:
     parser.add_argument("--inflation-accounting", default=None)
     parser.add_argument("--kap-limit", type=int, default=120)
     parser.add_argument("--financial-filing-limit", type=int, default=16)
+    parser.add_argument(
+        "--classification-file",
+        default=None,
+        help="Opsiyonel peer_benchmark.json; accounting archetype provider metadata'dan önce kullanılır.",
+    )
     args = parser.parse_args()
 
     if args.kap_limit < 20:
@@ -134,12 +183,15 @@ def main() -> int:
         info_error = str(exc)
         print(f"Şirket metadata'sı alınamadı: {exc}")
 
-    classification = classify_company(
-        symbol=symbol,
-        sector=str(info.get("sector") or "") or None,
-        industry=str(info.get("industry") or "") or None,
-        source="borsapy/Ticker.info",
-    )
+    classification = _external_classification(args.classification_file, symbol)
+    if classification is None:
+        classification = classify_company(
+            symbol=symbol,
+            sector=str(info.get("sector") or "") or None,
+            industry=str(info.get("industry") or "") or None,
+            company_name=_company_name(info),
+            source="borsapy/Ticker.info",
+        )
     financial_group, financial_group_source = _resolve_financial_group(
         args.financial_group,
         classification.sector_type,
@@ -285,6 +337,7 @@ def main() -> int:
                         "provider_sector": classification.sector,
                         "provider_industry": classification.industry,
                         "peer_group": classification.peer_group,
+                        "classification_source": classification.source,
                     },
                 )
                 current_column = str(snapshot.metadata.get("provider_period_column") or "")
@@ -342,6 +395,7 @@ def main() -> int:
         "symbol": symbol,
         "classification": asdict(classification),
         "company_info": {
+            "name": _company_name(info),
             "sector": info.get("sector"),
             "industry": info.get("industry"),
             "longBusinessSummary": info.get("longBusinessSummary"),
@@ -352,7 +406,7 @@ def main() -> int:
         "source_contract": {
             "financial_values": "borsapy/IsYatirim",
             "publication_metadata": "borsapy/KAP",
-            "company_metadata": "borsapy/Ticker.info",
+            "company_metadata": "borsapy/Ticker.info + optional peer classification",
             "kap_history_source": kap_history_source,
             "kap_history_limit": args.kap_limit,
             "borsapy_ttm_used": False,
@@ -384,7 +438,8 @@ def main() -> int:
     print(
         "Sınıflama: "
         f"{classification.sector_type.value} · peer={classification.peer_group} · "
-        f"sector={classification.sector} · industry={classification.industry}"
+        f"sector={classification.sector} · industry={classification.industry} · "
+        f"source={classification.source}"
     )
     print(f"Finansal grup: {financial_group} ({financial_group_source})")
     for name, meta in tables.items():
