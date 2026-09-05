@@ -54,6 +54,27 @@ class CanonicalRowMap:
     cash_flow: Mapping[str, RowSpec] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class CanonicalPeriodValues:
+    """Canonical values extracted from one explicit provider period column.
+
+    This object is intentionally *not* a FinancialSnapshot: a provider
+    comparative column may be visible today without having a separately proven
+    historical ``published_at``. It can therefore support current-report YoY
+    context, but it must never be inserted into point-in-time backtests as if it
+    were an independently published historical filing.
+    """
+
+    column: str
+    balance_sheet: dict[str, float | None]
+    income_statement: dict[str, float | None]
+    cash_flow: dict[str, float | None]
+    row_matches: dict[str, dict[str, object]]
+    missing_canonical_rows: dict[str, list[str]]
+    ambiguous_canonical_rows: dict[str, dict[str, object]]
+    basis: str = "EXPLICIT_PROVIDER_PERIOD_COLUMN"
+
+
 def _normalize_label(value: object) -> str:
     text = str(value or "").strip().casefold()
     translation = str.maketrans("çğıöşü", "cgiosu")
@@ -107,6 +128,8 @@ def _distinct_positions(frame: pd.DataFrame, positions: Sequence[int]) -> list[i
 def _selector(spec: RowSpec) -> RowSelector:
     if isinstance(spec, RowSelector):
         return spec
+    if isinstance(spec, str):
+        return RowSelector(aliases=(spec,))
     return RowSelector(aliases=tuple(spec))
 
 
@@ -211,6 +234,55 @@ def _extract_block(
     return values, matched_rows, missing, ambiguous
 
 
+def extract_canonical_period_values(
+    *,
+    column: str,
+    balance_sheet: pd.DataFrame,
+    income_statement: pd.DataFrame,
+    cash_flow: pd.DataFrame,
+    row_map: CanonicalRowMap,
+    basis: str = "EXPLICIT_PROVIDER_PERIOD_COLUMN",
+) -> CanonicalPeriodValues:
+    """Extract one named provider column without inventing publication metadata."""
+    balance, matched_balance, missing_balance, ambiguous_balance = _extract_block(
+        balance_sheet,
+        column=column,
+        aliases=row_map.balance_sheet,
+    )
+    income, matched_income, missing_income, ambiguous_income = _extract_block(
+        income_statement,
+        column=column,
+        aliases=row_map.income_statement,
+    )
+    cash, matched_cash, missing_cash, ambiguous_cash = _extract_block(
+        cash_flow,
+        column=column,
+        aliases=row_map.cash_flow,
+    )
+    return CanonicalPeriodValues(
+        column=column,
+        balance_sheet=balance,
+        income_statement=income,
+        cash_flow=cash,
+        row_matches={
+            "balance_sheet": matched_balance,
+            "income_statement": matched_income,
+            "cash_flow": matched_cash,
+        },
+        missing_canonical_rows={
+            "balance_sheet": missing_balance,
+            "income_statement": missing_income,
+            "cash_flow": missing_cash,
+        },
+        ambiguous_canonical_rows={
+            "balance_sheet": ambiguous_balance,
+            "income_statement": ambiguous_income,
+            "cash_flow": ambiguous_cash,
+        },
+        basis=basis,
+    )
+
+
 def build_snapshot_from_borsapy_tables(
     *,
     symbol: str,
@@ -251,20 +323,13 @@ def build_snapshot_from_borsapy_tables(
         and ("yıll" in filing.period_label.casefold() or "12 ayl" in filing.period_label.casefold())
     )
     column = period_column(filing.period_end, annual=annual)
-    balance, matched_balance, missing_balance, ambiguous_balance = _extract_block(
-        balance_sheet,
+    period_values = extract_canonical_period_values(
         column=column,
-        aliases=row_map.balance_sheet,
-    )
-    income, matched_income, missing_income, ambiguous_income = _extract_block(
-        income_statement,
-        column=column,
-        aliases=row_map.income_statement,
-    )
-    cash, matched_cash, missing_cash, ambiguous_cash = _extract_block(
-        cash_flow,
-        column=column,
-        aliases=row_map.cash_flow,
+        balance_sheet=balance_sheet,
+        income_statement=income_statement,
+        cash_flow=cash_flow,
+        row_map=row_map,
+        basis="KAP_LINKED_PROVIDER_PERIOD",
     )
 
     metadata: dict[str, object] = {
@@ -276,21 +341,9 @@ def build_snapshot_from_borsapy_tables(
         "kap_period_label": filing.period_label,
         "kap_period_end_source": filing.quality.get("period_end_source"),
         "consolidation": filing.consolidation,
-        "row_matches": {
-            "balance_sheet": matched_balance,
-            "income_statement": matched_income,
-            "cash_flow": matched_cash,
-        },
-        "missing_canonical_rows": {
-            "balance_sheet": missing_balance,
-            "income_statement": missing_income,
-            "cash_flow": missing_cash,
-        },
-        "ambiguous_canonical_rows": {
-            "balance_sheet": ambiguous_balance,
-            "income_statement": ambiguous_income,
-            "cash_flow": ambiguous_cash,
-        },
+        "row_matches": period_values.row_matches,
+        "missing_canonical_rows": period_values.missing_canonical_rows,
+        "ambiguous_canonical_rows": period_values.ambiguous_canonical_rows,
     }
     if flow_basis:
         metadata["flow_basis"] = flow_basis
@@ -308,9 +361,9 @@ def build_snapshot_from_borsapy_tables(
         audit_status=audit_status,
         inflation_accounting=inflation_accounting,
         source="borsapy/IsYatirim+KAP",
-        income_statement=income,
-        balance_sheet=balance,
-        cash_flow=cash,
+        income_statement=period_values.income_statement,
+        balance_sheet=period_values.balance_sheet,
+        cash_flow=period_values.cash_flow,
         shares_outstanding=shares_outstanding,
         metadata=metadata,
     )
