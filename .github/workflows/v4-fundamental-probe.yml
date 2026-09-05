@@ -1,0 +1,59 @@
+name: V4 Gerçek Finansal Veri Probu
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: "BIST sembolü"
+        required: true
+        default: "ZGYO"
+      financial_group:
+        description: "İş Yatırım finansal grup kodu"
+        required: true
+        default: "XI_29"
+  push:
+    branches:
+      - rebuild/v3-market-analysis-engine
+    paths:
+      - ".v4-fundamental-probe-trigger"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PROBE_SYMBOL: ${{ github.event.inputs.symbol || 'ZGYO' }}
+      PROBE_FINANCIAL_GROUP: ${{ github.event.inputs.financial_group || 'XI_29' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/technical_bot/requirements.txt
+
+      - name: Teknik bot bağımlılıklarını yükle
+        working-directory: apps/technical_bot
+        run: python -m pip install --requirement requirements.txt
+
+      - name: BorsaPy/İş Yatırım ve KAP verisini probe et
+        working-directory: apps/technical_bot
+        env:
+          PYTHONPATH: ../..
+        run: |
+          python -m src.v4_fundamental_probe "$PROBE_SYMBOL" \
+            --last-n 8 \
+            --financial-group "$PROBE_FINANCIAL_GROUP" \
+            --output reports/v4_fundamental_probe
+
+      - name: Probe artifact yükle
+        uses: actions/upload-artifact@v7
+        with:
+          name: v4-fundamental-probe-${{ github.event.inputs.symbol || 'ZGYO' }}-${{ github.run_id }}
+          path: apps/technical_bot/reports/v4_fundamental_probe/**
+          if-no-files-found: error
+          retention-days: 7
