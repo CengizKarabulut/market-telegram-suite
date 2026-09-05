@@ -129,13 +129,18 @@ def _balance_view(snapshot: FinancialSnapshot) -> dict[str, Any]:
 
 def _income_cash_view(snapshot: FinancialSnapshot) -> dict[str, Any]:
     revenue = _snapshot_amount(snapshot, "income_statement", "revenue")
-    ebit = _snapshot_amount(snapshot, "income_statement", "ebit")
-    net_income = _snapshot_amount(snapshot, "income_statement", "net_income")
+    net_operating_profit = _snapshot_amount(
+        snapshot,
+        "income_statement",
+        "net_operating_profit",
+    )
     other_operating_income = _snapshot_amount(
         snapshot,
         "income_statement",
         "other_operating_income",
     )
+    ebit = _snapshot_amount(snapshot, "income_statement", "ebit")
+    net_income = _snapshot_amount(snapshot, "income_statement", "net_income")
     ocf = _snapshot_amount(snapshot, "cash_flow", "operating_cash_flow")
 
     cash_conversion_state = "UNAVAILABLE"
@@ -157,17 +162,30 @@ def _income_cash_view(snapshot: FinancialSnapshot) -> dict[str, Any]:
             else "OTHER_OPERATING_INCOME_WITHIN_REVENUE_SCALE"
         )
 
+    operating_bridge_state = "UNAVAILABLE"
+    if net_operating_profit is not None and ebit is not None:
+        if net_operating_profit < 0 < ebit:
+            operating_bridge_state = "CORE_OPERATING_NEGATIVE_REPORTED_OPERATING_POSITIVE"
+        elif net_operating_profit >= 0 and ebit >= 0:
+            operating_bridge_state = "BOTH_POSITIVE"
+        elif net_operating_profit < 0 and ebit < 0:
+            operating_bridge_state = "BOTH_NEGATIVE"
+        else:
+            operating_bridge_state = "MIXED"
+
     return {
         "revenue": revenue,
+        "net_operating_profit": net_operating_profit,
+        "other_operating_income": other_operating_income,
         "ebit": ebit,
         "net_income": net_income,
-        "other_operating_income": other_operating_income,
         "operating_cash_flow": ocf,
         "operating_cash_flow_to_net_income": _ratio(ocf, net_income),
         "other_operating_income_to_revenue": _ratio(other_operating_income, revenue),
         "other_operating_income_to_ebit": _ratio(other_operating_income, ebit),
         "cash_conversion_state": cash_conversion_state,
         "other_income_state": other_income_state,
+        "operating_bridge_state": operating_bridge_state,
     }
 
 
@@ -221,7 +239,15 @@ def _synthesis(
         risks.append("Pozitif dönem kârına rağmen işletme nakit akışı negatif.")
     if current.get("other_income_state") == "OTHER_OPERATING_INCOME_EXCEEDS_REVENUE":
         risks.append(
-            "Esas faaliyetlerden diğer gelirler satış gelirini aşıyor; kârın bileşimi ayrıca incelenmeli."
+            "Diğer faaliyet gelirleri satış gelirini aşıyor; kârın bileşimi ayrıca incelenmeli."
+        )
+    if (
+        current.get("operating_bridge_state")
+        == "CORE_OPERATING_NEGATIVE_REPORTED_OPERATING_POSITIVE"
+    ):
+        risks.append(
+            "Net faaliyet sonucu negatifken raporlanan faaliyet kârı pozitif; farkın kaynağı "
+            "diğer faaliyet kalemlerinde."
         )
 
     revenue_growth = comparative.get("revenue_growth") if comparative.get("available") else None
