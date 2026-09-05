@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import textwrap
 from pathlib import Path
 
@@ -127,7 +126,7 @@ def _insights(fig: plt.Figure, report: FundamentalReport) -> None:
         ax.text(0.04, y, _wrapped(item, 72), fontsize=10.6, color=TEXT, va="top")
         y -= 0.2
 
-    coverage = int(round(report.coverage * 100))
+    coverage = round(report.coverage * 100)
     footer = f"Veri kapsamı %{coverage} · {report.note}"
     ax.text(0.0, 0.01, _wrapped(footer, 105), fontsize=8.4, color=MUTED, va="bottom")
 
@@ -138,7 +137,6 @@ def render_fundamental_card(report: FundamentalReport, output: Path) -> Path:
     plt.rcParams["font.family"] = "DejaVu Sans"
     fig = plt.figure(figsize=(8.5, 13.2), dpi=140, facecolor=BG)
 
-    # Header.
     company = report.company_name if report.company_name != report.symbol else ""
     price = "—" if report.price is None else f"{report.price:,.2f}"
     score = "—" if report.overall_score is None else f"{report.overall_score:.2f}/5"
