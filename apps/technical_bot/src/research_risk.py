@@ -1,13 +1,16 @@
 """Auditable risk layer for the integrated research command.
 
 Bank capital strength is a higher-is-better proxy. Official SYR/NPL values are
-never inferred when the provider does not expose them.
+never inferred when the provider does not expose them. The build wrapper also
+routes technical scoring through the same original indicator formulas used by
+the chart, so visual and report conclusions cannot diverge.
 """
 
 from __future__ import annotations
 
 from src import research_engine as core
 from src.research_engine import LevelZone, RiskItem
+from src.research_technical import _technical_analysis
 
 
 def _risk_engine(
@@ -99,12 +102,16 @@ def _risk_engine(
         100.0,
         technical_risk + support_penalty + (10.0 if atr_pct is not None and atr_pct > 5 else 0.0),
     )
+    divergence = technical.get("latest_rsi_divergence")
+    if divergence and "Bearish" in str(divergence.get("kind")):
+        technical_risk = min(100.0, technical_risk + 8.0)
     risks.append(
         RiskItem(
             "Teknik yapı",
             round(technical_risk, 1),
             (
-                f"Yapı {technical.get('structure', {}).get('state', '—')} · ATR %{atr_pct:.1f}"
+                f"Yapı {technical.get('structure', {}).get('state', '—')} · ATR %{atr_pct:.1f} · "
+                f"AlphaTrend {technical.get('alpha_trend_state', '—')} · RSI uyumsuzluk {divergence.get('kind') if divergence else 'yok'}"
                 if atr_pct is not None
                 else "Teknik volatilite verisi yetersiz."
             ),
@@ -133,10 +140,13 @@ def _risk_engine(
 
 
 def build_research_report(symbol: str):
-    """Build through the core engine with the corrected risk layer."""
-    previous = core._risk_engine
+    """Build through core using the corrected risk and original-indicator technical layers."""
+    previous_risk = core._risk_engine
+    previous_technical = core._technical_analysis
     core._risk_engine = _risk_engine
+    core._technical_analysis = _technical_analysis
     try:
         return core.build_research_report(symbol)
     finally:
-        core._risk_engine = previous
+        core._risk_engine = previous_risk
+        core._technical_analysis = previous_technical
