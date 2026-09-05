@@ -4,6 +4,7 @@ Bu paket chart_bot ve technical_bot tarafından ortak kullanılacak yeni çekird
 başlangıç noktasıdır. V3 tamamlanana kadar mevcut uygulamaları değiştirmez.
 """
 
+from .engine import build_market_state
 from .models import (
     EvidenceDirection,
     LevelClass,
@@ -26,4 +27,5 @@ __all__ = [
     "StructureEvent",
     "TechnicalLevel",
     "WaveHypothesis",
+    "build_market_state",
 ]
