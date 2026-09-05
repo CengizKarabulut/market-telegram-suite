@@ -18,7 +18,6 @@ from market_core.reader_presentation import format_reader_telegram
 
 from src.telegram_client import send_text
 
-
 VALUATION_METRICS = (
     "pe",
     "price_to_book",
