@@ -102,7 +102,7 @@ def _technical_paragraph_rich(report: ResearchReport) -> str:
     confidence_text = "—" if confidence is None else f"%{confidence:.0f}"
 
     return (
-        f"Teknik yapı {score_text} ile {label}. Piyasa yapısında günlük {structure.get('state', '—')} ve "
+        f"Teknik yapı {score_text} ile {label}. Günlük piyasa yapısında {structure.get('state', '—')} ve "
         f"{structure.get('event', structure.get('bos', '—'))}; haftalık {weekly.get('state', '—')} / "
         f"{weekly.get('event', '—')}, aylık {monthly.get('state', '—')} / {monthly.get('event', '—')} okunuyor. "
         f"AlphaTrend {technical.get('alpha_trend_state', '—')}; Bollinger konumu "
