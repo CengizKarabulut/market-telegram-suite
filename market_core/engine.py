@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Any, Mapping
+from typing import Any
 
 import pandas as pd
 
@@ -83,6 +84,7 @@ def build_market_state(
     bar_state: dict[str, Any] | None = None,
     data_quality: dict[str, Any] | None = None,
     indicators: dict[str, Any] | None = None,
+    technical_features: dict[str, Any] | None = None,
     benchmark_data: pd.DataFrame | None = None,
     benchmark_name: str = "BENCHMARK",
     multi_timeframe_states: dict[str, dict[str, Any]] | None = None,
@@ -94,7 +96,8 @@ def build_market_state(
     Dış tarama kaynakları yalnız versioned adapter contract üzerinden alınır.
     Scanner sinyalleri şimdilik yön skoruna otomatik oy vermez; raporda gözlemsel
     kanıt olarak tutulur. MA level watchlist verisi ise aynı timeframe için ortak
-    Level Engine'e destek/direnç kaynağı olarak eklenebilir.
+    Level Engine'e destek/direnç kaynağı olarak eklenebilir. Teknik feature
+    bölümleri de ayrı tutulur; yorum üretir ama burada ikinci kez yön oyu verilmez.
     """
     required = {"Open", "High", "Low", "Close"}
     missing = sorted(required.difference(data.columns))
@@ -111,6 +114,7 @@ def build_market_state(
     ma_level_evidence = [ma_level_from_mapping(row) for row in (ma_level_rows or [])]
 
     indicator_values = dict(indicators or {})
+    feature_values = dict(technical_features or {})
     structure = build_structure_state(data)
     structure["price_position"] = _price_position(price, structure)
     pivots = structure.get("pivots", [])
@@ -179,6 +183,7 @@ def build_market_state(
         bar_state=dict(bar_state or {}),
         data_quality=quality,
         indicators=indicator_values,
+        technical_features=feature_values,
         structure=structure_summary,
         wave_hypotheses=waves,
         levels=levels,
@@ -203,5 +208,6 @@ def build_market_state(
             "multi_timeframe_available": multi_timeframe.get("available"),
             "scanner_evidence_available": bool(scanner_evidence),
             "ma_level_evidence_available": bool(ma_level_evidence),
+            "technical_features_available": bool(feature_values.get("available")),
         },
     )
