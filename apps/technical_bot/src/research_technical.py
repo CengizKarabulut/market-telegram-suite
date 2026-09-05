@@ -17,12 +17,14 @@ from src.original_indicators import build_indicator_frame
 from src.research_engine import LevelZone
 
 
-def _structure_score(state: str) -> float:
+def _structure_score(state: str) -> float | None:
     if state == "HH / HL":
         return 85.0
     if state == "LH / LL":
         return 15.0
-    return 50.0
+    if state in {"HH / LL", "LH / HL"}:
+        return 50.0
+    return None
 
 
 def _structure_event(structure: dict[str, Any]) -> str:
