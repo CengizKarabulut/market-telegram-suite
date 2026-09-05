@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import math
 import sys
 from pathlib import Path
@@ -13,9 +14,14 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from market_core import build_market_state  # noqa: E402
-from market_core.report import build_report_contract, format_telegram_preview  # noqa: E402
-from market_core.serialization import market_state_json, report_json  # noqa: E402
+_market_core = importlib.import_module("market_core")
+_report = importlib.import_module("market_core.report")
+_serialization = importlib.import_module("market_core.serialization")
+build_market_state = _market_core.build_market_state
+build_report_contract = _report.build_report_contract
+format_telegram_preview = _report.format_telegram_preview
+market_state_json = _serialization.market_state_json
+report_json = _serialization.report_json
 
 
 def _finite(value: Any) -> float | None:
@@ -56,7 +62,10 @@ def canonical_indicators(data: pd.DataFrame) -> dict[str, float]:
 
 def data_quality_from_attrs(data: pd.DataFrame) -> dict[str, Any]:
     corporate = data.attrs.get("corporate_action")
-    suspected = bool(corporate)
+    if isinstance(corporate, dict):
+        suspected = bool(corporate.get("suspect", False))
+    else:
+        suspected = bool(corporate)
     return {
         "state": "CRITICAL" if suspected else "OK",
         "critical": suspected,
