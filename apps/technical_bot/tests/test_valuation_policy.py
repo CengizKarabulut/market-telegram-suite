@@ -1,9 +1,6 @@
-from __future__ import annotations
-
 import unittest
 
 from src.valuation_policy import build_valuation_policy
-
 
 PEER = {
     "score": 55.0,
