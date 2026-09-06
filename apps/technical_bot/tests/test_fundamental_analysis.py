@@ -62,6 +62,58 @@ class FundamentalAnalysisTests(unittest.TestCase):
         self.assertIsNone(fundamental_analysis._clean_multiple(-100.0))
         self.assertEqual(fundamental_analysis._clean_multiple(7.5), 7.5)
 
+    def test_raw_multiples_override_provider_ratios(self) -> None:
+        metrics = {
+            "net_income_ttm": 100.0,
+            "equity": 400.0,
+            "total_debt": 80.0,
+            "cash": 30.0,
+            "ebitda_ttm": 150.0,
+        }
+        result = fundamental_analysis._derive_multiples(
+            metrics,
+            10.0,
+            {"market_cap": 1_000.0, "pe_ratio": 99.0, "price_to_book": 99.0},
+            {"enterpriseToEbitda": 99.0},
+        )
+        self.assertAlmostEqual(result["pe"], 10.0)
+        self.assertAlmostEqual(result["pb"], 2.5)
+        self.assertAlmostEqual(result["ev_ebitda"], 7.0)
+
+    def test_nonpositive_raw_denominator_is_not_hidden_by_provider_ratio(self) -> None:
+        metrics = {
+            "net_income_ttm": -10.0,
+            "equity": -20.0,
+            "total_debt": 50.0,
+            "cash": 10.0,
+            "ebitda_ttm": -5.0,
+        }
+        result = fundamental_analysis._derive_multiples(
+            metrics,
+            10.0,
+            {"market_cap": 1_000.0, "pe_ratio": 8.0, "price_to_book": 1.2},
+            {"enterpriseToEbitda": 6.0},
+        )
+        self.assertIsNone(result["pe"])
+        self.assertIsNone(result["pb"])
+        self.assertIsNone(result["ev_ebitda"])
+
+    def test_provider_multiple_is_fallback_only_when_raw_inputs_are_missing(self) -> None:
+        metrics = {
+            "net_income_ttm": None,
+            "equity": None,
+            "total_debt": None,
+            "cash": None,
+            "ebitda_ttm": None,
+        }
+        result = fundamental_analysis._derive_multiples(
+            metrics,
+            10.0,
+            {"pe_ratio": 8.0, "price_to_book": 1.2},
+            {"enterpriseToEbitda": 6.0},
+        )
+        self.assertEqual(result, {"pe": 8.0, "pb": 1.2, "ev_ebitda": 6.0})
+
     def test_garan_builds_bank_specific_factors(self) -> None:
         fake_module = types.SimpleNamespace(Ticker=FakeTicker)
         original = sys.modules.get("borsapy")
