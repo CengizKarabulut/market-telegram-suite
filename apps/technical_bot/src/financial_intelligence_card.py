@@ -192,7 +192,15 @@ def render_financial_intelligence_card(report: ResearchReport, output: str | Pat
     ax.set_axis_off()
     ax.set_facecolor(BG)
 
-    ax.text(0.05, 0.966, f"{report.symbol} · Finansal Oranlar ve Skorlar", fontsize=22, fontweight="bold", color=TEXT, va="top")
+    ax.text(
+        0.05,
+        0.966,
+        f"{report.symbol} · Finansal Oranlar ve Skorlar",
+        fontsize=22,
+        fontweight="bold",
+        color=TEXT,
+        va="top",
+    )
     ax.text(
         0.05,
         0.936,
@@ -231,18 +239,18 @@ def render_financial_intelligence_card(report: ResearchReport, output: str | Pat
         right_y = 0.89
         for idx, group in enumerate(groups):
             if idx % 2 == 0:
-                left_y = _draw_ratio_group(ax, group, 0.05, left_y, 0.43, 0.035)
+                left_y = _draw_ratio_group(ax, group, 0.05, left_y, 0.43, 0.032)
             else:
-                right_y = _draw_ratio_group(ax, group, 0.52, right_y, 0.43, 0.035)
+                right_y = _draw_ratio_group(ax, group, 0.52, right_y, 0.43, 0.032)
 
     scores = financial.get("forensic_scores", {})
     groups_bottom = left_y if report.profile == "BANK" else min(left_y, right_y)
-    score_h = 0.165
-    score_bottom = max(0.055, groups_bottom - score_h - 0.012)
+    score_h = 0.145
+    score_bottom = max(0.040, groups_bottom - score_h - 0.022)
     _box(ax, 0.05, score_bottom, 0.90, score_h)
     ax.text(
         0.075,
-        score_bottom + score_h - 0.026,
+        score_bottom + score_h - 0.022,
         "Skor Değerleri",
         fontsize=13,
         fontweight="bold",
@@ -257,22 +265,49 @@ def render_financial_intelligence_card(report: ResearchReport, output: str | Pat
         ("piotroski_f", "Piotroski F Skor"),
         ("beta", "Beta"),
     )
-    start_y = score_bottom + score_h - 0.060
+    start_y = score_bottom + score_h - 0.050
     card_w = 0.166
     gap = 0.013
     for idx, (key, label) in enumerate(labels):
         x = 0.075 + idx * (card_w + gap)
-        _box(ax, x, start_y - 0.090, card_w, 0.085)
+        _box(ax, x, start_y - 0.078, card_w, 0.073)
         text, note, tone = _score_value(scores.get(key, {}), key)
-        ax.text(x + 0.010, start_y - 0.014, label, fontsize=8.7, fontweight="bold", color=TEXT, transform=ax.transAxes, va="top")
-        ax.text(x + 0.010, start_y - 0.043, text, fontsize=13.5, fontweight="bold", color=tone, transform=ax.transAxes, va="top")
-        ax.text(x + 0.010, start_y - 0.066, note[:48], fontsize=6.2, color=MUTED, transform=ax.transAxes, va="top", wrap=True)
+        ax.text(
+            x + 0.010,
+            start_y - 0.012,
+            label,
+            fontsize=8.4,
+            fontweight="bold",
+            color=TEXT,
+            transform=ax.transAxes,
+            va="top",
+        )
+        ax.text(
+            x + 0.010,
+            start_y - 0.037,
+            text,
+            fontsize=13.0,
+            fontweight="bold",
+            color=tone,
+            transform=ax.transAxes,
+            va="top",
+        )
+        ax.text(
+            x + 0.010,
+            start_y - 0.058,
+            note[:48],
+            fontsize=5.9,
+            color=MUTED,
+            transform=ax.transAxes,
+            va="top",
+            wrap=True,
+        )
 
     ax.text(
         0.05,
-        0.025,
+        0.012,
         str(financial.get("ratio_note", "Eksik veri oran/skor üretmez; veri yoksa alan boş bırakılır.")),
-        fontsize=7.5,
+        fontsize=7.2,
         color=MUTED,
         transform=ax.transAxes,
         va="bottom",
