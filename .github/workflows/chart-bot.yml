@@ -2,8 +2,9 @@ name: Grafik Telegram Botu
 
 on:
   workflow_dispatch:
+  # Uzun dinleme zinciri ana çalışma biçimi; cron yalnız emniyet ağıdır.
   schedule:
-    - cron: "5 * * * *"
+    - cron: "15 */6 * * *"
 
 concurrency:
   group: chart-telegram-bot
@@ -16,7 +17,7 @@ permissions:
 jobs:
   listen:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 355
     defaults:
       run:
         working-directory: apps/chart_bot
@@ -42,7 +43,7 @@ jobs:
           TELEGRAM_TOPIC_ID: ${{ secrets.CHART_TOPIC_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOT_WORKFLOW_FILE: chart-bot.yml
-          BOT_RUN_MINUTES: "50"
+          BOT_RUN_MINUTES: "345"
         run: python -m src.bot_runner
       - name: Bot durumunu sakla
         if: always()
