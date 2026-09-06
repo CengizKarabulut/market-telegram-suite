@@ -6,7 +6,7 @@ same-degree HH/HL/LH/LL sequence; the dominant rail comes from structural lows
 in an uptrend or structural highs in a downtrend; the counter rail is parallel;
 and only confirmed rails are eligible for confluence/alerts.
 
-This module deliberately omits TradingView drawing code.  It exposes auditable
+This module deliberately omits TradingView drawing code. It exposes auditable
 geometry and evidence that the research/chart layers may render as they choose.
 """
 
@@ -144,8 +144,8 @@ def _label_sequence(pivots: list[dict[str, Any]], tolerance_atr: float = 0.15) -
 
 
 def _sequence_evidence(pivots: list[dict[str, Any]]) -> dict[str, Any]:
-    highs = [item for item in pivots if item["type"] == "high" and item["label"] not in {"H"}]
-    lows = [item for item in pivots if item["type"] == "low" and item["label"] not in {"L"}]
+    highs = [item for item in pivots if item["type"] == "high" and item["label"] != "H"]
+    lows = [item for item in pivots if item["type"] == "low" and item["label"] != "L"]
     recent_highs = highs[-6:]
     recent_lows = lows[-6:]
     high_label = recent_highs[-1]["label"] if recent_highs else "—"
@@ -421,8 +421,9 @@ def analyze_structure_hierarchy(frame: pd.DataFrame) -> dict[str, Any]:
         "DESCENDING_TRIANGLE": "△↓",
         "INSUFFICIENT": "—",
     }
+    degree_codes = {"MAJOR": "M", "SWING": "S", "MINOR": "L"}
     summary = " · ".join(
-        f"{name[0]}{symbols.get(str(degrees[name].get('state')), '?')}"
+        f"{degree_codes[name]}{symbols.get(str(degrees[name].get('state')), '?')}"
         for name in ("MAJOR", "SWING", "MINOR")
     )
     return {**degrees, "score": score, "summary": summary, "confirmed_rails": confirmed}
