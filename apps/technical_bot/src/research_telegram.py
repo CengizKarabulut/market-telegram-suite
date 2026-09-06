@@ -1,4 +1,4 @@
-"""Telegram delivery for the integrated research report."""
+"""Telegram delivery for integrated and technical-only research packages."""
 
 from __future__ import annotations
 
@@ -8,8 +8,9 @@ from typing import Any
 
 import requests
 
-from src.research_commentary_rich import commentary_messages
+from src.research_commentary_rich import commentary_messages, compose_research_commentary
 from src.research_engine import ResearchReport
+from src.research_pipeline import TECHNICAL_SECTION_TITLES
 from src.telegram_client import CAPTION_LIMIT, DEFAULT_CHAT_ID, caption_enabled, clip
 
 
@@ -45,6 +46,26 @@ def _caption(report: ResearchReport) -> str:
         "Görsellerin ardından bölüm bölüm analist yorumu gelir. Otomatik AL/SAT değildir.",
     ]
     return clip("\n".join(lines), CAPTION_LIMIT)
+
+
+def _technical_caption(report: ResearchReport) -> str:
+    technical = report.technical
+    structure = technical.get("structure", {})
+    weekly = technical.get("weekly_structure", {})
+    score = technical.get("score")
+    score_text = "—" if score is None else f"{float(score):.0f}/100"
+    return clip(
+        "\n".join(
+            [
+                f"📈 {report.symbol} — Modern Teknik Araştırma",
+                f"Teknik yapı: {score_text} · {technical.get('label', '—')}",
+                f"Günlük: {structure.get('state', '—')} · {structure.get('event', structure.get('bos', '—'))}",
+                f"Haftalık: {weekly.get('state', '—')} · {weekly.get('event', '—')}",
+                "MA tablosu + Pine-faithful teknik grafik + analist yorumu. Eski teknik rapor motoru kullanılmaz.",
+            ]
+        ),
+        CAPTION_LIMIT,
+    )
 
 
 def _verified_message(response_payload: dict[str, Any], expected_thread_id: str) -> dict[str, Any]:
@@ -112,6 +133,44 @@ def _send_text(token: str, chat_id: str, thread_id: str, text: str) -> dict[str,
     return _decode_response(response, thread_id, context="analist yorumu")
 
 
+def _messages_from_sections(
+    symbol: str,
+    sections: tuple[tuple[str, str], ...],
+    *,
+    header: str,
+    limit: int = 3900,
+) -> tuple[str, ...]:
+    blocks = [f"📌 {title}\n{paragraph}" for title, paragraph in sections]
+    messages: list[str] = []
+    current = f"{header} {symbol}"
+    for block in blocks:
+        candidate = f"{current}\n\n{block}"
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        messages.append(current)
+        current = block
+    if current:
+        messages.append(current)
+    return tuple(messages)
+
+
+def technical_commentary_messages(report: ResearchReport, limit: int = 3900) -> tuple[str, ...]:
+    """Return only modern technical, levels and risk interpretation."""
+    section_map = dict(compose_research_commentary(report))
+    sections = tuple(
+        (title, section_map[title])
+        for title in TECHNICAL_SECTION_TITLES
+        if title in section_map
+    )
+    return _messages_from_sections(
+        report.symbol,
+        sections,
+        header="🧭 TEKNİK ANALİST YORUMU —",
+        limit=limit,
+    )
+
+
 def send_research_bundle(
     summary_card: Path,
     fundamental_card: Path,
@@ -162,5 +221,30 @@ def send_research_bundle(
     results.extend(
         _send_text(token, chat_id, thread_id, message)
         for message in commentary_messages(report)
+    )
+    return tuple(results)
+
+
+def send_technical_bundle(
+    moving_average_card: Path,
+    technical_chart: Path,
+    report: ResearchReport,
+) -> tuple[dict[str, Any], ...]:
+    """Send the modern technical-only package; no legacy dashboard is involved."""
+    token, chat_id, thread_id = _destination()
+    visuals = (
+        (moving_average_card, _technical_caption(report)),
+        (
+            technical_chart,
+            f"{report.symbol} · Günlük/haftalık/aylık yapı + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR",
+        ),
+    )
+    results: list[dict[str, Any]] = [
+        _send_photo(token, chat_id, thread_id, path, caption)
+        for path, caption in visuals
+    ]
+    results.extend(
+        _send_text(token, chat_id, thread_id, message)
+        for message in technical_commentary_messages(report)
     )
     return tuple(results)
