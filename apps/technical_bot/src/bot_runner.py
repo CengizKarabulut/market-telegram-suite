@@ -1,13 +1,14 @@
 """Telegram bot çalıştırıcısı.
 
-Yeni komutları toplar, yetkilendirir ve yerine getirir. Tarama gibi uzun süren
-işler bu süreçte çalıştırılmaz; ilgili GitHub Actions iş akışı tetiklenir ve
-kullanıcıya bilgi verilir. Böylece bot yoklaması kısa ve öngörülebilir kalır.
+Kısa komutları doğrudan işler; uzun taramalar aktif GitHub Actions akışına
+delege edilir. Takip uyarıları yalnızca teyit edilmiş mum kapanışlarında ve
+referans fiyatın iki yanına doğrulanmış yapısal seviyelerde çalışır.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -15,7 +16,7 @@ from typing import Any
 
 import requests
 
-from src.analyst_card import render_analyst_cards, standardize_pages
+from src.analyst_card import standardize_pages
 from src.bot_settings import (
     apply_change,
     defaults,
@@ -39,7 +40,6 @@ from src.stock_dashboard import (
     build_status,
     calculate_indicators,
     download_prices,
-    render_report_pages,
 )
 from src.telegram_bot import (
     HELP_TEXT,
@@ -56,24 +56,22 @@ from src.watch_alerts import (
     Watch,
     add_watch,
     check_break,
+    latest_confirmed_close,
     load_watches,
     remove_watch,
     save_watches,
+    select_watch_levels,
 )
-from src.watch_alerts import (
-    describe as describe_watches,
-)
+from src.watch_alerts import describe as describe_watches
 
 REPORTS_DIR = Path("reports")
 SCREENER_JSON = REPORTS_DIR / "screener.json"
 MAX_COMMANDS_PER_RUN = 5
-# Başarısız tarama tetiklemeleri arasında beklenecek süre.
 DISPATCH_RETRY_SECONDS = 300.0
-# Takip kontrolü her turda değil, belirli aralıklarla yapılır; her sembol için
-# bir indirme isteği gittiği için sık kontrol sağlayıcıyı gereksiz yorar.
 WATCH_CHECK_SECONDS = 600.0
 BOT_WORKFLOW_FILE = os.getenv("BOT_WORKFLOW_FILE", "technical-bot.yml")
 SCAN_WORKFLOW_FILE = os.getenv("SCAN_WORKFLOW_FILE", "technical-scan.yml")
+SCAN_ARTIFACT_PREFIXES = ("bist-tarama", "bist-teknik-tarama")
 _last_dispatch_attempt = 0.0
 _last_watch_check = 0.0
 
@@ -88,10 +86,7 @@ def reply(chat_id: int, text: str) -> None:
 
 
 def dispatch_scan(intervals: str) -> tuple[bool, str]:
-    """Tarama iş akışını GitHub API üzerinden tetikler.
-
-    Tarama 25+ dakika sürdüğü için bot yoklamasının içinde çalıştırılamaz.
-    """
+    """Uzun süren taramayı aktif scan workflow'una delege eder."""
     token = os.getenv("GITHUB_TOKEN", "")
     repository = os.getenv("GITHUB_REPOSITORY", "")
     if not token or not repository:
@@ -110,24 +105,70 @@ def dispatch_scan(intervals: str) -> tuple[bool, str]:
     return False, f"Tarama tetiklenemedi: HTTP {response.status_code} — {response.text[:150]}"
 
 
-def handle_report(chat_id: int, ticker: str, interval: str) -> None:
-    reply(chat_id, f"{ticker} raporu hazırlanıyor ({interval})… bu işlem yaklaşık bir dakika sürer.")
-    config = ScanConfig(ticker=ticker, market="BIST", interval=interval, report_detail="kompakt")
-    symbol, prices = download_prices(config)
-    data = calculate_indicators(prices, interval)
-    status = build_status(data, config, symbol)
-    target = REPORTS_DIR / "komut" / ticker
-    pages = render_report_pages(data, status, target, f"{ticker}_rapor")
-    cards = render_analyst_cards(status, target, f"{ticker}_kart")
-    standardize_pages(pages + cards)
-    send_analyst_cards(pages + cards, status)
+def list_scan_artifacts(limit: int = 10) -> list[dict[str, Any]]:
+    """Aktif ve eski adlandırmadaki tarama artifact'lerini, yeniden eskiye listeler."""
+    token = os.getenv("GITHUB_TOKEN", "")
+    repository = os.getenv("GITHUB_REPOSITORY", "")
+    if not token or not repository:
+        return []
+    response = requests.get(
+        f"https://api.github.com/repos/{repository}/actions/artifacts",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+        params={"per_page": 100},
+        timeout=30,
+    )
+    if not response.ok:
+        return []
+    artifacts = [
+        item
+        for item in response.json().get("artifacts", [])
+        if any(str(item.get("name", "")).startswith(prefix) for prefix in SCAN_ARTIFACT_PREFIXES)
+        and not item.get("expired")
+    ]
+    artifacts.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
+    return artifacts[:limit]
+
+
+def download_scan_json(artifact: dict[str, Any]) -> dict[str, Any] | None:
+    """Artifact zip'ini indirip içindeki screener.json dosyasını okur."""
+    import io
+    import zipfile
+
+    token = os.getenv("GITHUB_TOKEN", "")
+    response = requests.get(
+        str(artifact.get("archive_download_url", "")),
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=120,
+    )
+    if not response.ok:
+        return None
+    try:
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            name = next((item for item in archive.namelist() if item.endswith("screener.json")), "")
+            if not name:
+                return None
+            return json.loads(archive.read(name).decode("utf-8"))
+    except (zipfile.BadZipFile, ValueError, KeyError):
+        return None
+
+
+def _latest_scan_payload() -> dict[str, Any] | None:
+    artifacts = list_scan_artifacts(limit=1)
+    if artifacts:
+        payload = download_scan_json(artifacts[0])
+        if payload:
+            return payload
+    try:
+        return json.loads(SCREENER_JSON.read_text(encoding="utf-8"))
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
 def handle_list(chat_id: int) -> None:
-    if not SCREENER_JSON.exists():
+    payload = _latest_scan_payload()
+    if not payload:
         reply(chat_id, "Henüz kayıtlı bir tarama sonucu yok. /tara ile yeni tarama başlatabilirsiniz.")
         return
-    payload = json.loads(SCREENER_JSON.read_text(encoding="utf-8"))
     if not payload.get("results"):
         reply(chat_id, "Son taramada eşleşme yok.")
         return
@@ -164,6 +205,22 @@ def handle_settings(chat_id: int, args: list[str]) -> None:
     reply(chat_id, message + "\n\nSonraki taramadan itibaren geçerli.")
 
 
+def _watch_from_levels(ticker: str, interval: str, setup_name: str, levels: dict[str, Any]) -> Watch:
+    return Watch(
+        ticker=ticker,
+        interval=interval,
+        upper=float(levels["upper"]),
+        lower=float(levels["lower"]),
+        setup=setup_name,
+        added_at=now_market().isoformat(timespec="minutes"),
+        reference_close=float(levels["reference_close"]),
+        lower_source=str(levels["lower_source"]),
+        upper_source=str(levels["upper_source"]),
+        reference_bar=str(levels["reference_bar"]),
+        last_checked_bar=str(levels["reference_bar"]),
+    )
+
+
 def handle_watch(chat_id: int, args: list[str], intervals: set[str]) -> None:
     watches = load_watches()
     if not args:
@@ -178,25 +235,24 @@ def handle_watch(chat_id: int, args: list[str], intervals: set[str]) -> None:
             save_watches(updated)
         reply(chat_id, message)
         return
-    ticker, interval, error = validate_report_args(args, intervals)
+
+    ticker, interval, error = validate_report_args(args, intervals, command="takip")
     if error:
         reply(chat_id, error)
         return
-    reply(chat_id, f"{ticker} için seviyeler hesaplanıyor…")
+    reply(chat_id, f"{ticker} için teyitli yapı seviyeleri hesaplanıyor…")
     config = ScanConfig(ticker=ticker, market="BIST", interval=interval)
     symbol, prices = download_prices(config)
     data = calculate_indicators(prices, interval)
     status = build_status(data, config, symbol)
-    structure = status["market_context"]["structure"]
-    setup = status["technical_commentary"].get("setup", {})
-    watch = Watch(
-        ticker=ticker,
-        interval=interval,
-        upper=float(structure.get("high", 0.0)),
-        lower=float(structure.get("low", 0.0)),
-        setup=str(setup.get("name", "")),
-        added_at=now_market().isoformat(timespec="minutes"),
-    )
+    setup = status.get("technical_commentary", {}).get("setup", {})
+    try:
+        levels = select_watch_levels(data, "BIST", interval, now=now_market())
+    except ValueError as error:
+        reply(chat_id, f"{ticker} takibe alınamadı: {error}")
+        return
+
+    watch = _watch_from_levels(ticker, interval, str(setup.get("name", "")), levels)
     updated, message = add_watch(watches, watch)
     if updated is not None:
         save_watches(updated)
@@ -220,56 +276,6 @@ def handle_status(chat_id: int) -> None:
         describe_settings(values),
     ]
     reply(chat_id, "\n".join(lines))
-
-
-def list_scan_artifacts(limit: int = 10) -> list[dict[str, Any]]:
-    """Geçmiş tarama çıktılarını GitHub artifact'lerinden listeler.
-
-    Tarama sonuçları ayrı bir iş akışında üretildiği için bot sürecinin diskinde
-    yoktur; artifact'ler 30 gün saklandığından geçmişe erişim oradan sağlanır.
-    """
-    token = os.getenv("GITHUB_TOKEN", "")
-    repository = os.getenv("GITHUB_REPOSITORY", "")
-    if not token or not repository:
-        return []
-    response = requests.get(
-        f"https://api.github.com/repos/{repository}/actions/artifacts",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-        params={"per_page": 100},
-        timeout=30,
-    )
-    if not response.ok:
-        return []
-    artifacts = [
-        item
-        for item in response.json().get("artifacts", [])
-        if str(item.get("name", "")).startswith("bist-tarama") and not item.get("expired")
-    ]
-    artifacts.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
-    return artifacts[:limit]
-
-
-def download_scan_json(artifact: dict[str, Any]) -> dict[str, Any] | None:
-    """Artifact zip'ini indirip içindeki tarama sonucunu okur."""
-    import io
-    import zipfile
-
-    token = os.getenv("GITHUB_TOKEN", "")
-    response = requests.get(
-        str(artifact.get("archive_download_url", "")),
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=120,
-    )
-    if not response.ok:
-        return None
-    try:
-        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-            name = next((item for item in archive.namelist() if item.endswith("screener.json")), "")
-            if not name:
-                return None
-            return json.loads(archive.read(name).decode("utf-8"))
-    except (zipfile.BadZipFile, ValueError, KeyError):
-        return None
 
 
 def handle_history(chat_id: int, args: list[str]) -> None:
@@ -311,17 +317,10 @@ def handle_history(chat_id: int, args: list[str]) -> None:
     send_analyst_cards(cards, {})
 
 
-def execute(command, intervals: set[str]) -> None:
+def execute(command: Any, intervals: set[str]) -> None:
     chat_id = command.chat_id
     if command.name in {"yardim", "yardım", "help", "start"}:
         reply(chat_id, HELP_TEXT)
-        return
-    if command.name == "rapor":
-        ticker, interval, error = validate_report_args(command.args, intervals)
-        if error:
-            reply(chat_id, error)
-            return
-        handle_report(chat_id, ticker, interval)
         return
     if command.name in {"tara", "tarama"}:
         selection, error = validate_scan_args(command.args, intervals)
@@ -350,11 +349,6 @@ def execute(command, intervals: set[str]) -> None:
 
 
 def check_schedule() -> None:
-    """Zamanı gelen taramayı tetikler.
-
-    GitHub'ın zamanlanmış koşuları güvenilir çalışmadığı için tarama, sürekli
-    çalışan bu süreç tarafından başlatılır.
-    """
     if os.getenv("BOT_DRIVES_SCAN", "1").strip().lower() not in {"1", "true", "yes", "evet"}:
         return
     global _last_dispatch_attempt
@@ -363,8 +357,6 @@ def check_schedule() -> None:
     slot = due_slot(current, state)
     if slot is None:
         return
-    # Tetikleme başarısız olursa döngü onu her turda (25 sn) yeniden denerdi;
-    # başarısız denemeler arasına bekleme konur.
     now = time.perf_counter()
     if now - _last_dispatch_attempt < DISPATCH_RETRY_SECONDS:
         return
@@ -376,11 +368,12 @@ def check_schedule() -> None:
         save_state(mark_done(slot, current, state))
 
 
-def check_watches() -> None:
-    """Takip edilen sembollerin eşik aşımını kontrol eder.
+def _legacy_watch_needs_refresh(watch: Watch) -> bool:
+    return not math.isfinite(watch.reference_close) or not watch.lower < watch.reference_close < watch.upper
 
-    Seans dışında çalıştırmak anlamsızdır; son kapanış zaten değişmez.
-    """
+
+def check_watches() -> None:
+    """Takipleri yalnızca yeni oluşmuş teyitli mum kapanışında kontrol eder."""
     global _last_watch_check
     watches = load_watches()
     if not watches:
@@ -390,31 +383,47 @@ def check_watches() -> None:
         return
     _last_watch_check = now
     current = now_market()
-    if current.weekday() >= 5 or not 10 <= current.hour < 19:
+    if current.weekday() >= 5 or not 9 <= current.hour < 19:
         return
+
     changed = False
     for ticker, watch in list(watches.items()):
         try:
             config = ScanConfig(ticker=ticker, market="BIST", interval=watch.interval)
             _, prices = download_prices(config)
-            close = float(prices["Close"].iloc[-1])
+            close, bar_time = latest_confirmed_close(prices, "BIST", watch.interval, now=current)
+
+            # Eski watchlist kayıtlarında referans ve kaynak bilgisi yoktu. Bunları
+            # eski/çelişkili eşik üzerinden alarm üretmek yerine güvenle migrate et.
+            if _legacy_watch_needs_refresh(watch):
+                levels = select_watch_levels(prices, "BIST", watch.interval, now=current)
+                refreshed = _watch_from_levels(ticker, watch.interval, watch.setup, levels)
+                refreshed.added_at = watch.added_at
+                watches[ticker] = refreshed
+                changed = True
+                print(f"  eski takip seviyeleri yenilendi: {ticker}")
+                continue
         except Exception as error:  # noqa: BLE001 -- tek sembol kontrolü botu durdurmamalı
             print(f"  takip kontrolü başarısız {ticker}: {type(error).__name__}")
             continue
-        message = check_break(watch, close)
-        if not message:
+
+        if bar_time == watch.last_checked_bar:
             continue
-        send_text(message)
-        watch.triggered = current.isoformat(timespec="minutes")
+
+        watch.last_checked_bar = bar_time
+        message = check_break(watch, close)
+        if message:
+            send_text(message)
+            watch.triggered = current.isoformat(timespec="minutes")
+            print(f"  takip uyarısı gönderildi: {ticker}")
         watches[ticker] = watch
         changed = True
-        print(f"  takip uyarısı gönderildi: {ticker}")
+
     if changed:
         save_watches(watches)
 
 
 def process_once(token: str, allowed: set[int], long_poll: int) -> int:
-    """Bir tur güncelleme çeker ve işler; işlenen komut sayısını döndürür."""
     offset = load_offset()
     updates = fetch_updates(token, offset, long_poll=long_poll)
     if not updates:
@@ -447,7 +456,6 @@ def process_once(token: str, allowed: set[int], long_poll: int) -> int:
 
 
 def _restart_tokens() -> list[tuple[str, str]]:
-    """Dinleme zinciri için jetonları güvenli öncelik sırasına koyar."""
     candidates = [
         (os.getenv("GITHUB_TOKEN", "").strip(), "GITHUB_TOKEN"),
         (os.getenv("GH_PAT", "").strip(), "GH_PAT"),
@@ -462,12 +470,6 @@ def _restart_tokens() -> list[tuple[str, str]]:
 
 
 def restart_self() -> bool:
-    """Koşu süresi dolduğunda kendini yeniden tetikler.
-
-    workflow_dispatch, GitHub'ın GITHUB_TOKEN ile yeni koşu oluşturmasına izin
-    verdiği olaylardan biridir. Repoya sınırlı GITHUB_TOKEN önce kullanılır;
-    GH_PAT yalnızca yerel/özel çalıştırmalar için yedektir.
-    """
     repository = os.getenv("GITHUB_REPOSITORY", "").strip()
     credentials = _restart_tokens()
     if not repository or not credentials:
@@ -493,15 +495,12 @@ def restart_self() -> bool:
             last_error = f"{source}: {error}"
             print(f"Dinleme zinciri isteği başarısız ({last_error}); yedek jeton deneniyor.")
             continue
-
         if response.status_code == 204:
             print(f"Sonraki dinleme turu tetiklendi ({source}).")
             return True
-
         last_error = f"{source}: HTTP {response.status_code} {response.text[:150]}"
         print(f"Dinleme zinciri isteği reddedildi ({last_error}); yedek jeton deneniyor.")
 
-    # Zincir koptuğunda sessiz kalmak, botun çalıştığı sanılmasına yol açar.
     message = "⚠ Bot dinleme zinciri devam ettirilemedi. Komutlar bir sonraki zamanlanmış koşuya kadar gecikebilir."
     print(f"{message} Son hata: {last_error}")
     try:
@@ -539,5 +538,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    resolve("1d")  # aralık tablosunun yüklendiğini doğrular
+    resolve("1d")
     main()

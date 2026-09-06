@@ -17,15 +17,46 @@ Bu uygulama başka repodaki Telethon/session altyapısını kullanmaz.
 
 ## Komutlar
 
-- `/rapor THYAO 4h` — mevcut kapsamlı teknik piyasa durum raporu
-- `/temel GARAN` — sektör uyarlamalı temel analiz + radar kartı
 - `/analiz ASELS` — bütünleşik araştırma paketi
-- `/tara ...` — BIST taraması
-- `/liste` — son tarama listesi
-- `/takip ...` — teknik seviye takibi
+- `/rapor ASELS` — `/analiz` ile aynı güncel paket; eski teknik rapor motoru yoktur
+- `/temel GARAN` — sektör uyarlamalı temel analiz + radar kartı
+- `/tara [aralık]` — BIST taraması
+- `/liste` — son tamamlanan taramanın listesi
+- `/takip THYAO [aralık]` — teyitli yapısal seviyeleri izler
+- `/takip sil THYAO` — takipten çıkarır
 - `/esik ...` — tarama eşik ayarları
 - `/durum` — bot/tarama durumu
-- `/gecmis` — saklanan tarama artifact'leri
+- `/gecmis [no]` — saklanan tarama artifact'leri
+
+## `/takip` seviye mantığı
+
+Takip sistemi, son teyitli swing high/low değerlerini körlemesine alt/üst eşik
+olarak kaydetmez. Önce seçilen zaman dilimindeki **son tamamlanmış mum kapanışı**
+referans alınır. Ardından 5 sol + 5 sağ mumla teyit edilmiş swing pivotları
+fiyatın iki yanına ayrılır:
+
+- referans kapanışın altındaki en yakın teyitli yapı → **alt eşik**;
+- referans kapanışın üstündeki en yakın teyitli yapı → **üst eşik**.
+
+Bu nedenle fiyat örneğin 21 TL iken daha önce kırılmış 27,98 TL swing dip artık
+“alt eşik” olamaz. Fiyatın üzerinde kaldığı için rol değiştirmiş bir
+**reclaim/yukarı izleme seviyesi** olarak sınıflanabilir.
+
+Zorunlu invariant:
+
+```text
+alt eşik < son teyitli kapanış < üst eşik
+```
+
+Bu koşul sağlanmazsa takip oluşturulmaz. Bir tarafta yeterli teyitli swing yoksa
+son 20 tamamlanmış barın fiyat sınırı yalnız yedek seviye olarak kullanılabilir;
+iki taraf da üretilemiyorsa sistem tahmin yürütmez ve takip kaydını reddeder.
+
+Alarm kontrolü canlı/tamamlanmamış mumun o anki fiyatıyla yapılmaz. `1h`, `4h`,
+`1d`, `1wk`, `1mo` gibi hangi aralık seçildiyse yalnız o aralığın **tamamlanmış
+mumu** yeni bir kapanış oluşturduğunda kontrol edilir. Mevcut eski watchlist
+kayıtlarında referans bilgisi yoksa sistem onları doğrudan tetiklemek yerine
+önce yeni kurallarla otomatik yeniden hesaplar.
 
 ## `/analiz` araştırma paketi
 
@@ -156,14 +187,16 @@ gibi sunulmaz.
 Temel veride bulunmayan resmi banka oranları, GYO NAV veya ileriye dönük analist
 konsensüsü tahmin edilmez.
 
-## Test
+## Workflow ve test
+
+Üretim taraması `technical-scan.yml` içinde tekrar tüm unit testleri çalıştırmaz;
+kod kalitesi ve testler PR/push sırasında merkezi `ci.yml` tarafından yürütülür.
+Canlı veriyle bütünleşik kalite kontrolü `research-report-smoke.yml` üzerinden
+GARAN/ZGYO/ASELS için yapılır. Güncel paketin manuel Telegram doğrulaması
+`research-telegram-send.yml` ile yapılabilir.
 
 ```bash
 python -m pip install -r requirements.txt -r requirements-dev.txt
 ruff check src tests
 python -m unittest discover -s tests -v
 ```
-
-Canlı veri kalite kontrolleri ayrıca repository workflow'larında
-`Fundamental Card Smoke` ve `Research Report Smoke` ile GARAN/ZGYO/ASELS üzerinde
-çalıştırılır.

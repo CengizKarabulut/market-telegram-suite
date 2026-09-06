@@ -24,11 +24,10 @@ VALID_TICKER = re.compile(r"^[A-Z0-9]{4,6}$")
 
 HELP_TEXT = (
     "Kullanılabilir komutlar:\n"
-    "/rapor SEMBOL [aralık] — tek hisse teknik raporu (ör. /rapor THYAO 4h)\n"
     "/tara [aralık] — yeni tarama başlatır (boşsa saate göre seçilir)\n"
-    "/liste — son taramanın tam listesi\n"
+    "/liste — son tamamlanan taramanın tam listesi\n"
     "/gecmis [no] — geçmiş taramalar (numarasız: liste)\n"
-    "/takip SEMBOL [aralık] — seviye uyarısı için takibe alır\n"
+    "/takip SEMBOL [aralık] — teyitli yapı seviyelerini izler\n"
     "/takip sil SEMBOL — takipten çıkarır\n"
     "/esik [ad değer] — tarama eşikleri (ör. /esik rvol 2.0)\n"
     "/durum — bot ve tarama durumu\n"
@@ -140,13 +139,20 @@ def fetch_updates(token: str, offset: int, timeout: int = 10, long_poll: int = 0
     return list(payload.get("result", []))
 
 
-def validate_report_args(args: list[str], intervals: set[str]) -> tuple[str | None, str, str | None]:
-    """/rapor argümanlarını doğrular; (sembol, aralık, hata) döndürür."""
+def validate_report_args(
+    args: list[str],
+    intervals: set[str],
+    command: str = "rapor",
+) -> tuple[str | None, str, str | None]:
+    """Sembol + opsiyonel aralık argümanlarını doğrular."""
+    example = f"/{command} THYAO"
     if not args:
-        return None, "", "Sembol belirtilmedi. Örnek: /rapor THYAO"
+        return None, "", f"Sembol belirtilmedi. Örnek: {example}"
+    if len(args) > 2:
+        return None, "", f"Fazla argüman. Kullanım: {example} [aralık]"
     ticker = args[0].strip().upper().removesuffix(".IS")
     if not VALID_TICKER.match(ticker):
-        return None, "", f"Geçersiz sembol: {args[0]}. Örnek: /rapor THYAO"
+        return None, "", f"Geçersiz sembol: {args[0]}. Örnek: {example}"
     interval = args[1].strip().lower() if len(args) > 1 else "1d"
     if interval not in intervals:
         return None, "", f"Geçersiz aralık: {args[1]}. Geçerli değerler: {', '.join(sorted(intervals))}"
@@ -156,7 +162,6 @@ def validate_report_args(args: list[str], intervals: set[str]) -> tuple[str | No
 def validate_scan_args(args: list[str], intervals: set[str]) -> tuple[str, str | None]:
     """/tara argümanlarını doğrular; (aralık listesi, hata) döndürür."""
     if not args:
-        # Saate göre çözülür; sabit bir liste seans dışında yanlış aralık verir.
         return "auto", None
     requested = [item.strip().lower() for item in args[0].split(",") if item.strip()]
     invalid = [item for item in requested if item not in intervals]

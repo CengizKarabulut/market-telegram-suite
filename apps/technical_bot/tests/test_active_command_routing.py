@@ -5,6 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from src import bot_runner as base
 from src import bot_runner_fundamental as routed
 
 
@@ -46,11 +47,11 @@ class ActiveCommandRoutingTests(unittest.TestCase):
         }
         get.return_value = response
 
-        artifacts = routed.list_scan_artifacts()
+        artifacts = base.list_scan_artifacts()
 
         self.assertEqual([item["name"] for item in artifacts], ["bist-tarama-12345", "bist-teknik-tarama"])
 
-    @patch("src.bot_runner_fundamental._latest_scan_payload")
+    @patch("src.bot_runner._latest_scan_payload")
     @patch("src.bot_runner.send_analyst_cards")
     @patch("src.bot_runner.standardize_pages")
     @patch("src.bot_runner.render_scan_cards")
@@ -68,7 +69,7 @@ class ActiveCommandRoutingTests(unittest.TestCase):
         }
         render_scan_cards.return_value = ["page"]
 
-        routed.handle_list(42)
+        base.handle_list(42)
 
         render_scan_cards.assert_called_once()
         standardize_pages.assert_called_once_with(["page"])
