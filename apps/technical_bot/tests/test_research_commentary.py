@@ -24,6 +24,7 @@ class ResearchCommentaryTests(unittest.TestCase):
         main_risk = RiskItem("Teknik yapı", 74.0, "LH / LL ve BOS AŞAĞI; ATR %4.2.")
         return SimpleNamespace(
             symbol="TEST",
+            price=101.50,
             profile="GENERIC",
             research_score=54.0,
             coverage=0.78,
@@ -127,7 +128,8 @@ class ResearchCommentaryTests(unittest.TestCase):
         dimensions[2] = ResearchDimension("Kâr Kalitesi", None, 0.20, "VERİ YETERSİZ", "")
         report.dimensions = tuple(dimensions)
         commentary = dict(compose_research_commentary(report))
-        self.assertIn("yapay bir puan üretilmiyor", commentary["KÂR KALİTELİ Mİ?"])
+        self.assertIn("veri kapsamı yeterli değil", commentary["KÂR KALİTELİ Mİ?"])
+        self.assertIn("puanlanmıyor", commentary["KÂR KALİTELİ Mİ?"])
 
 
 if __name__ == "__main__":
