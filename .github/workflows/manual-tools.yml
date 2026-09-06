@@ -8,13 +8,13 @@ on:
         required: true
         default: research
         type: choice
-        options: [research, technical-report, chart]
+        options: [research, technical, chart]
       ticker:
         description: "Sembol / hisse"
         required: true
         default: ZGYO
       interval:
-        description: "Teknik rapor/grafik aralığı"
+        description: "Yalnız grafik aracı için mum aralığı"
         required: true
         default: "1d"
       send_telegram:
@@ -102,10 +102,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  technical-report:
-    if: inputs.tool == 'technical-report'
+  technical:
+    if: inputs.tool == 'technical'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: apps/technical_bot
@@ -117,30 +117,60 @@ jobs:
           cache: pip
           cache-dependency-path: apps/technical_bot/requirements.txt
       - run: python -m pip install --requirement requirements.txt
-      - name: Teknik raporu üret
-        run: |
-          python -m src.stock_dashboard \
-            --ticker "${{ inputs.ticker }}" \
-            --market "BIST" \
-            --provider "AUTO" \
-            --interval "${{ inputs.interval }}" \
-            --report-detail "dengeli"
-      - name: Teknik raporu Telegram'a gönder
-        if: inputs.send_telegram
+      - name: Yeni motorla teknik araştırmayı üret
         env:
+          TICKER: ${{ inputs.ticker }}
+          SEND_TELEGRAM: ${{ inputs.send_telegram }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TECHNICAL_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TECHNICAL_TOPIC_ID }}
-          TELEGRAM_SEND_CAPTION: "0"
-          TELEGRAM_SEND_TEXT_DETAIL: "1"
-        run: python -m src.send_telegram
-      - name: Teknik raporu sakla
-        if: always()
+          MPLBACKEND: Agg
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from src.research_pipeline import build_technical_bundle
+          from src.research_telegram import send_technical_bundle
+
+          ticker = os.environ['TICKER'].strip().upper().removesuffix('.IS')
+          bundle = build_technical_bundle(ticker, Path('reports/manual-technical') / ticker)
+
+          if os.environ.get('SEND_TELEGRAM', '').lower() == 'true':
+              responses = send_technical_bundle(
+                  bundle.moving_average_card,
+                  bundle.technical_chart,
+                  bundle.report,
+              )
+              if len(responses) < 3:
+                  raise SystemExit(f'Expected two visuals plus technical commentary, got {len(responses)} messages')
+              if any('photo' not in response['result'] for response in responses[:2]):
+                  raise SystemExit('Telegram order violation: first two technical messages must be visuals')
+              if any('text' not in response['result'] for response in responses[2:]):
+                  raise SystemExit('Telegram order violation: technical commentary must follow visuals')
+              verification = [
+                  {
+                      'sequence': index,
+                      'kind': 'photo' if 'photo' in response['result'] else 'text',
+                      'message_id': response['result']['message_id'],
+                      'message_thread_id': response['result'].get('message_thread_id'),
+                      'chat_id': response['result'].get('chat', {}).get('id'),
+                  }
+                  for index, response in enumerate(responses, start=1)
+              ]
+              (bundle.root / f'{ticker}_telegram_delivery.json').write_text(
+                  json.dumps(verification, ensure_ascii=False, indent=2) + '\n',
+                  encoding='utf-8',
+              )
+              print('TECHNICAL_DELIVERY_VERIFIED=' + json.dumps(verification, ensure_ascii=False))
+          PY
+      - name: Teknik araştırma çıktısını sakla
         uses: actions/upload-artifact@v7
         with:
           name: manuel-teknik-${{ inputs.ticker }}-${{ github.run_id }}
-          path: apps/technical_bot/reports/
-          if-no-files-found: warn
+          path: apps/technical_bot/reports/manual-technical/
+          if-no-files-found: error
           retention-days: 14
 
   chart:
