@@ -1,6 +1,11 @@
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
+
+import pandas as pd
 
 from src.watch_alerts import (
     MAX_WATCHED,
@@ -8,14 +13,23 @@ from src.watch_alerts import (
     add_watch,
     check_break,
     describe,
+    latest_confirmed_close,
     load_watches,
     remove_watch,
     save_watches,
+    select_watch_levels,
 )
 
 
 def watch(ticker: str = "THYAO", upper: float = 310.0, lower: float = 290.0) -> Watch:
-    return Watch(ticker=ticker, interval="1d", upper=upper, lower=lower, setup="Sıkışma / karar bölgesi", added_at="2026-08-20T10:00")
+    return Watch(
+        ticker=ticker,
+        interval="1d",
+        upper=upper,
+        lower=lower,
+        setup="Sıkışma / karar bölgesi",
+        added_at="2026-08-20T10:00",
+    )
 
 
 class BreakTests(unittest.TestCase):
@@ -37,6 +51,64 @@ class BreakTests(unittest.TestCase):
 
     def test_alert_states_it_is_not_advice(self) -> None:
         self.assertIn("önerisi değildir", check_break(watch(), 312.0))
+
+
+class LevelSelectionTests(unittest.TestCase):
+    @patch("src.watch_alerts._confirmed_pivot_candidates")
+    def test_broken_old_low_above_price_becomes_upper_not_lower(self, pivots) -> None:
+        index = pd.date_range("2026-08-01", periods=30, freq="D")
+        data = pd.DataFrame(
+            {
+                "High": [22.0] * 30,
+                "Low": [20.0] * 30,
+                "Close": [21.0] * 30,
+            },
+            index=index,
+        )
+        pivots.return_value = [
+            (27.98, "swing_low", 10),
+            (19.50, "swing_low", 18),
+            (40.50, "swing_high", 12),
+        ]
+
+        levels = select_watch_levels(
+            data,
+            "BIST",
+            "1d",
+            now=datetime(2026, 9, 6, 12, 0, tzinfo=ZoneInfo("Europe/Istanbul")),
+        )
+
+        self.assertEqual(levels["reference_close"], 21.0)
+        self.assertEqual(levels["lower"], 19.50)
+        self.assertEqual(levels["upper"], 27.98)
+        self.assertIn("reclaim", levels["upper_source"])
+        self.assertLess(levels["lower"], levels["reference_close"])
+        self.assertLess(levels["reference_close"], levels["upper"])
+
+    def test_live_daily_bar_is_not_treated_as_confirmed_close(self) -> None:
+        data = pd.DataFrame(
+            {
+                "High": [21.0, 26.0],
+                "Low": [19.0, 20.0],
+                "Close": [20.0, 25.0],
+            },
+            index=pd.to_datetime(["2026-09-04", "2026-09-07"]),
+        )
+        close, bar_time = latest_confirmed_close(
+            data,
+            "BIST",
+            "1d",
+            now=datetime(2026, 9, 7, 12, 0, tzinfo=ZoneInfo("Europe/Istanbul")),
+        )
+        self.assertEqual(close, 20.0)
+        self.assertTrue(bar_time.startswith("2026-09-04"))
+
+    def test_add_rejects_contradictory_thresholds_when_reference_exists(self) -> None:
+        item = watch(upper=40.50, lower=27.98)
+        item.reference_close = 21.0
+        updated, message = add_watch({}, item)
+        self.assertIsNone(updated)
+        self.assertIn("oluşturulmadı", message)
 
 
 class ListTests(unittest.TestCase):
@@ -75,6 +147,18 @@ class PersistenceTests(unittest.TestCase):
             loaded = load_watches(path)
             self.assertEqual(loaded["THYAO"].upper, 310.0)
 
+    def test_legacy_record_without_new_fields_still_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "watch.json"
+            path.write_text(
+                '{"ZGYO": {"ticker": "ZGYO", "interval": "1d", "upper": 40.5, '
+                '"lower": 27.98, "setup": "", "added_at": "2026-09-06T10:00"}}',
+                encoding="utf-8",
+            )
+            loaded = load_watches(path)
+            self.assertIn("ZGYO", loaded)
+            self.assertTrue(pd.isna(loaded["ZGYO"].reference_close))
+
     def test_corrupt_file_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "watch.json"
@@ -86,3 +170,7 @@ class PersistenceTests(unittest.TestCase):
             path = Path(directory) / "watch.json"
             path.write_text('{"AAA": {"ticker": "AAA"}}', encoding="utf-8")
             self.assertEqual(load_watches(path), {})
+
+
+if __name__ == "__main__":
+    unittest.main()
