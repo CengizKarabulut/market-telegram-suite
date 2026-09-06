@@ -8,7 +8,10 @@ from typing import Any
 
 import requests
 
-from src.research_commentary_rich import commentary_messages, compose_research_commentary
+from src.research_commentary_rich import (
+    commentary_messages,
+    compose_research_commentary,
+)
 from src.research_engine import ResearchReport
 from src.research_pipeline import TECHNICAL_SECTION_TITLES
 from src.telegram_client import CAPTION_LIMIT, DEFAULT_CHAT_ID, caption_enabled, clip
