@@ -13,6 +13,7 @@ on:
       - 'apps/technical_bot/src/moving_average_card.py'
       - 'apps/technical_bot/tests/**'
       - '.github/workflows/health-check.yml'
+      - '.github/workflows/manual-tools.yml'
 
 permissions:
   contents: read
@@ -44,12 +45,17 @@ jobs:
       - name: GARAN ZGYO ASELS canlı araştırma sağlığını doğrula
         run: |
           python - <<'PY'
+          import json
           from pathlib import Path
 
           import matplotlib.image as mpimg
 
           from src.research_commentary_rich import commentary_messages, compose_research_commentary
-          from src.research_pipeline import build_research_bundle
+          from src.research_pipeline import (
+              TECHNICAL_SECTION_TITLES,
+              build_research_bundle,
+              build_technical_bundle,
+          )
 
           root = Path('reports/health-check')
           root.mkdir(parents=True, exist_ok=True)
@@ -71,6 +77,14 @@ jobs:
               'ASIL RİSK NE?',
               'SONUÇ',
           }
+
+          def validate_white(image, ticker):
+              if image.stat().st_size < 10_000:
+                  raise SystemExit(f'{ticker}: unexpectedly small image {image.name}')
+              pixels = mpimg.imread(image)
+              corner = pixels[2, 2, :3]
+              if float(corner.min()) < 0.94:
+                  raise SystemExit(f'{ticker}: image background is not white: {image.name} {corner}')
 
           for ticker in ('GARAN', 'ZGYO', 'ASELS'):
               bundle = build_research_bundle(ticker, root / ticker)
@@ -119,12 +133,7 @@ jobs:
                       raise SystemExit(f'{ticker}: forensic score field missing: {key}')
 
               for image in bundle.visuals:
-                  if image.stat().st_size < 10_000:
-                      raise SystemExit(f'{ticker}: unexpectedly small image {image.name}')
-                  pixels = mpimg.imread(image)
-                  corner = pixels[2, 2, :3]
-                  if float(corner.min()) < 0.94:
-                      raise SystemExit(f'{ticker}: image background is not white: {image.name} {corner}')
+                  validate_white(image, ticker)
 
               peer = report.valuation.get('peer_analysis', {})
               print(
@@ -139,6 +148,22 @@ jobs:
                   'forensic=', {k: forensic.get(k) for k in ('altman_z', 'beneish_m', 'graham_number', 'piotroski_f', 'beta')},
                   'commentary_messages=', len(messages),
               )
+
+          # The former manual technical-report must not be able to reintroduce the
+          # legacy dashboard. Exercise the new technical-only pipeline separately.
+          technical_bundle = build_technical_bundle('ZGYO', root / 'technical-only' / 'ZGYO')
+          technical_commentary = technical_bundle.commentary_path.read_text(encoding='utf-8')
+          for title in TECHNICAL_SECTION_TITLES:
+              if title not in technical_commentary:
+                  raise SystemExit(f'technical-only: missing commentary section {title}')
+          if 'ŞİRKET NE DURUMDA?' in technical_commentary or 'DEĞERLEME NASIL?' in technical_commentary:
+              raise SystemExit('technical-only: non-technical research content leaked into manual technical mode')
+          for image in technical_bundle.visuals:
+              validate_white(image, 'ZGYO technical-only')
+          technical_payload = json.loads(technical_bundle.json_path.read_text(encoding='utf-8'))
+          if 'eski stock_dashboard içeriği kullanılmaz' not in technical_payload.get('note', ''):
+              raise SystemExit('technical-only: modern engine contract note missing')
+          print('TECHNICAL_ONLY_OK', technical_bundle.visuals)
           PY
       - name: Sağlık kontrolü çıktılarını sakla
         uses: actions/upload-artifact@v7
