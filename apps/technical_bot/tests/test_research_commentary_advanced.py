@@ -33,7 +33,8 @@ class AdvancedCommentaryTests(unittest.TestCase):
         text = _valuation_paragraph(report)
         self.assertIn("NAD / NAV", text)
         self.assertIn("hedef fiyat uydurmuyor", text)
-        self.assertIn("VERİ", text.upper())
+        # text.upper() Türkçe farkında değil ("veri" -> "VERI"); ham metinde ara.
+        self.assertIn("veri kapsamı", text)
         self.assertIn("içsel değer değil", text)
 
     def test_technical_extension_explains_hierarchy_confirmed_rail_ma_and_poc(self) -> None:
