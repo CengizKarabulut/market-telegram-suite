@@ -17,12 +17,30 @@ from typing import Any
 import requests
 
 from src.analyst_card import standardize_pages
-from src.bot_settings import apply_change, defaults, load_settings, save_settings, workflow_inputs
+from src.bot_settings import (
+    apply_change,
+    defaults,
+    load_settings,
+    save_settings,
+    workflow_inputs,
+)
 from src.bot_settings import describe as describe_settings
 from src.intervals import INTERVALS, resolve
 from src.scan_card import render_scan_cards
-from src.scan_scheduler import SLOTS, due_slot, load_state, mark_done, now_market, save_state
-from src.stock_dashboard import ScanConfig, build_status, calculate_indicators, download_prices
+from src.scan_scheduler import (
+    SLOTS,
+    due_slot,
+    load_state,
+    mark_done,
+    now_market,
+    save_state,
+)
+from src.stock_dashboard import (
+    ScanConfig,
+    build_status,
+    calculate_indicators,
+    download_prices,
+)
 from src.telegram_bot import (
     HELP_TEXT,
     fetch_updates,
