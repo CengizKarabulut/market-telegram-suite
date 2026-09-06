@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from src.research_commentary import commentary_messages, compose_research_commentary
+from src.research_commentary_rich import (
+    commentary_messages,
+    compose_research_commentary,
+)
 from src.research_engine import LevelZone, ResearchDimension, RiskItem
 
 
@@ -64,11 +67,21 @@ class ResearchCommentaryTests(unittest.TestCase):
                 "weekly_structure": {"state": "LH / LL", "event": "CHoCH AŞAĞI"},
                 "monthly_structure": {"state": "—", "event": "VERİ YETERSİZ"},
                 "alpha_trend_state": "FİYAT ALTINDA / DÜŞEN",
+                "bollinger_state": "ALT BANDA YAKIN",
                 "rsi14": 34.0,
                 "smi": -42.0,
+                "smi_signal": -38.0,
                 "macd_hist": -0.18,
                 "obv_10d_change": -7.0,
+                "rvol20": 1.25,
+                "atr_pct": 4.2,
                 "latest_rsi_divergence": {"kind": "Regular Bullish"},
+                "elliott": {
+                    "primary": "DÜZELTME / İTKİ AYRIMI BELİRSİZ",
+                    "alternate": "ABC DÜZELTMESİ",
+                    "confidence": 45.0,
+                    "invalidation": 94.5,
+                },
             },
             supports=(support,),
             resistances=(resistance,),
@@ -84,10 +97,10 @@ class ResearchCommentaryTests(unittest.TestCase):
             titles,
             [
                 "ŞİRKET NE DURUMDA?",
+                "DEĞERLEME NASIL?",
                 "BİLANÇO İYİLEŞİYOR MU?",
                 "KÂR KALİTELİ Mİ?",
                 "BORÇ VE NAKİT NE YÖNDE?",
-                "DEĞERLEME NASIL?",
                 "TEKNİK YAPI NE DİYOR?",
                 "KRİTİK SEVİYELER NEREDE?",
                 "ASIL RİSK NE?",
@@ -95,6 +108,9 @@ class ResearchCommentaryTests(unittest.TestCase):
             ],
         )
         self.assertTrue(all(len(paragraph) > 80 for _, paragraph in commentary))
+        technical = dict(commentary)["TEKNİK YAPI NE DİYOR?"]
+        for term in ("Bollinger", "SMI", "MACD", "RVOL20", "ATR", "Elliott"):
+            self.assertIn(term, technical)
 
     def test_telegram_messages_respect_limit_and_preserve_sections(self) -> None:
         messages = commentary_messages(self._report(), limit=1200)

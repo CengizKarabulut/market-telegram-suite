@@ -1,4 +1,8 @@
-"""Deterministic Turkish analyst commentary for integrated research reports."""
+"""Shared deterministic paragraph helpers for the rich /analiz commentary engine.
+
+This module intentionally does not expose a second commentary composer. The single
+user-facing compose/message path lives in ``research_commentary_rich.py``.
+"""
 
 from __future__ import annotations
 
@@ -157,25 +161,6 @@ def _valuation_paragraph(report: ResearchReport) -> str:
     )
 
 
-def _technical_paragraph(report: ResearchReport) -> str:
-    technical = report.technical
-    structure = technical.get("structure", {})
-    weekly = technical.get("weekly_structure", {})
-    monthly = technical.get("monthly_structure", {})
-    divergence = technical.get("latest_rsi_divergence")
-    divergence_text = divergence.get("kind") if isinstance(divergence, dict) else "yok"
-    return (
-        f"Teknik yapı {_num(technical.get('score'), 0)}/100 ile "
-        f"{str(technical.get('label', 'VERİ YETERSİZ')).casefold()}. Günlük yapı {structure.get('state', '—')} ve son "
-        f"teyitli olay {structure.get('event', structure.get('bos', '—'))}; haftalık {weekly.get('state', '—')} / "
-        f"{weekly.get('event', '—')}, aylık {monthly.get('state', '—')} / {monthly.get('event', '—')}. AlphaTrend "
-        f"{technical.get('alpha_trend_state', '—')}, RSI {_num(technical.get('rsi14'))}, SMI "
-        f"{_num(technical.get('smi'))}, MACD histogram {_num(technical.get('macd_hist'), 3)}, OBV 10 günlük değişim "
-        f"{_pct(technical.get('obv_10d_change'))}; son RSI uyumsuzluğu {divergence_text}. İndikatörler piyasa yapısının "
-        "yerine geçmiyor, yalnız yapıyı teyit veya zayıflatmak için kullanılıyor."
-    )
-
-
 def _levels_paragraph(report: ResearchReport) -> str:
     if report.supports:
         support = report.supports[0]
@@ -243,38 +228,3 @@ def _conclusion_paragraph(report: ResearchReport) -> str:
         "Bu çıktı otomatik işlem çağrısı değil; hangi olumlu tezlerin hangi risk ve seviyelerle sınandığını gösteren karar "
         "desteğidir."
     )
-
-
-def compose_research_commentary(report: ResearchReport) -> tuple[tuple[str, str], ...]:
-    """Return one paragraph for every agreed research section."""
-    return (
-        ("ŞİRKET NE DURUMDA?", _company_paragraph(report)),
-        ("BİLANÇO İYİLEŞİYOR MU?", _balance_paragraph(report)),
-        ("KÂR KALİTELİ Mİ?", _earnings_paragraph(report)),
-        ("BORÇ VE NAKİT NE YÖNDE?", _debt_paragraph(report)),
-        ("DEĞERLEME NASIL?", _valuation_paragraph(report)),
-        ("TEKNİK YAPI NE DİYOR?", _technical_paragraph(report)),
-        ("KRİTİK SEVİYELER NEREDE?", _levels_paragraph(report)),
-        ("ASIL RİSK NE?", _risk_paragraph(report)),
-        ("SONUÇ", _conclusion_paragraph(report)),
-    )
-
-
-def commentary_messages(report: ResearchReport, limit: int = 3900) -> tuple[str, ...]:
-    """Split commentary on paragraph boundaries to stay inside Telegram limits."""
-    blocks = [
-        f"📌 {title}\n{paragraph}"
-        for title, paragraph in compose_research_commentary(report)
-    ]
-    messages: list[str] = []
-    current = f"🧾 {report.symbol} — ANALİST YORUMU"
-    for block in blocks:
-        candidate = f"{current}\n\n{block}"
-        if len(candidate) <= limit:
-            current = candidate
-            continue
-        messages.append(current)
-        current = block
-    if current:
-        messages.append(current)
-    return tuple(messages)
