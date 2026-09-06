@@ -1,7 +1,14 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from src import fundamental_card, moving_average_card, research_card, research_chart
+from src import (
+    financial_intelligence_card,
+    fundamental_card,
+    moving_average_card,
+    research_card,
+    research_chart,
+    valuation_peer_card,
+)
 from src import research_telegram as telegram
 from src.research_commentary_rich import _technical_paragraph_rich
 from src.research_theme import apply_white_theme
@@ -18,6 +25,8 @@ def test_white_theme_keeps_pine_indicator_colours() -> None:
     assert research_card.BG == "#FFFFFF"
     assert research_chart.BG == "#FFFFFF"
     assert research_chart.PANEL == "#FFFFFF"
+    assert financial_intelligence_card.BG == "#FFFFFF"
+    assert valuation_peer_card.BG == "#FFFFFF"
     assert research_chart.TEXT != "#FFFFFF"
     assert research_chart.PINE_BLUE == original_pine_blue
     assert research_chart.RSI_PURPLE == original_rsi_purple
@@ -72,7 +81,7 @@ def test_rich_technical_commentary_contains_full_evidence_stack() -> None:
         assert term in text
 
 
-def test_research_bundle_sends_four_visuals_before_commentary(monkeypatch, tmp_path: Path) -> None:
+def test_research_bundle_sends_six_visuals_before_commentary(monkeypatch, tmp_path: Path) -> None:
     calls: list[tuple[str, str]] = []
 
     monkeypatch.setattr(telegram, "_destination", lambda: ("token", "chat", "thread"))
@@ -90,15 +99,37 @@ def test_research_bundle_sends_four_visuals_before_commentary(monkeypatch, tmp_p
     monkeypatch.setattr(telegram, "_send_photo", fake_photo)
     monkeypatch.setattr(telegram, "_send_text", fake_text)
 
-    paths = [tmp_path / name for name in ("ozet.png", "temel.png", "ma.png", "teknik.png")]
+    paths = [
+        tmp_path / name
+        for name in ("ozet.png", "temel.png", "finansal.png", "degerleme.png", "ma.png", "teknik.png")
+    ]
     report = SimpleNamespace(symbol="TEST")
-    results = telegram.send_research_bundle(*paths, report)
+    results = telegram.send_research_bundle(
+        paths[0],
+        paths[1],
+        paths[4],
+        paths[5],
+        report,
+        financial_card=paths[2],
+        valuation_peer_card=paths[3],
+    )
 
-    assert [kind for kind, _ in calls] == ["photo", "photo", "photo", "photo", "text", "text"]
+    assert [kind for kind, _ in calls] == [
+        "photo",
+        "photo",
+        "photo",
+        "photo",
+        "photo",
+        "photo",
+        "text",
+        "text",
+    ]
     assert [name for kind, name in calls if kind == "photo"] == [
         "ozet.png",
         "temel.png",
+        "finansal.png",
+        "degerleme.png",
         "ma.png",
         "teknik.png",
     ]
-    assert len(results) == 6
+    assert len(results) == 8
