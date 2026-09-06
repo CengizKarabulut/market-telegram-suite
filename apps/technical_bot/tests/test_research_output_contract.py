@@ -81,12 +81,8 @@ def test_rich_technical_commentary_contains_full_evidence_stack() -> None:
         assert term in text
 
 
-def test_research_bundle_sends_six_visuals_before_commentary(monkeypatch, tmp_path: Path) -> None:
-    calls: list[tuple[str, str]] = []
-
+def _install_fake_telegram(monkeypatch, calls: list[tuple[str, str]]) -> None:
     monkeypatch.setattr(telegram, "_destination", lambda: ("token", "chat", "thread"))
-    monkeypatch.setattr(telegram, "_caption", lambda report: "summary caption")
-    monkeypatch.setattr(telegram, "commentary_messages", lambda report: ("yorum-1", "yorum-2"))
 
     def fake_photo(token, chat_id, thread_id, image_path, caption=""):
         calls.append(("photo", Path(image_path).name))
@@ -98,6 +94,13 @@ def test_research_bundle_sends_six_visuals_before_commentary(monkeypatch, tmp_pa
 
     monkeypatch.setattr(telegram, "_send_photo", fake_photo)
     monkeypatch.setattr(telegram, "_send_text", fake_text)
+
+
+def test_research_bundle_sends_six_visuals_before_commentary(monkeypatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, str]] = []
+    _install_fake_telegram(monkeypatch, calls)
+    monkeypatch.setattr(telegram, "_caption", lambda report: "summary caption")
+    monkeypatch.setattr(telegram, "commentary_messages", lambda report: ("yorum-1", "yorum-2"))
 
     paths = [
         tmp_path / name
@@ -133,3 +136,18 @@ def test_research_bundle_sends_six_visuals_before_commentary(monkeypatch, tmp_pa
         "teknik.png",
     ]
     assert len(results) == 8
+
+
+def test_modern_technical_bundle_sends_two_visuals_then_commentary(monkeypatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, str]] = []
+    _install_fake_telegram(monkeypatch, calls)
+    monkeypatch.setattr(telegram, "_technical_caption", lambda report: "technical caption")
+    monkeypatch.setattr(telegram, "technical_commentary_messages", lambda report: ("teknik-yorum",))
+
+    report = SimpleNamespace(symbol="TEST")
+    ma = tmp_path / "ma.png"
+    technical = tmp_path / "teknik.png"
+    results = telegram.send_technical_bundle(ma, technical, report)
+
+    assert calls == [("photo", "ma.png"), ("photo", "teknik.png"), ("text", "teknik-yorum")]
+    assert len(results) == 3
