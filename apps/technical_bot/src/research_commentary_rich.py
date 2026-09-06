@@ -11,6 +11,7 @@ import re
 
 from src import research_commentary as base
 from src.research_engine import ResearchReport
+from src.turkish_text import tr_lower
 
 
 def _zone(value: float | None, *, upper: float, lower: float, high: str, low: str) -> str:
@@ -57,7 +58,7 @@ def _technical_paragraph_rich(report: ResearchReport) -> str:
 
     score = base._finite(technical.get("score"))
     score_text = "—" if score is None else f"{score:.0f}/100"
-    label = str(technical.get("label", "VERİ YETERSİZ")).casefold()
+    label = tr_lower(str(technical.get("label", "VERİ YETERSİZ")))
 
     daily_state = structure.get("state", "—")
     daily_event = structure.get("event", structure.get("bos", "—"))
@@ -175,6 +176,12 @@ def _technical_paragraph_rich(report: ResearchReport) -> str:
     else:
         elliott_read = "Elliott sayımı ana yapıya bağlam sağlıyor; tek başına seviye veya yön teyidi yerine alternatif senaryoyla birlikte okunmalı."
 
+    divergence_read = (
+        f"Son doğrulanmış RSI uyumsuzluğu: {divergence_text}."
+        if has_divergence
+        else "Doğrulanmış RSI uyumsuzluğu yok."
+    )
+
     if score is not None and score < 30:
         verdict = "Teknik puan çok düşük; karşı-trend tepki olasılığı olsa bile ana teknik tez şu aşamada savunmacı kalmalı."
     elif score is not None and score >= 70:
@@ -182,8 +189,8 @@ def _technical_paragraph_rich(report: ResearchReport) -> str:
     else:
         verdict = "Teknik puan tek başına yön kararı vermiyor; teyit ve geçersizleşme seviyeleri belirleyici."
 
-    alpha_text = alpha.casefold() if alpha not in ("", "—") else "veri yetersiz"
-    bollinger_text = bollinger.casefold() if bollinger not in ("", "—") else "veri yetersiz"
+    alpha_text = tr_lower(alpha) if alpha not in ("", "—") else "veri yetersiz"
+    bollinger_text = tr_lower(bollinger) if bollinger not in ("", "—") else "veri yetersiz"
 
     return (
         f"Teknik yapı {score_text} ile {label}. Günlük: {daily_state} / {daily_event}; haftalık: {weekly_state} / "
@@ -191,6 +198,7 @@ def _technical_paragraph_rich(report: ResearchReport) -> str:
         f"Trend filtrelerinde AlphaTrend {alpha_text}; Bollinger konumu {bollinger_text}. "
         f"RSI {base._num(rsi)} ({rsi_zone}), SMI {base._num(smi)} ({smi_zone}, {_direction(smi, smi_signal)}), "
         f"MACD {'pozitif' if macd_bullish else 'negatif' if macd_bearish else 'nötr/veri yetersiz'} histogram. "
+        f"{divergence_read} "
         f"{' '.join(momentum_parts)} Hacim tarafında {volume_text}; {obv_text}. {volatility_text}. "
         f"Elliott ana senaryo {elliott_primary}, alternatif {elliott_alt}, güven {confidence_text}, invalidation "
         f"{invalidation_text}. {elliott_read} {verdict}"

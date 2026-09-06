@@ -43,7 +43,7 @@ def _caption(report: ResearchReport) -> str:
         f"Elliott bağlamı: {elliott.get('primary', '—')} · güven %{elliott.get('confidence', '—')}",
         f"Ana risk: {risk}",
         "",
-        "Önce dört görsel, ardından bölüm bölüm analist yorumu gelir. Otomatik AL/SAT değildir.",
+        "Önce altı görsel, ardından bölüm bölüm analist yorumu gelir. Otomatik AL/SAT değildir.",
     ]
     return clip("\n".join(lines), CAPTION_LIMIT)
 
@@ -116,11 +116,13 @@ def _send_text(token: str, chat_id: str, thread_id: str, text: str) -> dict[str,
 def send_research_bundle(
     summary_card: Path,
     fundamental_card: Path,
+    financial_card: Path,
+    valuation_peer_card: Path,
     moving_average_card: Path,
     technical_chart: Path,
     report: ResearchReport,
 ) -> tuple[dict[str, Any], ...]:
-    """Send four visuals first, then analyst paragraphs, with topic verification."""
+    """Send six visuals first, then analyst paragraphs, with topic verification."""
     token, chat_id, thread_id = _destination()
     results: list[dict[str, Any]] = [
         _send_photo(token, chat_id, thread_id, summary_card, _caption(report)),
@@ -130,6 +132,20 @@ def send_research_bundle(
             thread_id,
             fundamental_card,
             f"{report.symbol} · Temel analiz / sektör profili",
+        ),
+        _send_photo(
+            token,
+            chat_id,
+            thread_id,
+            financial_card,
+            f"{report.symbol} · Finansal oranlar / forensic skorlar",
+        ),
+        _send_photo(
+            token,
+            chat_id,
+            thread_id,
+            valuation_peer_card,
+            f"{report.symbol} · Ham-öncelikli değerleme / sektör-rakip karşılaştırması",
         ),
         _send_photo(
             token,

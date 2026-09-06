@@ -7,6 +7,9 @@ on:
     paths:
       - 'apps/technical_bot/src/research_*.py'
       - 'apps/technical_bot/src/fundamental_*.py'
+      - 'apps/technical_bot/src/financial_intelligence_card.py'
+      - 'apps/technical_bot/src/valuation_peer_card.py'
+      - 'apps/technical_bot/src/bot_runner_fundamental.py'
       - 'apps/technical_bot/src/original_indicators.py'
       - 'apps/technical_bot/src/moving_average_card.py'
       - 'apps/technical_bot/src/turkish_text.py'
@@ -18,6 +21,9 @@ on:
     paths:
       - 'apps/technical_bot/src/research_*.py'
       - 'apps/technical_bot/src/fundamental_*.py'
+      - 'apps/technical_bot/src/financial_intelligence_card.py'
+      - 'apps/technical_bot/src/valuation_peer_card.py'
+      - 'apps/technical_bot/src/bot_runner_fundamental.py'
       - 'apps/technical_bot/src/original_indicators.py'
       - 'apps/technical_bot/src/moving_average_card.py'
       - 'apps/technical_bot/src/turkish_text.py'
@@ -46,23 +52,18 @@ jobs:
           cache-dependency-path: apps/technical_bot/requirements.txt
       - name: Bağımlılıkları yükle
         run: python -m pip install --requirement requirements.txt
-      - name: GARAN ZGYO ASELS canlı araştırma raporlarını üret
+      - name: GARAN ZGYO ASELS canlı altı-kart araştırma paketlerini üret
         run: |
           python - <<'PY'
-          import json
+          import math
           from pathlib import Path
 
           import matplotlib.image as mpimg
 
-          from src.fundamental_card import render_fundamental_card
-          from src.moving_average_card import render_moving_average_card
-          from src.research_card import render_research_card
-          from src.research_chart import render_research_chart
           from src.research_commentary_rich import commentary_messages, compose_research_commentary
-          from src.research_risk import build_research_report
-          from src.research_theme import apply_white_theme
+          from src.research_contracts import PEER_MULTIPLES, VALUATION_MULTIPLES
+          from src.research_pipeline import build_research_bundle
 
-          apply_white_theme()
           root = Path('reports/research-smoke')
           root.mkdir(parents=True, exist_ok=True)
 
@@ -73,24 +74,11 @@ jobs:
 
           for ticker in ('GARAN', 'ZGYO', 'ASELS'):
               target = root / ticker
-              target.mkdir(parents=True, exist_ok=True)
-              report = build_research_report(ticker)
-              summary = render_research_card(report, target / f'{ticker}_arastirma.png')
-              fundamental = render_fundamental_card(report.fundamental, target / f'{ticker}_temel.png')
-              ma_image, ma_snapshot = render_moving_average_card(ticker, target / f'{ticker}_ortalamalar.png')
-              technical = render_research_chart(ticker, report, target / f'{ticker}_teknik_yapi.png')
+              bundle = build_research_bundle(ticker, target)
+              report = bundle.report
+              ma_snapshot = bundle.moving_averages
               commentary = compose_research_commentary(report)
               messages = commentary_messages(report)
-              commentary_text = '\n\n'.join(f'{title}\n{paragraph}' for title, paragraph in commentary)
-              (target / f'{ticker}_yorum.txt').write_text(commentary_text + '\n', encoding='utf-8')
-
-              payload = report.to_dict()
-              payload['moving_averages'] = ma_snapshot
-              payload['commentary'] = dict(commentary)
-              (target / f'{ticker}_arastirma.json').write_text(
-                  json.dumps(payload, ensure_ascii=False, indent=2, default=str) + '\n',
-                  encoding='utf-8',
-              )
 
               if report.price is None or report.price <= 0:
                   raise SystemExit(f'{ticker}: current price is missing')
@@ -114,19 +102,83 @@ jobs:
                   raise SystemExit(f'{ticker}: analyst commentary paragraph is unexpectedly short')
               if any(len(message) > 3900 for message in messages):
                   raise SystemExit(f'{ticker}: Telegram commentary message exceeds safe length')
+              if len(bundle.visuals) != 6:
+                  raise SystemExit(f'{ticker}: expected six research visuals, got {len(bundle.visuals)}')
+
+              expected_suffixes = (
+                  '_arastirma.png',
+                  '_temel.png',
+                  '_finansal_oranlar.png',
+                  '_degerleme_rakipler.png',
+                  '_ortalamalar.png',
+                  '_teknik_yapi.png',
+              )
+              if tuple(path.name.removeprefix(ticker) for path in bundle.visuals) != expected_suffixes:
+                  raise SystemExit(f'{ticker}: six-card visual order/names changed: {[p.name for p in bundle.visuals]}')
 
               technical_paragraph = dict(commentary).get('TEKNİK YAPI NE DİYOR?', '')
               for term in required_technical_terms:
                   if term not in technical_paragraph:
                       raise SystemExit(f'{ticker}: rich technical commentary missing {term}')
 
-              for image in (summary, fundamental, ma_image, technical):
+              for image in bundle.visuals:
                   if image.stat().st_size < 10_000:
                       raise SystemExit(f'{ticker}: unexpectedly small image {image.name}')
                   pixels = mpimg.imread(image)
                   corner = pixels[2, 2, :3]
                   if float(corner.min()) < 0.94:
                       raise SystemExit(f'{ticker}: image background is not white: {image.name} {corner}')
+
+              beneish = (report.financial.get('forensic_scores') or {}).get('beneish_m') or {}
+              beneish_coverage = float(beneish.get('coverage') or 0.0)
+              if not 0.0 <= beneish_coverage <= 1.0:
+                  raise SystemExit(f'{ticker}: invalid Beneish coverage {beneish_coverage}')
+              if beneish.get('value') is not None:
+                  if beneish_coverage != 1.0 or len(beneish.get('components') or {}) != 8:
+                      raise SystemExit(f'{ticker}: Beneish value produced without complete eight-component evidence')
+
+              if ticker == 'ZGYO':
+                  if report.profile != 'GYO':
+                      raise SystemExit(f'ZGYO: expected GYO profile, got {report.profile}')
+
+                  valuation_metrics = report.valuation.get('metrics') or {}
+                  for key in VALUATION_MULTIPLES:
+                      item = valuation_metrics.get(key)
+                      value = item.get('value') if isinstance(item, dict) else None
+                      if value is not None and (float(value) <= 0 or float(value) >= 10_000):
+                          raise SystemExit(f'ZGYO: valuation sentinel leaked for {key}: {value}')
+
+                  for peer in (report.valuation.get('peer_analysis') or {}).get('peers', ()):
+                      for key in PEER_MULTIPLES:
+                          value = peer.get(key)
+                          if value is not None and (float(value) <= 0 or float(value) >= 10_000):
+                              raise SystemExit(f'ZGYO: peer sentinel leaked for {peer.get("symbol")} {key}: {value}')
+
+                  financial_metrics = report.financial.get('metrics') or {}
+                  raw_non_comparable = report.financial.get('non_comparable_metrics') or {}
+                  for key in ('operating_margin', 'operating_margin_quarterly', 'net_margin', 'net_margin_quarterly'):
+                      displayed = financial_metrics.get(key)
+                      if displayed is not None and abs(float(displayed)) > 500:
+                          raise SystemExit(f'ZGYO: non-comparable margin leaked to card metric {key}: {displayed}')
+                      if key in raw_non_comparable:
+                          if abs(float(raw_non_comparable[key])) <= 500 or displayed is not None:
+                              raise SystemExit(f'ZGYO: invalid non-comparable margin bucket for {key}')
+
+                  market_cap = financial_metrics.get('market_cap')
+                  net_income = financial_metrics.get('net_income_ttm')
+                  fcf = financial_metrics.get('fcf_ttm')
+                  earnings_item = valuation_metrics.get('earnings_yield') or {}
+                  fcf_item = valuation_metrics.get('fcf_yield') or {}
+                  if market_cap is not None and float(market_cap) > 0 and net_income is not None:
+                      expected = float(net_income) / float(market_cap) * 100.0
+                      actual = earnings_item.get('value')
+                      if actual is None or not math.isclose(float(actual), expected, rel_tol=1e-9, abs_tol=1e-9):
+                          raise SystemExit(f'ZGYO: raw earnings yield was overwritten: expected={expected} actual={actual}')
+                  if market_cap is not None and float(market_cap) > 0 and fcf is not None:
+                      expected = float(fcf) / float(market_cap) * 100.0
+                      actual = fcf_item.get('value')
+                      if actual is None or not math.isclose(float(actual), expected, rel_tol=1e-9, abs_tol=1e-9):
+                          raise SystemExit(f'ZGYO: raw FCF yield was overwritten: expected={expected} actual={actual}')
 
               print(
                   ticker,
@@ -135,11 +187,13 @@ jobs:
                   'coverage=', report.coverage,
                   'balance=', report.financial.get('balance_label'),
                   'quality=', report.financial.get('earnings_quality_label'),
+                  'beneish=', beneish.get('value'), beneish_coverage,
                   'debt=', report.financial.get('debt_direction'),
                   'valuation=', report.valuation.get('score'), report.valuation.get('scope'),
                   'technical=', report.technical.get('score'), report.technical.get('structure', {}).get('state'),
                   'commentary_sections=', len(commentary),
                   'commentary_messages=', len(messages),
+                  'visuals=', [path.name for path in bundle.visuals],
                   'ma=', ma_snapshot['summaries'],
                   'main_risk=', None if report.main_risk is None else (report.main_risk.name, report.main_risk.score),
                   'supports=', [(z.low, z.high, z.score, z.status) for z in report.supports],
