@@ -27,6 +27,9 @@ class ValuationPolicyTests(unittest.TestCase):
         self.assertEqual(models["NAD / NAV"]["status"], "VERİ EKSİK")
         self.assertEqual(models["F/K"]["status"], "UYGUN DEĞİL")
         self.assertEqual(models["FD/FAVÖK"]["status"], "UYGUN DEĞİL")
+        self.assertEqual(models["EPV / Kazanç Gücü"]["status"], "UYGUN DEĞİL")
+        self.assertEqual(models["Temettü İskonto"]["status"], "VERİ EKSİK")
+        self.assertEqual(models["Altman Z"]["status"], "UYGUN DEĞİL")
         self.assertEqual(report["computed_values"], {})
 
     def test_gyo_keeps_equity_models_as_support_without_inventing_inputs(self) -> None:
@@ -45,7 +48,7 @@ class ValuationPolicyTests(unittest.TestCase):
         self.assertIsNone(models["Haklı PD/DD"]["value_per_share"])
         self.assertIsNone(models["Residual Income"]["value_per_share"])
         self.assertEqual(models["Monetizasyon DCF"]["status"], "VERİ EKSİK")
-        self.assertEqual(models["Altman Z"]["status"], "UYGUN DEĞİL")
+        self.assertEqual(models["FCFF DCF"]["status"], "UYGUN DEĞİL")
 
     def test_gyo_equity_support_becomes_conditional_only_with_ke_and_growth(self) -> None:
         report = build_valuation_policy(
@@ -67,18 +70,22 @@ class ValuationPolicyTests(unittest.TestCase):
         self.assertEqual(models["Residual Income"]["status"], "KOŞULLU")
         self.assertIsNone(models["Haklı PD/DD"]["value_per_share"])
 
-    def test_bank_rejects_fcff_and_prefers_equity_models(self) -> None:
+    def test_bank_rejects_firm_value_models_and_keeps_pe_as_support(self) -> None:
         report = build_valuation_policy(
             "BANK",
             "Banks",
-            {"roe": 25.0, "pb": 1.5},
+            {"roe": 25.0, "pb": 1.5, "pe": 6.0},
             PEER,
             50.0,
         )
         models = self._by_model(report)
         self.assertIn("Residual Income", report["primary_model"])
         self.assertEqual(models["Residual Income"]["status"], "KOŞULLU")
+        self.assertEqual(models["F/K"]["role"], "destek")
+        self.assertEqual(models["F/K"]["status"], "KOŞULLU")
         self.assertEqual(models["FCFF / FD-FAVÖK"]["status"], "UYGUN DEĞİL")
+        self.assertEqual(models["EPV"]["status"], "UYGUN DEĞİL")
+        self.assertEqual(models["NAD / NAV"]["status"], "UYGUN DEĞİL")
         self.assertEqual(models["Altman Z"]["status"], "UYGUN DEĞİL")
 
     def test_generic_positive_cash_conversion_allows_conditional_dcf(self) -> None:
@@ -95,7 +102,7 @@ class ValuationPolicyTests(unittest.TestCase):
         self.assertIsNone(models["FCFF DCF"]["value_per_share"])
         self.assertEqual(report["computed_values"], {})
 
-    def test_holding_requires_sotp_inputs(self) -> None:
+    def test_holding_requires_sotp_and_rejects_consolidated_pe_fcff(self) -> None:
         report = build_valuation_policy(
             "GENERIC",
             "Investment Holding Companies",
@@ -106,6 +113,9 @@ class ValuationPolicyTests(unittest.TestCase):
         models = self._by_model(report)
         self.assertEqual(report["primary_model"], "NAD / SOTP")
         self.assertEqual(models["NAD / SOTP"]["status"], "VERİ EKSİK")
+        self.assertEqual(models["Holding İskontosu"]["status"], "VERİ EKSİK")
+        self.assertEqual(models["FCFF DCF"]["status"], "UYGUN DEĞİL")
+        self.assertEqual(models["F/K"]["status"], "UYGUN DEĞİL")
 
     def test_cyclical_sector_uses_mid_cycle_earnings_not_current_pe(self) -> None:
         report = build_valuation_policy(
@@ -124,7 +134,11 @@ class ValuationPolicyTests(unittest.TestCase):
         self.assertEqual(report["primary_model"], "Normalize FAVÖK DCF")
         self.assertEqual(models["Normalize FAVÖK DCF"]["status"], "KOŞULLU")
         self.assertEqual(models["Çevrim Ortası FD/FAVÖK"]["status"], "KOŞULLU")
+        self.assertEqual(models["EPV / Kazanç Gücü"]["status"], "KOŞULLU")
+        self.assertEqual(models["FCFF DCF"]["status"], "KOŞULLU")
         self.assertEqual(models["Cari F/K"]["status"], "UYGUN DEĞİL")
+        self.assertEqual(models["NAD / NAV"]["status"], "UYGUN DEĞİL")
+        self.assertEqual(models["Temettü İskonto"]["status"], "UYGUN DEĞİL")
         self.assertEqual(report["computed_values"], {})
 
 
