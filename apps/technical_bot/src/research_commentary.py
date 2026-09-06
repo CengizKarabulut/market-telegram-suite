@@ -12,6 +12,7 @@ import math
 from typing import Any
 
 from src.research_engine import ResearchDimension, ResearchReport
+from src.turkish_text import tr_lower
 
 
 def _finite(value: Any) -> float | None:
@@ -33,14 +34,14 @@ def _pct(value: Any, digits: int = 1) -> str:
 
 
 def _dimension(report: ResearchReport, name: str) -> ResearchDimension | None:
-    target = name.casefold()
-    return next((item for item in report.dimensions if item.name.casefold() == target), None)
+    target = tr_lower(name)
+    return next((item for item in report.dimensions if tr_lower(item.name) == target), None)
 
 
 def _score_phrase(item: ResearchDimension | None) -> str:
     if item is None or item.score is None:
         return "bu başlıkta güvenilir puan üretmek için veri kapsamı yeterli değil"
-    return f"{item.score:.0f}/100 puanla {item.label.casefold()} görünüm veriyor"
+    return f"{item.score:.0f}/100 puanla {tr_lower(item.label)} görünüm veriyor"
 
 
 def _coverage_phrase(coverage: float) -> str:
@@ -102,7 +103,7 @@ def _balance_paragraph(report: ResearchReport) -> str:
         if income is not None and income < 0:
             interpretation += " Net kâr geriliyorsa bilanço büyümesi tek başına olumlu okunmamalı."
         return (
-            f"Bilanço trendi {label.casefold()} olarak sınıflanıyor{score_text}. Aktif büyümesi "
+            f"Bilanço trendi {tr_lower(label)} olarak sınıflanıyor{score_text}. Aktif büyümesi "
             f"{_pct(assets)}, özkaynak büyümesi {_pct(equity)}, net kâr büyümesi {_pct(income)} ve kredi/mevduat "
             f"oranı {_num(metrics.get('loans_deposits'), 2)}. {interpretation.strip()} Resmî SYR, NPL ve karşılık "
             "oranları yoksa banka riski bu veri setiyle tam ölçülemeyeceği için yorum bunların yerine vekil üretmiyor."
@@ -141,7 +142,7 @@ def _balance_paragraph(report: ResearchReport) -> str:
             signals.append("Cari oranın 1'in altında olması kısa vadeli likidite tarafında daha sıkı izleme gerektiriyor.")
     interpretation = " ".join(signals) or "Mevcut metrikler aynı yönde güçlü bir bilanço hikâyesi üretmiyor; ana eğilim puan ve veri kapsamıyla birlikte okunmalı."
     return (
-        f"Bilanço trendi {label.casefold()}{score_text}. TTM satış büyümesi {_pct(revenue)}, faaliyet kârı büyümesi "
+        f"Bilanço trendi {tr_lower(label)}{score_text}. TTM satış büyümesi {_pct(revenue)}, faaliyet kârı büyümesi "
         f"{_pct(operating)}, faaliyet marjı değişimi {_num(margin_change)} puan ve cari oran {_num(current_ratio, 2)}. "
         f"{interpretation} Burada asıl soru satışın büyüyüp büyümediğinden çok, bu büyümenin faaliyet kârına ve nakde dönüşüp dönüşmediğidir."
     )
@@ -170,7 +171,7 @@ def _earnings_paragraph(report: ResearchReport) -> str:
                 else " Gider büyümesi net kârı yakalıyor veya aşıyorsa kâr kalitesinin devamlılığı daha temkinli okunmalı."
             )
         return (
-            f"Kâr kalitesi {quality.score:.0f}/100 ile {quality.label.casefold()}. Net faiz geliri büyümesi "
+            f"Kâr kalitesi {quality.score:.0f}/100 ile {tr_lower(quality.label)}. Net faiz geliri büyümesi "
             f"{_pct(metrics.get('net_interest_growth'))}, ROE {_pct(roe)}, faaliyet gideri büyümesi {_pct(expense)} ve "
             f"net kâr büyümesi {_pct(net_income)} birlikte değerlendiriliyor.{interpretation} Bankalarda klasik CFO/net "
             "kâr yaklaşımı yerine faiz geliri, özkaynak kârlılığı ve gider disiplini daha anlamlıdır."
@@ -197,7 +198,7 @@ def _earnings_paragraph(report: ResearchReport) -> str:
         signals.append("Stokların satışlardan hızlı büyümesi işletme sermayesi ve talep kalitesi açısından izlenmeli.")
     interpretation = " ".join(signals) or "Nakit dönüşümü, serbest nakit ve işletme sermayesi göstergeleri belirgin bir kırmızı bayrak üretmiyor."
     return (
-        f"Kâr kalitesi {quality.score:.0f}/100 ile {quality.label.casefold()}. CFO/net kâr {_num(cfo, 2)}x, FCF marjı "
+        f"Kâr kalitesi {quality.score:.0f}/100 ile {tr_lower(quality.label)}. CFO/net kâr {_num(cfo, 2)}x, FCF marjı "
         f"{_pct(fcf)}, tahakkuk oranı {_pct(accrual)}; alacak-satış büyüme farkı {_num(receivable_gap)} puan ve "
         f"stok-satış farkı {_num(inventory_gap)} puan. {interpretation}"
     )
@@ -224,7 +225,7 @@ def _debt_paragraph(report: ResearchReport) -> str:
     available = [value for value in (nde, ndeq, debt_change, coverage) if value is not None]
     if not available:
         return (
-            f"Borç ve nakit yönü {direction.casefold()}; fakat net borç/FAVÖK, net borç/özkaynak, borç değişimi ve "
+            f"Borç ve nakit yönü {tr_lower(direction)}; fakat net borç/FAVÖK, net borç/özkaynak, borç değişimi ve "
             "faiz karşılama için güvenilir değer yok. Bu durum 'borç sorunu yok' anlamına gelmez; tam tersine finansal "
             "kaldıraç konusunda şu an sonuç üretilemediğini gösterir. Teknik veya değerleme tezi kurulurken bu belirsizlik "
             "ayrı bir veri boşluğu olarak tutulmalı."
@@ -247,7 +248,7 @@ def _debt_paragraph(report: ResearchReport) -> str:
             signals.append("Faiz karşılama faaliyet kârının finansman giderlerine karşı daha rahat olduğunu gösteriyor.")
     interpretation = " ".join(signals) or "Borç göstergeleri tek yönde güçlü bir sinyal vermiyor; yön ve nakit yaratımı birlikte izlenmeli."
     return (
-        f"Borç ve nakit yönü {direction.casefold()}. Net borç/FAVÖK {_num(nde, 2)}x, net borç/özkaynak "
+        f"Borç ve nakit yönü {tr_lower(direction)}. Net borç/FAVÖK {_num(nde, 2)}x, net borç/özkaynak "
         f"{_num(ndeq, 2)}x, net borç değişimi {_pct(debt_change)} ve faiz karşılama {_num(coverage, 2)}x. "
         f"{interpretation}"
     )
@@ -300,7 +301,7 @@ def _valuation_paragraph(report: ResearchReport) -> str:
     elif report.profile == "BANK":
         extra = " Bankada FD/FAVÖK kullanılmadığı için F/K ve PD/DD daha anlamlı akran çarpanlarıdır."
     return (
-        f"Değerleme {dimension.score:.0f}/100 ile {dimension.label.casefold()}; karşılaştırma evreni "
+        f"Değerleme {dimension.score:.0f}/100 ile {tr_lower(dimension.label)}; karşılaştırma evreni "
         f"{valuation.get('scope', '—')}. Başlıca veriler: {metrics_text}. {interpretation}{extra}"
     )
 
@@ -311,7 +312,7 @@ def _levels_paragraph(report: ResearchReport) -> str:
         support = report.supports[0]
         support_text = (
             f"en yakın aktif destek {support.low:.2f}–{support.high:.2f} (Q{support.score:.0f}, "
-            f"{support.distance_atr:.1f} ATR, {support.status.casefold()})"
+            f"{support.distance_atr:.1f} ATR, {tr_lower(support.status)})"
         )
     else:
         support_text = "fiyatın altında kalite/yakınlık filtresini geçen aktif destek yok"
@@ -319,7 +320,7 @@ def _levels_paragraph(report: ResearchReport) -> str:
         resistance = report.resistances[0]
         resistance_text = (
             f"en yakın aktif direnç {resistance.low:.2f}–{resistance.high:.2f} (Q{resistance.score:.0f}, "
-            f"{resistance.distance_atr:.1f} ATR, {resistance.status.casefold()})"
+            f"{resistance.distance_atr:.1f} ATR, {tr_lower(resistance.status)})"
         )
     else:
         resistance_text = "fiyatın üstünde kalite/yakınlık filtresini geçen aktif direnç yok"
@@ -331,7 +332,7 @@ def _levels_paragraph(report: ResearchReport) -> str:
         )
     if report.resistances:
         resistance = report.resistances[0]
-        status = resistance.status.casefold()
+        status = tr_lower(resistance.status)
         if "kır" in status and "destek" in status:
             scenario.append(
                 f"{resistance.low:.2f}–{resistance.high:.2f} bölgesi daha önce destekken kırıldığı için artık rol değiştirerek direnç/reclaim alanı sayılıyor; fiyat bu bölgeyi geri almadan eski desteğin yeniden çalıştığı kabul edilmemeli."
@@ -352,7 +353,7 @@ def _risk_paragraph(report: ResearchReport) -> str:
         )
     others = [item for item in report.risks if item.name != report.main_risk.name][:2]
     secondary = "; ".join(f"{item.name} {item.score:.0f}/100" for item in others)
-    main_name = report.main_risk.name.casefold()
+    main_name = tr_lower(report.main_risk.name)
     if "teknik" in main_name:
         meaning = "Bu durumda temel hikâye iyi olsa bile fiyat yapısı teyit vermeden zamanlama riski yüksek kalır."
     elif "değer" in main_name:
@@ -393,7 +394,7 @@ def _conclusion_paragraph(report: ResearchReport) -> str:
     elif "Değerleme" in risk.name:
         action = "Genel görünümün iyileşmesi için ya kârlılık/büyümenin mevcut primi haklı çıkaracak biçimde güçlenmesi ya da değerleme baskısının fiyatla normalleşmesi gerekir."
     else:
-        action = f"Genel görünümün iyileşmesi için özellikle {risk.name.casefold()} başlığındaki kanıtların tersine dönmesi gerekir."
+        action = f"Genel görünümün iyileşmesi için özellikle {tr_lower(risk.name)} başlığındaki kanıtların tersine dönmesi gerekir."
 
     coverage_note = _coverage_phrase(report.coverage)
     return (
