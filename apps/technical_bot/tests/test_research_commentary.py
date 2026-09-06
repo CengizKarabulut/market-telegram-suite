@@ -3,7 +3,10 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from src.research_commentary_rich import commentary_messages, compose_research_commentary
+from src.research_commentary_rich import (
+    commentary_messages,
+    compose_research_commentary,
+)
 from src.research_engine import LevelZone, ResearchDimension, RiskItem
 
 
