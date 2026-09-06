@@ -134,6 +134,23 @@ def _sanitize_profile_financials(financial: dict, profile: str) -> dict:
     return result
 
 
+def _sync_financial_labels(report):
+    """Expose the same coverage-gated conclusion everywhere in cards and commentary."""
+    financial = dict(report.financial)
+    by_name = {item.name: item for item in report.dimensions}
+    balance = by_name.get("Bilanço Trendi")
+    earnings = by_name.get("Kâr Kalitesi")
+    if balance is not None:
+        financial["balance_label"] = balance.label
+        financial["balance_score"] = balance.score
+        financial["balance_coverage"] = balance.coverage
+    if earnings is not None:
+        financial["earnings_quality_label"] = earnings.label
+        financial["earnings_quality_score"] = earnings.score
+        financial["earnings_quality_coverage"] = earnings.coverage
+    return replace(report, financial=financial)
+
+
 def build_research_report(symbol: str):
     """Build audited research, then enrich it without weakening coverage gates."""
     report = audited.build_research_report(symbol)
@@ -164,4 +181,5 @@ def build_research_report(symbol: str):
         report.supports,
     )
     report = replace(report, main_risk=main_risk, risks=risks)
-    return audited._finalize_dimensions(report)
+    report = audited._finalize_dimensions(report)
+    return _sync_financial_labels(report)
