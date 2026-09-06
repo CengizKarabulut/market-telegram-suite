@@ -7,6 +7,8 @@ reading. All conclusions remain deterministic and evidence-bound.
 
 from __future__ import annotations
 
+import re
+
 from src import research_commentary as base
 from src.research_engine import ResearchReport
 
@@ -210,9 +212,33 @@ def compose_research_commentary(report: ResearchReport) -> tuple[tuple[str, str]
     )
 
 
+def _split_long_block(block: str, limit: int) -> list[str]:
+    """Bir bölüm tek başına limiti aşarsa cümle sınırından böl."""
+    if len(block) <= limit:
+        return [block]
+    parts: list[str] = []
+    current = ""
+    for sentence in re.split(r"(?<=[.!?…])\s+", block):
+        candidate = f"{current} {sentence}".strip() if current else sentence
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        if current:
+            parts.append(current)
+        while len(sentence) > limit:
+            parts.append(sentence[:limit])
+            sentence = sentence[limit:]
+        current = sentence
+    if current:
+        parts.append(current)
+    return parts
+
+
 def commentary_messages(report: ResearchReport, limit: int = 3900) -> tuple[str, ...]:
-    """Split the ordered paragraphs only at section boundaries."""
-    blocks = [f"📌 {title}\n{paragraph}" for title, paragraph in compose_research_commentary(report)]
+    """Split the ordered paragraphs at section boundaries, never above ``limit``."""
+    blocks: list[str] = []
+    for title, paragraph in compose_research_commentary(report):
+        blocks.extend(_split_long_block(f"📌 {title}\n{paragraph}", limit))
     messages: list[str] = []
     current = f"🧾 {report.symbol} — ANALİST YORUMU"
     for block in blocks:
