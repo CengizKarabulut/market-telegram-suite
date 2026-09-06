@@ -188,21 +188,19 @@ jobs:
           cache: pip
           cache-dependency-path: apps/chart_bot/requirements.txt
       - run: python -m pip install --requirement requirements.txt
-      - name: Grafiği üret
+      - name: Yeni teknik dashboard'u üret
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.CHART_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_TOPIC_ID: ${{ secrets.CHART_TOPIC_ID }}
           SEND_TELEGRAM: ${{ inputs.send_telegram }}
+          MPLBACKEND: Agg
         run: |
           SEND_FLAG=""
           if [ "$SEND_TELEGRAM" = "true" ]; then SEND_FLAG="--telegram"; fi
-          python -m src.cli \
+          python -m src.technical_dashboard \
             --symbol "${{ inputs.ticker }}" \
             --interval "${{ inputs.interval }}" \
-            --views "set" \
-            --theme "tv" \
-            --grid 0 \
             --outdir out \
             $SEND_FLAG
       - name: Grafik çıktısını sakla
