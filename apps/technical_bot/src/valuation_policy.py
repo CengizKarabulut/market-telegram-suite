@@ -1,9 +1,15 @@
-"""Company-type valuation policy for the integrated research report.
+"""Evidence-bound company-type valuation policy for the research report.
 
-The policy follows the user's valuation workflow: choose the economically correct
-model first, test whether the required evidence exists, and report unusable models
-instead of forcing a target price.  Relative valuation remains a secondary market
-context; it is not treated as intrinsic value.
+Model suitability is decided before any target value is produced.  The module
+therefore separates three questions:
+
+1. Is the model economically appropriate for this company type?
+2. Are the company-specific inputs required by that model actually available?
+3. If the inputs are available, can an auditable value be calculated without
+   inventing WACC, growth, appraisal or profitability assumptions?
+
+Relative multiples remain secondary market context; they are never promoted to
+intrinsic value merely because a provider exposes a ready-made ratio.
 """
 
 from __future__ import annotations
@@ -46,10 +52,26 @@ def _profile(profile: str, sector: str) -> str:
     raw = f"{profile} {sector}".casefold()
     if "bank" in raw or "banka" in raw:
         return "BANK"
-    if profile == "GYO" or "gyo" in raw or "reit" in raw or "gayrimenkul" in raw:
+    if profile.upper() == "GYO" or "gyo" in raw or "reit" in raw or "gayrimenkul" in raw:
         return "GYO"
     if "holding" in raw or "yatırım ortak" in raw or "yatirim ortak" in raw:
         return "HOLDING"
+    cyclical_terms = (
+        "cyclical",
+        "dongusel",
+        "döngüsel",
+        "airline",
+        "havac",
+        "steel",
+        "çelik",
+        "celik",
+        "chemical",
+        "kimya",
+        "automotive",
+        "otomotiv",
+    )
+    if any(term in raw for term in cyclical_terms):
+        return "CYCLICAL"
     return "GENERIC"
 
 
@@ -77,7 +99,27 @@ def _relative_assessment(peer: dict[str, Any]) -> ModelAssessment:
     )
 
 
+def _equity_support_status(metrics: dict[str, Any]) -> tuple[str, float]:
+    """GYO/banka özkaynak modellerinin veri hazırlığını hedef değer üretmeden ölç."""
+    roe = _finite(metrics.get("roe"))
+    equity = _finite(metrics.get("equity"))
+    ke = _finite(metrics.get("cost_of_equity"))
+    growth = _finite(metrics.get("long_term_growth"))
+    if roe is None or equity is None:
+        return STATUS_MISSING, 0.0
+    if ke is None or growth is None:
+        return STATUS_MISSING, 0.25
+    if ke <= growth:
+        return STATUS_UNSUITABLE, 0.0
+    return STATUS_CONDITIONAL, 0.55
+
+
 def _gyo_models(metrics: dict[str, Any], peer: dict[str, Any]) -> list[ModelAssessment]:
+    equity_status, equity_confidence = _equity_support_status(metrics)
+    equity_reason = (
+        "GYO'da özkaynak modelleri yalnız destek/çapraz kontrol rolündedir. Sürdürülebilir ROE, "
+        "TMS-29 ile aynı reel/nominal ölçekte Ke ve uzun dönem g olmadan hedef çarpan/değer üretilmez."
+    )
     assessments = [
         _model(
             "NAD / NAV",
@@ -88,8 +130,25 @@ def _gyo_models(metrics: dict[str, Any], peer: dict[str, Any]) -> list[ModelAsse
             confidence=0.0,
             assumptions=("KAP/şirket ekspertiz portföyü", "yükümlülük ayrıntısı", "hisse adedi"),
         ),
+        _model(
+            "Haklı PD/DD",
+            equity_status,
+            "destek",
+            equity_reason,
+            confidence=equity_confidence,
+            assumptions=("sürdürülebilir ROE", "özkaynak maliyeti (Ke)", "uzun dönem g"),
+        ),
+        _model(
+            "Residual Income",
+            equity_status,
+            "destek",
+            equity_reason,
+            confidence=equity_confidence,
+            assumptions=("defter değeri", "ROE yolu", "özkaynak maliyeti (Ke)", "dağıtım/büyüme varsayımı"),
+        ),
         _relative_assessment(peer),
     ]
+
     cfo_ni = _finite(metrics.get("cfo_net_income"))
     fcf_margin = _finite(metrics.get("fcf_margin"))
     if cfo_ni is None or fcf_margin is None:
@@ -97,20 +156,48 @@ def _gyo_models(metrics: dict[str, Any], peer: dict[str, Any]) -> list[ModelAsse
         dcf_reason = "Tekrarlayan nakit akışının kâra dönüşümü yeterince ölçülemiyor; klasik DCF zorlanmadı."
     elif cfo_ni > 0.7 and fcf_margin > 0:
         dcf_status = STATUS_CONDITIONAL
-        dcf_reason = "Pozitif nakit dönüşümü DCF'i yardımcı model yapabilir; ancak GYO'da NAD'ın yerini almaz ve WACC/g varsayımları ayrıca gerekir."
+        dcf_reason = (
+            "Pozitif nakit dönüşümü FCFF DCF'i yardımcı model yapabilir; GYO'da NAD'ın yerini almaz ve "
+            "şirket-spesifik FCFF, WACC ve terminal g ayrıca gerekir."
+        )
     else:
         dcf_status = STATUS_UNSUITABLE
-        dcf_reason = "Muhasebe kârının nakit karşılığı zayıf/negatif; klasik FCFF DCF bu görünümde ekonomik olarak güvenilir değil."
+        dcf_reason = "Muhasebe kârının nakit karşılığı zayıf/negatif; klasik FCFF DCF bu görünümde güvenilir değil."
+
     assessments.extend(
         [
-            _model("FCFF DCF", dcf_status, "yardımcı", dcf_reason, confidence=0.35 if dcf_status == STATUS_CONDITIONAL else 0.0),
+            _model(
+                "FCFF DCF",
+                dcf_status,
+                "yardımcı",
+                dcf_reason,
+                confidence=0.35 if dcf_status == STATUS_CONDITIONAL else 0.0,
+            ),
+            _model(
+                "Monetizasyon DCF",
+                STATUS_MISSING,
+                "yardımcı",
+                "Arsa/proje satış takvimi, tahsilat planı ve proje bazlı nakit akışı yoksa monetizasyon DCF'i kurulmaz.",
+                assumptions=("satış/tahsilat takvimi", "proje nakit akışları", "iskonto oranı"),
+            ),
             _model(
                 "F/K",
                 STATUS_UNSUITABLE,
                 "kontrol",
                 "GYO kârı yeniden değerleme ve nakit olmayan kalemlerden etkilenebildiği için F/K birincil değerleme değildir.",
             ),
-            _model("Residual Income", STATUS_UNSUITABLE, "—", "Banka/finansal özkaynak modeli; GYO için birincil yöntem değildir."),
+            _model(
+                "FD/FAVÖK",
+                STATUS_UNSUITABLE,
+                "kontrol",
+                "GYO'da ekspertiz/NAD ekonomisi baskınsa ve faaliyet FAVÖK'ü zayıfsa firma değeri/FAVÖK zorlanmaz.",
+            ),
+            _model(
+                "Altman Z",
+                STATUS_UNSUITABLE,
+                "—",
+                "Klasik imalat şirketi iflas modeli GYO bilançosu için güvenilir bir değerleme/risk modeli değildir.",
+            ),
         ]
     )
     return assessments
@@ -137,8 +224,18 @@ def _bank_models(metrics: dict[str, Any], peer: dict[str, Any]) -> list[ModelAss
             confidence=0.5 if residual_status == STATUS_CONDITIONAL else 0.0,
         ),
         _relative_assessment(peer),
-        _model("Temettü İskonto", STATUS_CONDITIONAL, "yardımcı", "Düzenli ve sürdürülebilir dağıtım politikası varsa kullanılabilir; ileri temettü tahmini gerekir."),
-        _model("FCFF / FD-FAVÖK", STATUS_UNSUITABLE, "—", "Banka bilançosunda borç işletme hammaddesidir; klasik firma değeri/FCFF yaklaşımı uygun değildir."),
+        _model(
+            "Temettü İskonto",
+            STATUS_CONDITIONAL,
+            "yardımcı",
+            "Düzenli ve sürdürülebilir dağıtım politikası varsa kullanılabilir; ileri temettü tahmini gerekir.",
+        ),
+        _model(
+            "FCFF / FD-FAVÖK",
+            STATUS_UNSUITABLE,
+            "—",
+            "Banka bilançosunda borç işletme hammaddesidir; klasik firma değeri/FCFF yaklaşımı uygun değildir.",
+        ),
         _model("Altman Z", STATUS_UNSUITABLE, "—", "Bankalar için imalat şirketi iflas modeli ekonomik olarak uygun değildir."),
     ]
 
@@ -167,8 +264,18 @@ def _generic_models(metrics: dict[str, Any], peer: dict[str, Any], *, holding: b
             confidence=0.4 if epv_status == STATUS_CONDITIONAL else 0.0,
         ),
         _relative_assessment(peer),
-        _model("Piotroski F-Score", STATUS_CONDITIONAL, "kalite kontrolü", "En az iki karşılaştırılabilir bilanço dönemi ve hisse adedi/temel marj verileriyle finansal sağlamlık kontrolü yapılabilir."),
-        _model("Altman Z", STATUS_CONDITIONAL, "risk kontrolü", "İmalat/operasyonel şirketlerde yardımcı iflas riski göstergesidir; GYO/banka için kullanılmamalıdır."),
+        _model(
+            "Piotroski F-Score",
+            STATUS_CONDITIONAL,
+            "kalite kontrolü",
+            "En az iki karşılaştırılabilir bilanço dönemi ve hisse adedi/temel marj verileriyle finansal sağlamlık kontrolü yapılabilir.",
+        ),
+        _model(
+            "Altman Z",
+            STATUS_CONDITIONAL,
+            "risk kontrolü",
+            "İmalat/operasyonel şirketlerde yardımcı iflas riski göstergesidir; GYO/banka için kullanılmamalıdır.",
+        ),
     ]
     if holding:
         assessments.insert(
@@ -181,8 +288,59 @@ def _generic_models(metrics: dict[str, Any], peer: dict[str, Any], *, holding: b
                 assumptions=("iştirak piyasa/gerçeğe uygun değerleri", "holding net borcu"),
             ),
         )
-        assessments[1] = _model("FCFF DCF", STATUS_CONDITIONAL, "yardımcı", "Holding seviyesinde DCF ancak tekrar eden merkez nakit akışı anlamlıysa yardımcı modeldir.")
+        for index, item in enumerate(assessments):
+            if item.model == "FCFF DCF":
+                assessments[index] = _model(
+                    "FCFF DCF",
+                    STATUS_CONDITIONAL,
+                    "yardımcı",
+                    "Holding seviyesinde DCF ancak tekrar eden merkez nakit akışı anlamlıysa yardımcı modeldir.",
+                )
+                break
     return assessments
+
+
+def _cyclical_models(metrics: dict[str, Any], peer: dict[str, Any]) -> list[ModelAssessment]:
+    """Use mid-cycle earning power instead of extrapolating a peak/trough period."""
+    history = metrics.get("ebitda_history") or metrics.get("favok_history")
+    normalized: float | None = None
+    if isinstance(history, (list, tuple)) and len(history) >= 3:
+        try:
+            normalized = vm.normalize_ebitda([float(value) for value in history], method="median")
+        except (TypeError, ValueError):
+            normalized = None
+    normalized_status = STATUS_CONDITIONAL if normalized is not None and normalized > 0 else STATUS_MISSING
+    return [
+        _model(
+            "Normalize FAVÖK DCF",
+            normalized_status,
+            "birincil",
+            "Döngüsel şirkette tek dönemin zirve/dip kârı ileri taşınmaz; çevrim ortası normalize FAVÖK/EBIT ve şirket-spesifik WACC gerekir.",
+            confidence=0.5 if normalized_status == STATUS_CONDITIONAL else 0.0,
+            assumptions=("çok dönemli FAVÖK geçmişi", "çevrim ortası marj", "WACC", "idame capex"),
+        ),
+        _model(
+            "Çevrim Ortası FD/FAVÖK",
+            normalized_status,
+            "çapraz kontrol",
+            "Akran çarpanı yalnız normalize çevrim ortası FAVÖK ile anlamlıdır; cari tepe/dip FAVÖK'e uygulanmaz.",
+            confidence=0.4 if normalized_status == STATUS_CONDITIONAL else 0.0,
+        ),
+        _model(
+            "EPV / Kazanç Gücü",
+            normalized_status,
+            "taban değer",
+            "Normalize faaliyet kârı pozitifse büyümesiz taban değer olarak kullanılabilir.",
+            confidence=0.35 if normalized_status == STATUS_CONDITIONAL else 0.0,
+        ),
+        _relative_assessment(peer),
+        _model(
+            "Cari F/K",
+            STATUS_UNSUITABLE,
+            "kontrol",
+            "Döngüsel kârın zirve/dip döneminde cari F/K yapısal olarak yanıltıcı olabilir; çevrim ortası kâr tercih edilir.",
+        ),
+    ]
 
 
 def build_valuation_policy(
@@ -203,6 +361,9 @@ def build_valuation_policy(
     elif kind == "HOLDING":
         models = _generic_models(metrics, peer_valuation, holding=True)
         primary = "NAD / SOTP"
+    elif kind == "CYCLICAL":
+        models = _cyclical_models(metrics, peer_valuation)
+        primary = "Normalize FAVÖK DCF"
     else:
         models = _generic_models(metrics, peer_valuation)
         primary = "FCFF DCF"
