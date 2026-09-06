@@ -14,6 +14,16 @@ from typing import Any
 from src import research_commentary_rich as rich
 from src.research_engine import ResearchReport
 
+# Python'un casefold/lower'ı Türkçe farkında değil: "KATILIM" -> "katilim",
+# "TEYİTLİ" -> "teyi̇tli̇" (birleşik nokta). Kullanıcıya giden etiketlerde
+# bozuk metin üretmemek için önce I/İ eşlemesi yapılır.
+_TR_LOWER_MAP = str.maketrans({"I": "ı", "İ": "i"})
+
+
+def tr_lower(text: str) -> str:
+    """Türkçe kurallarına uygun küçük harfe çevirir."""
+    return text.translate(_TR_LOWER_MAP).lower()
+
 
 def _finite(value: Any) -> float | None:
     try:
@@ -101,7 +111,7 @@ def _state_text(state: str) -> str:
         "ASCENDING_TRIANGLE": "yükselen üçgen benzeri sıkışma",
         "DESCENDING_TRIANGLE": "alçalan üçgen benzeri sıkışma",
         "INSUFFICIENT": "veri yetersiz",
-    }.get(state, state.casefold() if state else "veri yetersiz")
+    }.get(state, tr_lower(state) if state else "veri yetersiz")
 
 
 def _technical_extension(report: ResearchReport) -> str:
@@ -119,7 +129,7 @@ def _technical_extension(report: ResearchReport) -> str:
             rail_status = str(rail.get("status") or "yok")
             suffix = f", güven %{confidence * 100:.0f}" if confidence is not None else ""
             if rail_status != "yok":
-                suffix += f", rail {rail_status.casefold()}"
+                suffix += f", rail {tr_lower(rail_status)}"
             degree_bits.append(f"{label} {state}{suffix}")
         hierarchy_text = "Yapı dereceleri: " + "; ".join(degree_bits) + "."
         confirmed = int(hierarchy.get("confirmed_rails") or 0)
@@ -143,8 +153,8 @@ def _technical_extension(report: ResearchReport) -> str:
     family_parts: list[str] = []
     for key, label in (("short", "5/8/13"), ("medium", "21/34/55"), ("long", "89/144/233")):
         group = ma.get(key) or {}
-        family_parts.append(f"{label} {str(group.get('confirmation') or '—').casefold()}")
-    ma_text = " Ortalama aileleri: " + ", ".join(family_parts) + f"; kısa EMA uzaklaşma riski {extension.casefold()}."
+        family_parts.append(f"{label} {tr_lower(str(group.get('confirmation') or '—'))}")
+    ma_text = " Ortalama aileleri: " + ", ".join(family_parts) + f"; kısa EMA uzaklaşma riski {tr_lower(extension)}."
 
     vp = technical.get("volume_profile") or {}
     poc_values = []
@@ -155,7 +165,7 @@ def _technical_extension(report: ResearchReport) -> str:
     poc_text = " Hacim-fiyat hafızasında " + ", ".join(poc_values) + "." if poc_values else " Hacim POC ufukları için veri yetersiz."
 
     participation = technical.get("participation") or {}
-    label = str(participation.get("label") or "VERİ YETERSİZ").casefold()
+    label = tr_lower(str(participation.get("label") or "VERİ YETERSİZ"))
     relative_turnover = _finite(participation.get("relative_turnover"))
     impulse = _finite(participation.get("price_impulse_5d_pct"))
     part_text = f" Katılım okuması {label}"
