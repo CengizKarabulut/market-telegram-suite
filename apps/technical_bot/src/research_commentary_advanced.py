@@ -13,16 +13,7 @@ from typing import Any
 
 from src import research_commentary_rich as rich
 from src.research_engine import ResearchReport
-
-# Python'un casefold/lower'ı Türkçe farkında değil: "KATILIM" -> "katilim",
-# "TEYİTLİ" -> "teyi̇tli̇" (birleşik nokta). Kullanıcıya giden etiketlerde
-# bozuk metin üretmemek için önce I/İ eşlemesi yapılır.
-_TR_LOWER_MAP = str.maketrans({"I": "ı", "İ": "i"})
-
-
-def tr_lower(text: str) -> str:
-    """Türkçe kurallarına uygun küçük harfe çevirir."""
-    return text.translate(_TR_LOWER_MAP).lower()
+from src.turkish_text import tr_lower
 
 
 def _finite(value: Any) -> float | None:
