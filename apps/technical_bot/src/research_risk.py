@@ -12,7 +12,11 @@ from __future__ import annotations
 from dataclasses import replace
 
 from src import research_engine as core
-from src.research_contracts import enrich_beneish, sanitize_profile_financials, sanitize_valuation
+from src.research_contracts import (
+    enrich_beneish,
+    sanitize_profile_financials,
+    sanitize_valuation,
+)
 from src.research_engine import LevelZone, ResearchDimension, RiskItem
 from src.research_extensions import enrich_financial_analysis, enrich_valuation
 from src.research_technical import _technical_analysis
