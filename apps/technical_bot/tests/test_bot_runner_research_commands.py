@@ -101,6 +101,35 @@ def test_existing_operational_commands_still_delegate_to_base_runner() -> None:
     assert [call.args[0].name for call in legacy.call_args_list] == list(operational)
 
 
+def test_operational_command_handlers_route_inside_base_runner() -> None:
+    base = runner.base
+    intervals = {"1d", "4h"}
+    with (
+        patch.object(base, "dispatch_scan", return_value=(True, "Tarama başlatıldı")) as scan,
+        patch.object(base, "handle_list") as listed,
+        patch.object(base, "handle_settings") as settings,
+        patch.object(base, "handle_watch") as watch,
+        patch.object(base, "handle_status") as status,
+        patch.object(base, "handle_history") as history,
+        patch.object(base, "reply") as reply,
+    ):
+        base.execute(_command("tara"), intervals)
+        base.execute(_command("liste"), intervals)
+        base.execute(_command("esik", "rvol", "2.0"), intervals)
+        base.execute(_command("takip", "ASELS"), intervals)
+        base.execute(_command("durum"), intervals)
+        base.execute(_command("gecmis"), intervals)
+        base.execute(_command("yardim"), intervals)
+
+    scan.assert_called_once_with("auto")
+    listed.assert_called_once_with(12345)
+    settings.assert_called_once_with(12345, ["rvol", "2.0"])
+    watch.assert_called_once_with(12345, ["ASELS"], intervals)
+    status.assert_called_once_with(12345)
+    history.assert_called_once_with(12345, [])
+    assert any("Kullanılabilir komutlar" in call.args[1] for call in reply.call_args_list)
+
+
 def test_main_replaces_legacy_report_help_with_modern_surface() -> None:
     original = runner.base.HELP_TEXT
     legacy_line = "/rapor SEMBOL [aralık] — tek hisse teknik raporu (ör. /rapor THYAO 4h)"
