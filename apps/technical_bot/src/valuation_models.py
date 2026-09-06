@@ -1,8 +1,8 @@
 """Auditable valuation primitives used by the research engine.
 
-Adapted from the user's valuation reference library.  The module is intentionally
+Adapted from the user's valuation reference library. The module is intentionally
 pure and deterministic: it performs valuation math but never invents missing
-inputs.  Model suitability and data availability are handled separately by
+inputs. Model suitability and data availability are handled separately by
 ``valuation_policy``.
 """
 
@@ -11,8 +11,8 @@ from __future__ import annotations
 import math
 import random
 import statistics
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Sequence
 
 
 def cost_of_equity_capm(
