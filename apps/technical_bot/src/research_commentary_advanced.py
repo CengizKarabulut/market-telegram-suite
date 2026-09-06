@@ -7,6 +7,7 @@ company-type valuation-model suitability and MAJOR/SWING/MINOR structure.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -19,7 +20,7 @@ def _finite(value: Any) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    return number if number == number and abs(number) != float("inf") else None
+    return number if math.isfinite(number) else None
 
 
 def _valuation_paragraph(report: ResearchReport) -> str:
