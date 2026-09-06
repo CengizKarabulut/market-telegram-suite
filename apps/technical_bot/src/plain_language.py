@@ -161,7 +161,7 @@ def build_plain_summary(
         "method": "Teknik sınıflamaların gündelik dile birebir çevirisi; yeni bir iddia veya tahmin içermez.",
     }
 
-# Tarama listesindeki her satır için kurulumun tek cümlelik gündelik karşılığı.
+
 SCAN_SETUP_PLAIN = {
     "Destekte reddedilme / başarısız aşağı kırılım": "Fiyat aşağı kırmayı denedi ama başaramadı, geri döndü.",
     "Dirençte reddedilme / başarısız yukarı kırılım": "Fiyat yukarı çıkmayı denedi ama tutunamadı, geri geldi.",
@@ -175,11 +175,7 @@ SCAN_SETUP_PLAIN = {
 
 
 def _volume_phrase(rvol: float, observed: float = math.nan, fraction: float = 1.0) -> str:
-    """Hacim cümlesi.
-
-    Bar henüz kapanmadıysa gösterilen RVOL bir projeksiyondur; gerçekleşmiş
-    değer gibi sunmak yanıltıcı olur, ikisi birlikte yazılır.
-    """
+    """Hacim cümlesi; canlı barda gerçekleşen ve projeksiyon ayrılır."""
     if not math.isfinite(rvol):
         return ""
     if fraction < 1.0 and math.isfinite(observed):
@@ -212,7 +208,7 @@ def _strength_phrase(excess: Any) -> str:
 
 
 def scan_line_plain(item: dict[str, Any]) -> str:
-    """Tarama listesindeki bir satırı teknik terim kullanmadan anlatır."""
+    """Tarama satırını sade anlatır; yalnız doğrulanmış aktif seviyeleri kullanır."""
     parts: list[str] = []
     setup = str(item.get("setup", ""))
     parts.append(SCAN_SETUP_PLAIN.get(setup, "Fiyatın durumu klasik bir kalıba tam oturmuyor."))
@@ -226,10 +222,16 @@ def scan_line_plain(item: dict[str, Any]) -> str:
     strength = _strength_phrase(item.get("excess_return_20"))
     if strength:
         parts.append(strength)
-    levels = item.get("levels") or {}
-    high, low = _number(levels.get("swing_high")), _number(levels.get("swing_low"))
-    if math.isfinite(high) and math.isfinite(low):
-        parts.append(f"Yön {_fmt(high)} üstünde veya {_fmt(low)} altında günlük kapanışla belli olur.")
+
+    levels = item.get("active_levels") or {}
+    lower = _number(levels.get("lower"))
+    reference = _number(levels.get("reference_close"))
+    upper = _number(levels.get("upper"))
+    if all(math.isfinite(value) for value in (lower, reference, upper)) and lower < reference < upper:
+        parts.append(
+            f"Teyitli referans kapanış {_fmt(reference)}; aktif alt seviye {_fmt(lower)}, "
+            f"aktif üst seviye {_fmt(upper)}."
+        )
     if len(item.get("matched_intervals", [])) > 1:
         parts.append("Birden fazla zaman diliminde aynı anda öne çıktı.")
     return " ".join(parts)

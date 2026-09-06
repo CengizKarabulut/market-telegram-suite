@@ -1,9 +1,8 @@
-"""Richer analyst commentary contract for /analiz.
+"""Interpretive analyst commentary contract for /analiz and /rapor.
 
-All non-technical sections reuse the audited deterministic commentary composer.
-The technical paragraph is expanded with multi-timeframe structure, BOS/CHoCH,
-AlphaTrend, Bollinger, MACD, SMI, RSI divergence, OBV, RVOL, ATR and conservative
-Elliott context. Missing values are stated as missing instead of inferred.
+The commentary does not merely enumerate indicators. It explains alignment,
+contradiction, missing confirmation, level roles and what would change the current
+reading. All conclusions remain deterministic and evidence-bound.
 """
 
 from __future__ import annotations
@@ -32,6 +31,21 @@ def _direction(value: float | None, signal: float | None) -> str:
     return "sinyal çizgisiyle aynı seviyede"
 
 
+def _upper(value: object) -> str:
+    return str(value or "").upper()
+
+
+def _structure_bias(state: object, event: object) -> int:
+    text = f"{_upper(state)} {_upper(event)}"
+    bearish = any(token in text for token in ("LL", "LH", "AŞAĞI", "DÜŞ"))
+    bullish = any(token in text for token in ("HH", "HL", "YUKARI", "YÜKSEL"))
+    if bearish and not bullish:
+        return -1
+    if bullish and not bearish:
+        return 1
+    return 0
+
+
 def _technical_paragraph_rich(report: ResearchReport) -> str:
     technical = report.technical
     structure = technical.get("structure", {})
@@ -43,6 +57,28 @@ def _technical_paragraph_rich(report: ResearchReport) -> str:
     score_text = "—" if score is None else f"{score:.0f}/100"
     label = str(technical.get("label", "VERİ YETERSİZ")).casefold()
 
+    daily_state = structure.get("state", "—")
+    daily_event = structure.get("event", structure.get("bos", "—"))
+    weekly_state = weekly.get("state", "—")
+    weekly_event = weekly.get("event", "—")
+    monthly_state = monthly.get("state", "—")
+    monthly_event = monthly.get("event", "—")
+
+    biases = [
+        _structure_bias(daily_state, daily_event),
+        _structure_bias(weekly_state, weekly_event),
+        _structure_bias(monthly_state, monthly_event),
+    ]
+    known_biases = [value for value in biases if value != 0]
+    if known_biases and all(value < 0 for value in known_biases):
+        structure_read = "Okunabilen zaman dilimleri aynı yönde aşağı eğilim gösteriyor; bu, kısa vadeli zayıflığın üst zaman dilimiyle de çelişmediği anlamına geliyor."
+    elif known_biases and all(value > 0 for value in known_biases):
+        structure_read = "Okunabilen zaman dilimleri aynı yönde yukarı eğilim gösteriyor; teknik yapı çoklu zaman diliminde uyumlu."
+    elif len(known_biases) >= 2:
+        structure_read = "Zaman dilimleri aynı yönde değil; bu nedenle tek bir günlük kırılımı ana trend değişimi olarak okumak için üst zaman dilimi teyidi gerekiyor."
+    else:
+        structure_read = "Çoklu zaman dilimi teyidi sınırlı; mevcut yapı yorumu ağırlıklı olarak günlük veriye dayanıyor."
+
     rsi = base._finite(technical.get("rsi14"))
     smi = base._finite(technical.get("smi"))
     smi_signal = base._finite(technical.get("smi_signal"))
@@ -53,71 +89,110 @@ def _technical_paragraph_rich(report: ResearchReport) -> str:
     divergence = technical.get("latest_rsi_divergence")
     divergence_text = divergence.get("kind") if isinstance(divergence, dict) else "yok"
 
-    rsi_zone = _zone(
-        rsi,
-        upper=70.0,
-        lower=30.0,
-        high="aşırı alım bölgesi",
-        low="aşırı satım bölgesi",
-    )
-    smi_zone = _zone(
-        smi,
-        upper=40.0,
-        lower=-40.0,
-        high="+40 üzeri aşırı alım bölgesi",
-        low="-40 altı aşırı satım bölgesi",
-    )
-    macd_state = (
-        "veri yetersiz"
-        if macd_hist is None
-        else "pozitif histogram"
-        if macd_hist > 0
-        else "negatif histogram"
-        if macd_hist < 0
-        else "sıfır histogram"
-    )
-    volume_state = (
-        "RVOL verisi yetersiz"
-        if rvol is None
-        else f"RVOL20 {rvol:.2f}x ile olağanın üzerinde hacim"
-        if rvol >= 1.5
-        else f"RVOL20 {rvol:.2f}x ile normal hacim"
-        if rvol >= 0.8
-        else f"RVOL20 {rvol:.2f}x ile zayıf hacim"
-    )
-    volatility_state = (
-        "ATR verisi yetersiz"
-        if atr_pct is None
-        else f"ATR %{atr_pct:.1f} ile yüksek volatilite"
-        if atr_pct >= 5.0
-        else f"ATR %{atr_pct:.1f} ile orta volatilite"
-        if atr_pct >= 2.5
-        else f"ATR %{atr_pct:.1f} ile görece düşük volatilite"
-    )
-    obv_text = "—" if obv_change is None else f"%{obv_change:+.1f}"
+    rsi_zone = _zone(rsi, upper=70.0, lower=30.0, high="aşırı alım", low="aşırı satım")
+    smi_zone = _zone(smi, upper=40.0, lower=-40.0, high="+40 üzeri aşırı alım", low="-40 altı aşırı satım")
+
+    alpha = _upper(technical.get("alpha_trend_state", "—"))
+    bollinger = _upper(technical.get("bollinger_state", "—"))
+    alpha_bearish = "ALTINDA" in alpha or "DÜŞ" in alpha
+    alpha_bullish = "ÜSTÜNDE" in alpha or "YÜKSEL" in alpha
+    bollinger_extreme_low = "ALT BAND ALTI" in bollinger
+    bollinger_extreme_high = "ÜST BAND ÜSTÜ" in bollinger
+
+    momentum_parts: list[str] = []
+    oversold = (rsi is not None and rsi <= 30) or (smi is not None and smi <= -40)
+    overbought = (rsi is not None and rsi >= 70) or (smi is not None and smi >= 40)
+    macd_bearish = macd_hist is not None and macd_hist < 0
+    macd_bullish = macd_hist is not None and macd_hist > 0
+    has_divergence = str(divergence_text).casefold() not in ("", "yok", "none", "—")
+
+    if oversold and macd_bearish and not has_divergence:
+        momentum_parts.append(
+            "RSI/SMI aşırı satım tarafına inmiş olsa da MACD negatif ve doğrulanmış regular pozitif uyumsuzluk yok; bu nedenle mevcut durum 'dönüş başladı' değil, satışın aşırılaşmış olabileceği fakat teyidin henüz gelmediği bir bölge."
+        )
+    elif oversold and (macd_bullish or has_divergence):
+        momentum_parts.append(
+            "Aşırı satım bölgesine momentum iyileşmesi eşlik ediyor; bu tepki ihtimalini artırıyor ancak piyasa yapısı değişmeden ana trend dönüşü teyit edilmiş sayılmaz."
+        )
+    elif overbought and macd_bullish:
+        momentum_parts.append("Momentum güçlü fakat aşırı alım bölgesinde; trend devamı mümkün olsa da yeni girişte risk-getiri marjı daralabilir.")
+    elif overbought and macd_bearish:
+        momentum_parts.append("Aşırı alım bölgesinde MACD zayıflaması momentum kaybına işaret ediyor; fiyat yapısındaki ilk bozulma daha önemli hale geliyor.")
+    else:
+        momentum_parts.append("Momentum göstergeleri aşırı bir bölgeyi tek başına teyit etmiyor; yön için piyasa yapısı ve seviye davranışı daha belirleyici.")
+
+    if alpha_bearish:
+        momentum_parts.append("AlphaTrend fiyatın altında/düşen konumdaysa trend filtresi de zayıflığı destekliyor.")
+    elif alpha_bullish:
+        momentum_parts.append("AlphaTrend yukarı yönlü konumdaysa trend filtresi fiyat yapısına destek veriyor.")
+    if bollinger_extreme_low:
+        momentum_parts.append("Fiyatın alt Bollinger bandının altında olması istatistiksel olarak genişlemiş bir satış hareketine işaret eder; bu tek başına dip teyidi değildir.")
+    elif bollinger_extreme_high:
+        momentum_parts.append("Fiyatın üst Bollinger bandının üzerinde olması güçlü ivme gösterebilir ancak kısa vadeli taşma riskini de artırır.")
+
+    if obv_change is None:
+        obv_text = "OBV yönü için yeterli veri yok"
+    elif obv_change > 0:
+        obv_text = "OBV son 10 günlük ölçümde yukarı yönlü; hacim akışı fiyatı destekliyor"
+    elif obv_change < 0:
+        obv_text = "OBV son 10 günlük ölçümde aşağı yönlü; hacim akışı fiyat hareketini desteklemekten çok zayıflatıyor"
+    else:
+        obv_text = "OBV son 10 günlük ölçümde yatay"
+
+    if rvol is None:
+        volume_text = "RVOL için veri yetersiz"
+    elif rvol >= 1.5:
+        volume_text = f"RVOL20 {rvol:.2f}x; hareket olağanın üzerinde katılımla gerçekleşiyor"
+    elif rvol >= 0.8:
+        volume_text = f"RVOL20 {rvol:.2f}x; hacim normal aralıkta"
+    else:
+        volume_text = f"RVOL20 {rvol:.2f}x; hacim zayıf, dolayısıyla olası tepkinin güvenilirliği düşük"
+
+    if atr_pct is None:
+        volatility_text = "ATR için veri yetersiz"
+    elif atr_pct >= 7:
+        volatility_text = f"ATR %{atr_pct:.1f}; volatilite çok yüksek ve seviye etrafındaki normal fiyat salınımı geniş"
+    elif atr_pct >= 5:
+        volatility_text = f"ATR %{atr_pct:.1f}; volatilite yüksek"
+    elif atr_pct >= 2.5:
+        volatility_text = f"ATR %{atr_pct:.1f}; volatilite orta"
+    else:
+        volatility_text = f"ATR %{atr_pct:.1f}; volatilite görece düşük"
 
     invalidation = base._finite(elliott.get("invalidation"))
-    invalidation_text = "—" if invalidation is None else f"{invalidation:,.2f}"
     confidence = base._finite(elliott.get("confidence"))
+    invalidation_text = "—" if invalidation is None else f"{invalidation:,.2f}"
     confidence_text = "—" if confidence is None else f"%{confidence:.0f}"
+    elliott_primary = str(elliott.get("primary", "—"))
+    elliott_alt = str(elliott.get("alternate", "—"))
+    elliott_upper = _upper(elliott_primary)
+    if "DÜŞ" in elliott_upper and oversold:
+        elliott_read = "Elliott ana sayımı düşüş itkisini korurken aşırı satım göstergeleri bir düzeltme/tepki alanı oluşabileceğini söylüyor; tepki ile trend dönüşü birbirinden ayrılmalı."
+    elif "YÜK" in elliott_upper and overbought:
+        elliott_read = "Elliott ana sayımı yukarı yönü destekliyor ancak momentumun aşırı alımda olması dalga olgunluğu açısından izlenmeli."
+    else:
+        elliott_read = "Elliott sayımı ana yapıya bağlam sağlıyor; tek başına seviye veya yön teyidi yerine alternatif senaryoyla birlikte okunmalı."
+
+    if score is not None and score < 30:
+        verdict = "Teknik puan çok düşük; karşı-trend tepki olasılığı olsa bile ana teknik tez şu aşamada savunmacı kalmalı."
+    elif score is not None and score >= 70:
+        verdict = "Teknik puan güçlü; yine de devam senaryosunun geçerliliği aktif destek/direnç yaşam döngüsüyle sınanmalı."
+    else:
+        verdict = "Teknik puan tek başına yön kararı vermiyor; teyit ve geçersizleşme seviyeleri belirleyici."
 
     return (
-        f"Teknik yapı {score_text} ile {label}. Günlük piyasa yapısında {structure.get('state', '—')} ve "
-        f"{structure.get('event', structure.get('bos', '—'))}; haftalık {weekly.get('state', '—')} / "
-        f"{weekly.get('event', '—')}, aylık {monthly.get('state', '—')} / {monthly.get('event', '—')} okunuyor. "
-        f"AlphaTrend {technical.get('alpha_trend_state', '—')}; Bollinger konumu "
-        f"{technical.get('bollinger_state', '—')}. Momentum tarafında RSI {base._num(rsi)} ile {rsi_zone} ve son "
-        f"regular uyumsuzluk {divergence_text}; SMI {base._num(smi)} ({smi_zone}, {_direction(smi, smi_signal)}), "
-        f"MACD {macd_state}; OBV 10 günlük değişim {obv_text}. Hacim/volatilite tarafında {volume_state} ve "
-        f"{volatility_state}. Elliott bağlamı {elliott.get('primary', '—')}; alternatif "
-        f"{elliott.get('alternate', '—')}, güven {confidence_text}, invalidation {invalidation_text}. Bu göstergeler "
-        "tek başına işlem çağrısı olarak değil, HH/HL/LH/LL, BOS/CHoCH ve kritik seviye yaşam döngüsünü teyit "
-        "veya zayıflatmak için birlikte okunuyor."
+        f"Teknik yapı {score_text} ile {label}. Günlük: {daily_state} / {daily_event}; haftalık: {weekly_state} / "
+        f"{weekly_event}; aylık: {monthly_state} / {monthly_event}. {structure_read} "
+        f"RSI {base._num(rsi)} ({rsi_zone}), SMI {base._num(smi)} ({smi_zone}, {_direction(smi, smi_signal)}), "
+        f"MACD {'pozitif' if macd_bullish else 'negatif' if macd_bearish else 'nötr/veri yetersiz'} histogram. "
+        f"{' '.join(momentum_parts)} Hacim tarafında {volume_text}; {obv_text}. {volatility_text}. "
+        f"Elliott ana senaryo {elliott_primary}, alternatif {elliott_alt}, güven {confidence_text}, invalidation "
+        f"{invalidation_text}. {elliott_read} {verdict}"
     )
 
 
 def compose_research_commentary(report: ResearchReport) -> tuple[tuple[str, str], ...]:
-    """Return the agreed analyst sections in the user-facing order."""
+    """Return the analyst sections in the user-facing order."""
     return (
         ("ŞİRKET NE DURUMDA?", base._company_paragraph(report)),
         ("DEĞERLEME NASIL?", base._valuation_paragraph(report)),
