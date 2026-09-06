@@ -12,7 +12,9 @@ from __future__ import annotations
 from dataclasses import replace
 
 from src import research_engine as core
+from src.research_contracts import enrich_beneish, sanitize_profile_financials, sanitize_valuation
 from src.research_engine import LevelZone, ResearchDimension, RiskItem
+from src.research_extensions import enrich_financial_analysis, enrich_valuation
 from src.research_technical import _technical_analysis
 from src.valuation_policy import build_valuation_policy
 
@@ -226,16 +228,39 @@ def _finalize_dimensions(report):
 
 
 def build_research_report(symbol: str):
-    """Build the production research report with advanced technical/valuation policy."""
+    """Build the production report with one statement fetch and raw-first extensions."""
     previous_risk = core._risk_engine
     previous_technical = core._technical_analysis
+    previous_financial = core._financial_analysis
+    previous_peer = core._peer_valuation
+    state: dict[str, dict] = {}
+
+    def financial_wrapper(fundamental, balance, income, cashflow):
+        base = previous_financial(fundamental, balance, income, cashflow)
+        financial = enrich_financial_analysis(base, fundamental, balance, income, cashflow)
+        financial = enrich_beneish(financial, fundamental, balance, income, cashflow)
+        financial = sanitize_profile_financials(financial, fundamental.profile)
+        state["financial"] = financial
+        return financial
+
+    def peer_wrapper(ticker: str, profile: str):
+        base = previous_peer(ticker, profile)
+        financial = state.get("financial")
+        if financial is None:
+            return sanitize_valuation(base)
+        return sanitize_valuation(enrich_valuation(base, financial, symbol=ticker, profile=profile))
+
     core._risk_engine = _risk_engine
     core._technical_analysis = _technical_analysis
+    core._financial_analysis = financial_wrapper
+    core._peer_valuation = peer_wrapper
     try:
         report = core.build_research_report(symbol)
     finally:
         core._risk_engine = previous_risk
         core._technical_analysis = previous_technical
+        core._financial_analysis = previous_financial
+        core._peer_valuation = previous_peer
 
     combined_metrics = dict(report.fundamental.metrics)
     combined_metrics.update(report.financial.get("metrics") or {})
@@ -246,6 +271,7 @@ def build_research_report(symbol: str):
         report.valuation,
         report.price,
     )
+    valuation = sanitize_valuation(valuation)
     dimensions = tuple(
         _valuation_dimension(valuation) if dimension.name == "Değerleme" else dimension
         for dimension in report.dimensions
