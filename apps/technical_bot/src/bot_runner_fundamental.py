@@ -1,8 +1,8 @@
-"""Technical bot entry point extended with fundamental and research commands.
+"""Technical bot entry point for modern technical, fundamental and research commands.
 
-The existing technical command runner stays intact. New commands are routed in a
-small wrapper so production technical scans/listeners keep their current
-behaviour while the research layer evolves independently.
+Legacy scanning/list/history/watch/settings commands stay in ``bot_runner``. User-facing
+single-stock analysis commands are routed here so ``/rapor`` no longer falls back to
+the old ``stock_dashboard`` report motor.
 """
 
 from __future__ import annotations
@@ -15,19 +15,19 @@ from src.fundamental_analysis import build_fundamental_report
 from src.fundamental_card import render_fundamental_card
 from src.fundamental_quality import apply_coverage_policy
 from src.fundamental_telegram import send_fundamental_card
-from src.research_pipeline import build_research_bundle
-from src.research_telegram import send_research_bundle
+from src.research_pipeline import build_research_bundle, build_technical_bundle
+from src.research_telegram import send_research_bundle, send_technical_bundle
 from src.research_theme import apply_white_theme
 from src.telegram_bot import VALID_TICKER
 
 _BASE_EXECUTE = base.execute
 
-# One visual language for /temel and /analiz. Pine indicator colours are kept;
-# only research canvas/panel/text colours are changed to the white theme.
+# One visual language for /temel, /rapor and /analiz. Pine indicator colours are
+# kept; only research canvas/panel/text colours are changed to the white theme.
 apply_white_theme()
 
 
-def _validate_ticker(args: list[str], command: str = "temel") -> tuple[str | None, str | None]:
+def _validate_ticker(args: list[str], command: str) -> tuple[str | None, str | None]:
     example = f"/{command} GARAN"
     if not args:
         return None, f"Sembol belirtilmedi. Örnek: {example}"
@@ -35,7 +35,10 @@ def _validate_ticker(args: list[str], command: str = "temel") -> tuple[str | Non
     if not VALID_TICKER.match(ticker):
         return None, f"Geçersiz sembol: {args[0]}. Örnek: {example}"
     if len(args) > 1:
-        return None, f"Bu analiz zaman diliminden bağımsızdır. Kullanım: {example}"
+        return None, (
+            f"/{command} çoklu zaman dilimli araştırma üretir; ayrıca aralık parametresi almaz. "
+            f"Kullanım: {example}"
+        )
     return ticker, None
 
 
@@ -54,6 +57,23 @@ def handle_fundamental(chat_id: int, args: list[str]) -> None:
         encoding="utf-8",
     )
     send_fundamental_card(image, report)
+
+
+def handle_technical(chat_id: int, args: list[str]) -> None:
+    ticker, error = _validate_ticker(args, "rapor")
+    if error or ticker is None:
+        base.reply(chat_id, error or "Geçersiz sembol.")
+        return
+
+    # The modern technical package is intentionally built from the audited
+    # research engine: daily main structure, weekly/monthly confirmation, MA
+    # table and Pine-faithful indicator panels. Legacy stock_dashboard is not used.
+    bundle = build_technical_bundle(ticker, base.REPORTS_DIR / "komut" / ticker / "teknik")
+    send_technical_bundle(
+        bundle.moving_average_card,
+        bundle.technical_chart,
+        bundle.report,
+    )
 
 
 def handle_research(chat_id: int, args: list[str]) -> None:
@@ -80,6 +100,9 @@ def execute(command, intervals: set[str]) -> None:
     if command.name in {"temel", "fundamental", "mali"}:
         handle_fundamental(command.chat_id, command.args)
         return
+    if command.name in {"rapor", "teknik", "technical"}:
+        handle_technical(command.chat_id, command.args)
+        return
     if command.name in {"analiz", "arastir", "research"}:
         handle_research(command.chat_id, command.args)
         return
@@ -87,21 +110,27 @@ def execute(command, intervals: set[str]) -> None:
 
 
 def main() -> None:
-    fundamental_help = "/temel SEMBOL — sektör uyarlamalı temel analiz ve radar kartı"
-    research_help = (
-        "/analiz SEMBOL — temel + bilanço oranları/skorları + değerleme/rakipler + "
-        "MA tablosu + teknik yapı + risk"
+    old_report_help = "/rapor SEMBOL [aralık] — tek hisse teknik raporu (ör. /rapor THYAO 4h)"
+    modern_report_help = (
+        "/rapor SEMBOL — modern teknik araştırma: günlük yapı + haftalık/aylık teyit + "
+        "MA tablosu + BB/AlphaTrend/MACD/SMI/RSI/OBV/ATR"
     )
-    addition = ""
-    if fundamental_help not in base.HELP_TEXT:
-        addition += fundamental_help + "\n"
-    if research_help not in base.HELP_TEXT:
-        addition += research_help + "\n"
-    if addition:
-        base.HELP_TEXT = base.HELP_TEXT.replace(
-            "/rapor SEMBOL [aralık] — tek hisse teknik raporu (ör. /rapor THYAO 4h)\n",
-            "/rapor SEMBOL [aralık] — tek hisse teknik raporu (ör. /rapor THYAO 4h)\n" + addition,
-        )
+    if old_report_help in base.HELP_TEXT:
+        base.HELP_TEXT = base.HELP_TEXT.replace(old_report_help, modern_report_help)
+
+    additions = (
+        "/teknik SEMBOL — /rapor ile aynı modern teknik paket",
+        "/temel SEMBOL — sektör uyarlamalı temel analiz ve radar kartı",
+        (
+            "/analiz SEMBOL — temel + bilanço oranları/skorları + değerleme/rakipler + "
+            "MA tablosu + teknik yapı + risk"
+        ),
+    )
+    anchor = modern_report_help + "\n"
+    missing = [line for line in additions if line not in base.HELP_TEXT]
+    if missing and anchor in base.HELP_TEXT:
+        base.HELP_TEXT = base.HELP_TEXT.replace(anchor, anchor + "\n".join(missing) + "\n")
+
     base.execute = execute
     base.main()
 
