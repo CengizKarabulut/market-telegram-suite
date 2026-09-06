@@ -1,0 +1,184 @@
+name: Manuel Araçlar
+
+on:
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: "Çalıştırılacak araç"
+        required: true
+        default: research
+        type: choice
+        options: [research, technical-report, chart]
+      ticker:
+        description: "Sembol / hisse"
+        required: true
+        default: ZGYO
+      interval:
+        description: "Teknik rapor/grafik aralığı"
+        required: true
+        default: "1d"
+      send_telegram:
+        description: "Uygun Telegram konusuna gönder"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    if: inputs.tool == 'research'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/technical_bot
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: apps/technical_bot/requirements.txt
+      - run: python -m pip install --requirement requirements.txt
+      - name: Tam araştırma paketini üret
+        env:
+          TICKER: ${{ inputs.ticker }}
+          SEND_TELEGRAM: ${{ inputs.send_telegram }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TECHNICAL_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TECHNICAL_TOPIC_ID }}
+          MPLBACKEND: Agg
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from src.research_pipeline import build_research_bundle
+          from src.research_telegram import send_research_bundle
+
+          ticker = os.environ['TICKER'].strip().upper().removesuffix('.IS')
+          bundle = build_research_bundle(ticker, Path('reports/manual') / ticker)
+
+          if os.environ.get('SEND_TELEGRAM', '').lower() == 'true':
+              responses = send_research_bundle(
+                  bundle.summary_card,
+                  bundle.fundamental_card,
+                  bundle.moving_average_card,
+                  bundle.technical_chart,
+                  bundle.report,
+                  financial_card=bundle.financial_card,
+                  valuation_peer_card=bundle.valuation_peer_card,
+              )
+              if len(responses) < 7:
+                  raise SystemExit(f'Expected six visuals plus commentary, got {len(responses)} messages')
+              if any('photo' not in response['result'] for response in responses[:6]):
+                  raise SystemExit('Telegram order violation: first six messages must be visuals')
+              if any('text' not in response['result'] for response in responses[6:]):
+                  raise SystemExit('Telegram order violation: commentary must follow all visuals')
+              verification = [
+                  {
+                      'sequence': index,
+                      'kind': 'photo' if 'photo' in response['result'] else 'text',
+                      'message_id': response['result']['message_id'],
+                      'message_thread_id': response['result'].get('message_thread_id'),
+                      'chat_id': response['result'].get('chat', {}).get('id'),
+                  }
+                  for index, response in enumerate(responses, start=1)
+              ]
+              (bundle.root / f'{ticker}_telegram_delivery.json').write_text(
+                  json.dumps(verification, ensure_ascii=False, indent=2) + '\n',
+                  encoding='utf-8',
+              )
+              print('TELEGRAM_DELIVERY_VERIFIED=' + json.dumps(verification, ensure_ascii=False))
+          PY
+      - name: Araştırma çıktısını sakla
+        uses: actions/upload-artifact@v7
+        with:
+          name: manuel-arastirma-${{ inputs.ticker }}-${{ github.run_id }}
+          path: apps/technical_bot/reports/manual/
+          if-no-files-found: error
+          retention-days: 14
+
+  technical-report:
+    if: inputs.tool == 'technical-report'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/technical_bot
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: apps/technical_bot/requirements.txt
+      - run: python -m pip install --requirement requirements.txt
+      - name: Teknik raporu üret
+        run: |
+          python -m src.stock_dashboard \
+            --ticker "${{ inputs.ticker }}" \
+            --market "BIST" \
+            --provider "AUTO" \
+            --interval "${{ inputs.interval }}" \
+            --report-detail "dengeli"
+      - name: Teknik raporu Telegram'a gönder
+        if: inputs.send_telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TECHNICAL_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TECHNICAL_TOPIC_ID }}
+          TELEGRAM_SEND_CAPTION: "0"
+          TELEGRAM_SEND_TEXT_DETAIL: "1"
+        run: python -m src.send_telegram
+      - name: Teknik raporu sakla
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: manuel-teknik-${{ inputs.ticker }}-${{ github.run_id }}
+          path: apps/technical_bot/reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+  chart:
+    if: inputs.tool == 'chart'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/chart_bot
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: apps/chart_bot/requirements.txt
+      - run: python -m pip install --requirement requirements.txt
+      - name: Grafiği üret
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.CHART_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TOPIC_ID: ${{ secrets.CHART_TOPIC_ID }}
+          SEND_TELEGRAM: ${{ inputs.send_telegram }}
+        run: |
+          SEND_FLAG=""
+          if [ "$SEND_TELEGRAM" = "true" ]; then SEND_FLAG="--telegram"; fi
+          python -m src.cli \
+            --symbol "${{ inputs.ticker }}" \
+            --interval "${{ inputs.interval }}" \
+            --views "set" \
+            --theme "tv" \
+            --grid 0 \
+            --outdir out \
+            $SEND_FLAG
+      - name: Grafik çıktısını sakla
+        uses: actions/upload-artifact@v7
+        with:
+          name: manuel-grafik-${{ inputs.ticker }}-${{ github.run_id }}
+          path: apps/chart_bot/out/
+          if-no-files-found: error
+          retention-days: 14
