@@ -86,10 +86,6 @@ class PlainLanguageTests(unittest.TestCase):
         self.assertIn("klasik bir kalıba tam oturmuyor", text)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ScanLineTests(unittest.TestCase):
     """Tarama listesi teknik analiz bilmeyen biri için de okunabilir olmalı."""
 
@@ -98,7 +94,7 @@ class ScanLineTests(unittest.TestCase):
             "setup": "Destekte reddedilme / başarısız aşağı kırılım",
             "rvol": 2.49,
             "excess_return_20": -5.5,
-            "levels": {"swing_high": 103.20, "swing_low": 89.10},
+            "active_levels": {"lower": 89.10, "reference_close": 96.40, "upper": 103.20},
             "matched_intervals": ["1d", "1wk"],
         }
         base.update(overrides)
@@ -117,7 +113,8 @@ class ScanLineTests(unittest.TestCase):
         text = scan_line_plain(self._item())
         self.assertIn("103.20", text)
         self.assertIn("89.10", text)
-        self.assertIn("kapanışla", text)
+        self.assertIn("96.40", text)
+        self.assertIn("Teyitli referans kapanış", text)
 
     def test_high_volume_is_described_plainly(self) -> None:
         from src.plain_language import scan_line_plain
@@ -144,9 +141,9 @@ class ScanLineTests(unittest.TestCase):
     def test_missing_levels_do_not_break_the_line(self) -> None:
         from src.plain_language import scan_line_plain
 
-        text = scan_line_plain(self._item(levels={}))
+        text = scan_line_plain(self._item(active_levels={}))
         self.assertTrue(text)
-        self.assertNotIn("kapanışla belli olur", text)
+        self.assertNotIn("Teyitli referans kapanış", text)
 
     def test_unknown_setup_has_a_fallback(self) -> None:
         from src.plain_language import scan_line_plain
@@ -186,3 +183,7 @@ class ProjectedVolumeTests(unittest.TestCase):
             "excess_return_20": 0.0, "levels": {}, "matched_intervals": ["1d"],
         })
         self.assertIn("normalin 2.0 katı", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

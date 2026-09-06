@@ -5,8 +5,11 @@ yanındaki teyit edilmiş piyasa yapısı seviyelerinden seçilir. Böylece daha
 önce kırılmış bir swing dip, fiyatın üzerinde kaldığı halde "alt eşik" olarak
 kaydedilemez; rolü varsa yukarı reclaim seviyesi olarak değerlendirilir.
 
-Uyarılar yalnızca tamamlanmış mum kapanışlarıyla değerlendirilir. Uyarı,
-eşiğin aşıldığını bildirir; ne yapılması gerektiğini söylemez.
+Uyarılar yalnızca tamamlanmış mum kapanışlarıyla değerlendirilir ve yalnızca
+seviye geçişinde üretilir. Fiyat eşik dışında kalmaya devam ederken aynı uyarı
+tekrarlanmaz; fiyat yeniden eşiğin öteki tarafına döndükten sonra yeni bir
+kapanış geçişi oluşursa uyarı yeniden kurulmuş sayılır. Uyarı, eşiğin
+aşıldığını bildirir; ne yapılması gerektiğini söylemez.
 """
 
 from __future__ import annotations
@@ -37,12 +40,24 @@ class Watch:
     lower: float
     setup: str
     added_at: str
+    # Geriye dönük uyumluluk için tutulur; artık kalıcı kilit değildir.
+    # bot_runner bu alana yalnız son uyarı zamanını yazar.
     triggered: str = ""
     reference_close: float = math.nan
     lower_source: str = ""
     upper_source: str = ""
     reference_bar: str = ""
     last_checked_bar: str = ""
+    # Eski watch JSON kayıtlarında bu alan yoktur. None, "henüz güvenilir bir
+    # önceki kapanış gözlemi yok" anlamına gelir ve ilk gözlemde sahte uyarıyı
+    # önler.
+    last_close: float | None = None
+    # inside / above / below. Ayrı durum tutulması aynı yönde spam'i önler ve
+    # fiyat banda döndükten sonra yeni crossing için uyarının yeniden kurulmasını
+    # açık ve kalıcı hale getirir.
+    alert_state: str = ""
+    # Geriye dönük görünürlük için son olay yönü; karar mantığı alert_state'tedir.
+    last_event: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -54,6 +69,14 @@ def _finite(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _state_for_close(close: float, lower: float, upper: float) -> str:
+    if close > upper:
+        return "above"
+    if close < lower:
+        return "below"
+    return "inside"
 
 
 def confirmed_frame(
@@ -184,9 +207,12 @@ def load_watches(path: Path = WATCH_PATH) -> dict[str, Watch]:
         return {}
     if not isinstance(payload, dict):
         return {}
+
     watches: dict[str, Watch] = {}
     for ticker, item in payload.items():
         try:
+            raw_last_close = item.get("last_close")
+            last_close = _finite(raw_last_close) if raw_last_close is not None else None
             watches[str(ticker)] = Watch(
                 ticker=str(item["ticker"]),
                 interval=str(item.get("interval", "1d")),
@@ -200,6 +226,9 @@ def load_watches(path: Path = WATCH_PATH) -> dict[str, Watch]:
                 upper_source=str(item.get("upper_source", "")),
                 reference_bar=str(item.get("reference_bar", "")),
                 last_checked_bar=str(item.get("last_checked_bar", "")),
+                last_close=last_close,
+                alert_state=str(item.get("alert_state", "")),
+                last_event=str(item.get("last_event", "")),
             )
         except (KeyError, TypeError, ValueError):
             continue
@@ -218,30 +247,39 @@ def save_watches(watches: dict[str, Watch], path: Path = WATCH_PATH) -> None:
 
 
 def add_watch(watches: dict[str, Watch], watch: Watch) -> tuple[dict[str, Watch] | None, str]:
-    if math.isfinite(watch.reference_close) and not watch.lower < watch.reference_close < watch.upper:
+    reference = _finite(watch.reference_close)
+    if reference is not None and not watch.lower < reference < watch.upper:
         return None, (
             f"{watch.ticker} için takip oluşturulmadı: eşikler referans kapanışı çevrelemiyor "
-            f"({watch.lower:,.2f} < {watch.reference_close:,.2f} < {watch.upper:,.2f})."
+            f"({watch.lower:,.2f} < {reference:,.2f} < {watch.upper:,.2f})."
         )
+    if reference is not None and _finite(watch.last_close) is None:
+        watch.last_close = reference
+    if _finite(watch.last_close) is not None and not watch.alert_state:
+        watch.alert_state = _state_for_close(float(watch.last_close), watch.lower, watch.upper)
+
     if watch.ticker in watches:
         updated = dict(watches)
         updated[watch.ticker] = watch
+        reference_text = "—" if reference is None else f"{reference:,.2f}"
         return updated, (
             f"{watch.ticker} takip seviyeleri güncellendi.\n"
-            f"Referans teyitli kapanış: {watch.reference_close:,.2f}\n"
+            f"Referans teyitli kapanış: {reference_text}\n"
             f"Alt eşik: {watch.lower:,.2f} — {watch.lower_source or 'yapısal seviye'}\n"
             f"Üst eşik: {watch.upper:,.2f} — {watch.upper_source or 'yapısal seviye'}"
         )
     if len(watches) >= MAX_WATCHED:
         return None, f"Takip listesi dolu (en fazla {MAX_WATCHED}). Önce /takip sil SEMBOL ile yer açın."
+
     updated = dict(watches)
     updated[watch.ticker] = watch
+    reference_text = "—" if reference is None else f"{reference:,.2f}"
     return updated, (
         f"{watch.ticker} takibe alındı ({watch.interval}).\n"
-        f"Referans teyitli kapanış: {watch.reference_close:,.2f}\n"
+        f"Referans teyitli kapanış: {reference_text}\n"
         f"Alt eşik: {watch.lower:,.2f} — {watch.lower_source or 'yapısal seviye'}\n"
         f"Üst eşik: {watch.upper:,.2f} — {watch.upper_source or 'yapısal seviye'}\n"
-        f"Uyarı yalnızca tamamlanmış {watch.interval} mum kapanışıyla verilir."
+        f"Uyarı yalnızca tamamlanmış {watch.interval} mum kapanışıyla ve yeni eşik geçişinde verilir."
     )
 
 
@@ -259,10 +297,11 @@ def describe(watches: dict[str, Watch]) -> str:
         return "Takip listesi boş. Eklemek için: /takip THYAO"
     lines = [f"Takip listesi ({len(watches)}/{MAX_WATCHED}):"]
     for watch in watches.values():
-        state = " — uyarı verildi" if watch.triggered else ""
-        reference = f" | ref {watch.reference_close:,.2f}" if math.isfinite(watch.reference_close) else ""
+        state = f" — son uyarı {watch.triggered}" if watch.triggered else ""
+        reference = _finite(watch.reference_close)
+        reference_text = f" | ref {reference:,.2f}" if reference is not None else ""
         lines.append(
-            f"{watch.ticker} ({watch.interval}): {watch.lower:,.2f} – {watch.upper:,.2f}{reference}{state}"
+            f"{watch.ticker} ({watch.interval}): {watch.lower:,.2f} – {watch.upper:,.2f}{reference_text}{state}"
         )
     lines.append("")
     lines.append("Çıkarmak için: /takip sil THYAO")
@@ -270,23 +309,51 @@ def describe(watches: dict[str, Watch]) -> str:
 
 
 def check_break(watch: Watch, close: float) -> str:
-    """Teyitli kapanış eşiği aştı mı? Aştıysa uyarı metnini döndürür."""
-    if not math.isfinite(close) or watch.triggered:
+    """Yeni teyitli kapanışta gerçek eşik geçişi varsa uyarı metnini döndürür.
+
+    Eski kayıtta ``last_close`` yoksa ilk gözlem yalnız başlangıç durumu olarak
+    kaydedilir; geçmişte gerçekleşmiş bir kırılımı yeniymiş gibi bildirmez.
+    Yeni kayıtlarda ise referans kapanış başlangıç noktasıdır. Fiyat eşik
+    dışında kaldıkça tekrar uyarı üretilmez; banda döndükten sonraki yeni
+    crossing tekrar bildirilebilir.
+    """
+    current = _finite(close)
+    if current is None:
         return ""
-    if close > watch.upper:
+
+    previous = _finite(watch.last_close)
+    if previous is None:
+        watch.last_close = current
+        watch.alert_state = _state_for_close(current, watch.lower, watch.upper)
+        watch.last_event = ""
+        return ""
+
+    previous_state = watch.alert_state or _state_for_close(previous, watch.lower, watch.upper)
+    current_state = _state_for_close(current, watch.lower, watch.upper)
+    watch.last_close = current
+    watch.alert_state = current_state
+
+    if previous_state != "above" and current_state == "above" and previous <= watch.upper < current:
+        watch.last_event = "upper"
         return (
             f"🔔 {watch.ticker} — yukarı eşik aşıldı\n"
-            f"Teyitli kapanış {close:,.2f}, izlenen üst seviye {watch.upper:,.2f}.\n"
+            f"Teyitli kapanış {current:,.2f}, izlenen üst seviye {watch.upper:,.2f}.\n"
+            f"Önceki teyitli kapanış: {previous:,.2f}.\n"
             f"Seviye kaynağı: {watch.upper_source or 'yapısal seviye'}.\n"
             f"Takibe alındığındaki kurulum: {watch.setup or '—'}.\n"
             "Bu bir alım/satım önerisi değildir; yalnızca izlenen seviyenin aşıldığını bildirir."
         )
-    if close < watch.lower:
+    if previous_state != "below" and current_state == "below" and previous >= watch.lower > current:
+        watch.last_event = "lower"
         return (
             f"🔔 {watch.ticker} — aşağı eşik aşıldı\n"
-            f"Teyitli kapanış {close:,.2f}, izlenen alt seviye {watch.lower:,.2f}.\n"
+            f"Teyitli kapanış {current:,.2f}, izlenen alt seviye {watch.lower:,.2f}.\n"
+            f"Önceki teyitli kapanış: {previous:,.2f}.\n"
             f"Seviye kaynağı: {watch.lower_source or 'yapısal seviye'}.\n"
             f"Takibe alındığındaki kurulum: {watch.setup or '—'}.\n"
             "Bu bir alım/satım önerisi değildir; yalnızca izlenen seviyenin aşıldığını bildirir."
         )
+
+    if current_state == "inside":
+        watch.last_event = ""
     return ""

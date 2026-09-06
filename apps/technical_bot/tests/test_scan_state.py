@@ -79,7 +79,8 @@ class ScanCardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             paths = render_scan_cards(payload, Path(directory), "borsapy", 300.0)
             self.assertGreaterEqual(len(paths), 1)
-            self.assertEqual(Image.open(paths[0]).size[0], 1200)
+            # Kart genişliği scan_card.render figsize=9.0 x dpi=140 ile sabittir.
+            self.assertEqual(Image.open(paths[0]).size[0], 1260)
 
     def test_card_is_rendered_with_zero_matches(self) -> None:
         from src.scan_card import render_scan_cards
