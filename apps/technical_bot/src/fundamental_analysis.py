@@ -53,6 +53,14 @@ STATEMENT_ALIASES: dict[str, tuple[str, ...]] = {
         "esas faaliyet karı",
         "esas faaliyet kari",
     ),
+    "ebitda": (
+        "ebitda",
+        "earnings before interest taxes depreciation and amortization",
+        "favök",
+        "favok",
+        "faiz amortisman vergi öncesi kar",
+        "faiz amortisman vergi oncesi kar",
+    ),
     "net_income": (
         "net income",
         "net profit",
@@ -371,6 +379,7 @@ def _extract_common(
 ) -> dict[str, float | None]:
     revenue = _statement_series(income, "revenue")
     operating = _statement_series(income, "operating_profit")
+    ebitda = _statement_series(income, "ebitda")
     net_income = _statement_series(income, "net_income")
     cfo = _statement_series(cashflow, "cfo")
     capex = _statement_series(cashflow, "capex")
@@ -386,6 +395,7 @@ def _extract_common(
     revenue_prev = _sum4(revenue, 4)
     operating_ttm = _sum4(operating)
     operating_prev = _sum4(operating, 4)
+    ebitda_ttm = _sum4(ebitda)
     net_ttm = _sum4(net_income)
     net_prev = _sum4(net_income, 4)
     cfo_ttm = _sum4(cfo)
@@ -394,9 +404,11 @@ def _extract_common(
     latest_assets = _latest(assets)
     latest_equity = _latest(equity)
     latest_cash = _latest(cash)
+    short_debt_latest = _latest(short_debt)
+    long_debt_latest = _latest(long_debt)
     total_debt = None
-    if _latest(short_debt) is not None or _latest(long_debt) is not None:
-        total_debt = (_latest(short_debt) or 0.0) + (_latest(long_debt) or 0.0)
+    if short_debt_latest is not None or long_debt_latest is not None:
+        total_debt = (short_debt_latest or 0.0) + (long_debt_latest or 0.0)
     net_debt = None if total_debt is None else total_debt - (latest_cash or 0.0)
     fcf = None if cfo_ttm is None else cfo_ttm - abs(capex_ttm or 0.0)
 
@@ -416,6 +428,10 @@ def _extract_common(
         "fcf_margin": _ratio(fcf, revenue_ttm, 100.0),
         "assets": latest_assets,
         "equity": latest_equity,
+        "net_income_ttm": net_ttm,
+        "ebitda_ttm": ebitda_ttm,
+        "total_debt": total_debt,
+        "cash": latest_cash,
     }
 
 
@@ -680,6 +696,61 @@ def _clean_multiple(value: float | None) -> float | None:
     return value
 
 
+def _provider_multiple(fast: dict[str, Any], info: dict[str, Any], *names: str) -> float | None:
+    return _clean_multiple(_pick(fast, *names) or _pick(info, *names))
+
+
+def _market_cap(price: float | None, fast: dict[str, Any], info: dict[str, Any]) -> float | None:
+    market_cap = _pick(fast, "market_cap", "marketCap", "market_value")
+    if market_cap is None:
+        market_cap = _pick(info, "marketCap", "market_cap", "marketValue")
+    if market_cap is not None and market_cap > 0:
+        return market_cap
+    shares = _pick(fast, "shares_outstanding", "sharesOutstanding", "shares")
+    if shares is None:
+        shares = _pick(info, "sharesOutstanding", "shares_outstanding", "impliedSharesOutstanding")
+    if price is not None and price > 0 and shares is not None and shares > 0:
+        return price * shares
+    return None
+
+
+def _derive_multiples(
+    metrics: dict[str, float | None],
+    price: float | None,
+    fast: dict[str, Any],
+    info: dict[str, Any],
+) -> dict[str, float | None]:
+    """Prefer auditable raw calculations; use provider ratios only when raw inputs are absent."""
+    market_cap = _market_cap(price, fast, info)
+    net_income = metrics.get("net_income_ttm")
+    equity = metrics.get("equity")
+    debt = metrics.get("total_debt")
+    cash = metrics.get("cash")
+    ebitda = metrics.get("ebitda_ttm")
+
+    provider_pe = _provider_multiple(fast, info, "pe_ratio", "pe", "trailingPE")
+    provider_pb = _provider_multiple(fast, info, "price_to_book", "pb", "priceToBook")
+    provider_ev_ebitda = _provider_multiple(fast, info, "enterpriseToEbitda", "evToEbitda", "ev_ebitda")
+
+    if market_cap is not None and net_income is not None:
+        pe = market_cap / net_income if net_income > 0 else None
+    else:
+        pe = provider_pe
+
+    if market_cap is not None and equity is not None:
+        pb = market_cap / equity if equity > 0 else None
+    else:
+        pb = provider_pb
+
+    if market_cap is not None and debt is not None and cash is not None and ebitda is not None:
+        enterprise_value = market_cap + debt - cash
+        ev_ebitda = enterprise_value / ebitda if ebitda > 0 else None
+    else:
+        ev_ebitda = provider_ev_ebitda
+
+    return {"pe": _clean_multiple(pe), "pb": _clean_multiple(pb), "ev_ebitda": _clean_multiple(ev_ebitda)}
+
+
 def build_fundamental_report(symbol: str) -> FundamentalReport:
     """Fetch current fundamentals and build a sector-aware 0-5 scorecard."""
     import borsapy as bp
@@ -710,14 +781,9 @@ def build_fundamental_report(symbol: str) -> FundamentalReport:
             cashflow = None
 
     metrics = _extract_common(balance, income, cashflow)
-    metrics.update(
-        {
-            "pe": _clean_multiple(_pick(fast, "pe_ratio", "pe") or _pick(info, "trailingPE", "pe")),
-            "pb": _clean_multiple(_pick(fast, "price_to_book", "pb") or _pick(info, "priceToBook", "pb")),
-            "ev_ebitda": _clean_multiple(_pick(info, "enterpriseToEbitda", "evToEbitda", "ev_ebitda")),
-            "dividend_yield": _pick(info, "dividendYield", "dividend_yield"),
-        }
-    )
+    price = _pick(fast, "last_price", "last", "price") or _pick(info, "last", "lastPrice", "price")
+    metrics.update(_derive_multiples(metrics, price, fast, info))
+    metrics["dividend_yield"] = _pick(info, "dividendYield", "dividend_yield")
     dividend = metrics.get("dividend_yield")
     if dividend is not None and 0 <= dividend <= 1.0:
         metrics["dividend_yield"] = dividend * 100.0
@@ -736,7 +802,6 @@ def build_fundamental_report(symbol: str) -> FundamentalReport:
     overall = round(float(sum(available) / len(available)), 2) if available else None
     coverage = round(sum(factor.coverage for factor in factors) / len(factors), 2) if factors else 0.0
     positives, risks = _insights(profile, factors, metrics)
-    price = _pick(fast, "last_price", "last", "price") or _pick(info, "last", "lastPrice", "price")
 
     return FundamentalReport(
         symbol=ticker,
