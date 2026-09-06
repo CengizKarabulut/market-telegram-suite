@@ -131,7 +131,8 @@ def test_operational_command_handlers_route_inside_base_runner() -> None:
 
 
 def test_main_replaces_legacy_report_help_with_modern_surface() -> None:
-    original = runner.base.HELP_TEXT
+    original_help = runner.base.HELP_TEXT
+    original_execute = runner.base.execute
     legacy_line = "/rapor SEMBOL [aralık] — tek hisse teknik raporu (ör. /rapor THYAO 4h)"
     try:
         runner.base.HELP_TEXT = "Kullanılabilir komutlar:\n" + legacy_line + "\n/tara [aralık]"
@@ -147,4 +148,5 @@ def test_main_replaces_legacy_report_help_with_modern_surface() -> None:
         assert runner.base.execute is runner.execute
         fake_main.assert_called_once_with()
     finally:
-        runner.base.HELP_TEXT = original
+        runner.base.HELP_TEXT = original_help
+        runner.base.execute = original_execute
