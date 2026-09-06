@@ -15,10 +15,7 @@ from src.fundamental_analysis import build_fundamental_report
 from src.fundamental_card import render_fundamental_card
 from src.fundamental_quality import apply_coverage_policy
 from src.fundamental_telegram import send_fundamental_card
-from src.moving_average_card import render_moving_average_card
-from src.research_card import render_research_card
-from src.research_chart import render_research_chart
-from src.research_risk import build_research_report
+from src.research_pipeline import build_research_bundle
 from src.research_telegram import send_research_bundle
 from src.research_theme import apply_white_theme
 from src.telegram_bot import VALID_TICKER
@@ -65,22 +62,17 @@ def handle_research(chat_id: int, args: list[str], command: str = "analiz") -> N
         base.reply(chat_id, error or "Geçersiz sembol.")
         return
 
-    # User-facing bundle opens with visuals, followed by analyst commentary.
-    report = build_research_report(ticker)
     target = base.REPORTS_DIR / "komut" / ticker
-    target.mkdir(parents=True, exist_ok=True)
-
-    summary_image = render_research_card(report, target / f"{ticker}_arastirma.png")
-    fundamental_image = render_fundamental_card(report.fundamental, target / f"{ticker}_temel.png")
-    ma_image, ma_snapshot = render_moving_average_card(ticker, target / f"{ticker}_ortalamalar.png")
-    technical_image = render_research_chart(ticker, report, target / f"{ticker}_teknik_yapi.png")
-    payload = report.to_dict()
-    payload["moving_averages"] = ma_snapshot
-    Path(target / f"{ticker}_arastirma.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n",
-        encoding="utf-8",
+    bundle = build_research_bundle(ticker, target)
+    send_research_bundle(
+        bundle.summary_card,
+        bundle.fundamental_card,
+        bundle.financial_card,
+        bundle.valuation_peer_card,
+        bundle.moving_average_card,
+        bundle.technical_chart,
+        bundle.report,
     )
-    send_research_bundle(summary_image, fundamental_image, ma_image, technical_image, report)
 
 
 def execute(command, intervals: set[str]) -> None:
