@@ -1,9 +1,10 @@
-name: Teknik Analiz Telegram Botu
+name: Teknik Analiz ve Araştırma Telegram Botu
 
 on:
   workflow_dispatch:
+  # Bot kendi zincirini sürdürür; cron yalnız zincir koparsa emniyet ağıdır.
   schedule:
-    - cron: "0 6-18 * * 1-5"
+    - cron: "20 */6 * * *"
 
 permissions:
   contents: read
@@ -16,7 +17,7 @@ concurrency:
 jobs:
   listen:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 355
     defaults:
       run:
         working-directory: apps/technical_bot
@@ -50,7 +51,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOT_WORKFLOW_FILE: technical-bot.yml
           SCAN_WORKFLOW_FILE: technical-scan.yml
-          BOT_RUN_MINUTES: "50"
+          BOT_RUN_MINUTES: "345"
           BOT_LONG_POLL_SECONDS: "25"
           BOT_SELF_RESTART: "1"
           BOT_DRIVES_SCAN: "1"
