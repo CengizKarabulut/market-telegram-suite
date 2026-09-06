@@ -2,6 +2,17 @@ name: Research Report Smoke
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/technical_bot/src/research_*.py'
+      - 'apps/technical_bot/src/fundamental_*.py'
+      - 'apps/technical_bot/src/original_indicators.py'
+      - 'apps/technical_bot/src/moving_average_card.py'
+      - 'apps/technical_bot/src/turkish_text.py'
+      - 'apps/technical_bot/tests/test_research_*.py'
+      - 'apps/technical_bot/tests/test_original_indicators.py'
+      - '.github/workflows/research-report-smoke.yml'
   pull_request:
     branches: [main]
     paths:
@@ -9,9 +20,8 @@ on:
       - 'apps/technical_bot/src/fundamental_*.py'
       - 'apps/technical_bot/src/original_indicators.py'
       - 'apps/technical_bot/src/moving_average_card.py'
-      - 'apps/technical_bot/tests/test_research_engine.py'
-      - 'apps/technical_bot/tests/test_research_commentary.py'
-      - 'apps/technical_bot/tests/test_research_output_contract.py'
+      - 'apps/technical_bot/src/turkish_text.py'
+      - 'apps/technical_bot/tests/test_research_*.py'
       - 'apps/technical_bot/tests/test_original_indicators.py'
       - '.github/workflows/research-report-smoke.yml'
 
