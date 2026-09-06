@@ -8,12 +8,9 @@ from typing import Any
 
 import requests
 
-from src.research_commentary_rich import (
-    commentary_messages,
-    compose_research_commentary,
-)
+from src.research_commentary_rich import commentary_messages
 from src.research_engine import ResearchReport
-from src.research_pipeline import TECHNICAL_SECTION_TITLES
+from src.research_pipeline import technical_commentary_sections
 from src.telegram_client import CAPTION_LIMIT, DEFAULT_CHAT_ID, caption_enabled, clip
 
 
@@ -64,7 +61,7 @@ def _technical_caption(report: ResearchReport) -> str:
                 f"Teknik yapı: {score_text} · {technical.get('label', '—')}",
                 f"Günlük: {structure.get('state', '—')} · {structure.get('event', structure.get('bos', '—'))}",
                 f"Haftalık: {weekly.get('state', '—')} · {weekly.get('event', '—')}",
-                "MA tablosu + Pine-faithful teknik grafik + analist yorumu. Eski teknik rapor motoru kullanılmaz.",
+                "MA tablosu + Pine-faithful teknik grafik + teknik analist yorumu. Eski teknik rapor motoru kullanılmaz.",
             ]
         ),
         CAPTION_LIMIT,
@@ -159,16 +156,10 @@ def _messages_from_sections(
 
 
 def technical_commentary_messages(report: ResearchReport, limit: int = 3900) -> tuple[str, ...]:
-    """Return only modern technical, levels and risk interpretation."""
-    section_map = dict(compose_research_commentary(report))
-    sections = tuple(
-        (title, section_map[title])
-        for title in TECHNICAL_SECTION_TITLES
-        if title in section_map
-    )
+    """Return only market-structure, levels and technical-risk interpretation."""
     return _messages_from_sections(
         report.symbol,
-        sections,
+        technical_commentary_sections(report),
         header="🧭 TEKNİK ANALİST YORUMU —",
         limit=limit,
     )
