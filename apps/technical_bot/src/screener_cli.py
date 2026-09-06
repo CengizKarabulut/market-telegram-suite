@@ -23,7 +23,13 @@ from src.intervals import resolve
 from src.market_context import market_structure, profile_context
 from src.scan_card import render_scan_cards, render_scan_detail_card
 from src.scan_scheduler import resolve_intervals
-from src.scan_state import MARKET_TIMEZONE, load_state, mark_reported, save_state, select_new
+from src.scan_state import (
+    MARKET_TIMEZONE,
+    load_state,
+    mark_reported,
+    save_state,
+    select_new,
+)
 from src.screener import (
     INTERVAL_ORDER,
     SCREENS,
@@ -61,7 +67,7 @@ def build_fetcher(period: str, interval: str, sleep: float = BACKOFF_SECONDS):
             try:
                 raw = bp.download(batch, period=period, interval=interval, group_by="ticker", progress=False)
                 break
-            except Exception as error:  # noqa: BLE001 - provider may raise multiple network error types
+            except Exception as error:
                 last_error = error
                 if attempt == MAX_RETRIES - 1:
                     raise
@@ -281,7 +287,6 @@ def parse_args() -> argparse.Namespace:
         default=3,
         help="Kaç yeni eşleşme için araştırma-dili tarama aday kartı üretilsin (0 = kapalı)",
     )
-    # Geriye dönük workflow/CLI uyumluluğu; yeni aday kartının ayrıntısı sabittir.
     parser.add_argument("--report-detail", default="kompakt", choices=["kompakt", "dengeli", "tam"])
     parser.add_argument("--state", default="reports/scan_state.json", help="Gün içi tekrar önleme durumu")
     parser.add_argument("--title", default="BIST Teknik Tarama")
@@ -324,8 +329,6 @@ def main() -> None:
             interval=interval,
             batch_size=args.batch_size,
             benchmark=benchmark,
-            # Eşleşen frame'ler yalnız sonuç zenginleştirmesi ve aday kartı için
-            # bellekte tutulur; JSON'a hiçbir DataFrame yazılmaz.
             keep_frames=True,
         )
         for ticker, frame in result.pop("frames", {}).items():
@@ -365,7 +368,6 @@ def main() -> None:
     scan_cards = render_scan_cards(payload, reports_dir, universe.source, elapsed, title=args.title)
     print(f"{len(scan_cards)} araştırma-dili tarama kartı üretildi.")
 
-    # Aynı sembol gün boyu değişmeden eşleşiyorsa ayrıntı kartını tekrarlamayız.
     state_path = Path(args.state)
     reported = load_state(state_path)
     fresh = select_new(payload.get("results", []), reported, args.report_top)
