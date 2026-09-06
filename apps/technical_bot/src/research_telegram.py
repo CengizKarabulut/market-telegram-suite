@@ -30,16 +30,19 @@ def _caption(report: ResearchReport) -> str:
     financial = report.financial
     structure = report.technical.get("structure", {})
     elliott = report.technical.get("elliott", {})
+    peer = report.valuation.get("peer_analysis", {})
+    peer_scope = peer.get("scope") or report.valuation.get("scope", "—")
     lines = [
         f"📚 {report.symbol} — Araştırma Özeti",
         f"Genel durum: {score} · veri kapsamı %{round(report.coverage * 100)}",
         f"Bilanço: {financial.get('balance_label', '—')} · Kâr kalitesi: {financial.get('earnings_quality_label', '—')}",
         f"Borç yönü: {financial.get('debt_direction', '—')}",
+        f"Değerleme evreni: {peer_scope}",
         f"Teknik: {report.technical.get('label', '—')} · {structure.get('event', structure.get('bos', '—'))}",
         f"Elliott bağlamı: {elliott.get('primary', '—')} · güven %{elliott.get('confidence', '—')}",
         f"Ana risk: {risk}",
         "",
-        "Önce dört görsel, ardından bölüm bölüm analist yorumu gelir. Otomatik AL/SAT değildir.",
+        "Görsellerin ardından bölüm bölüm analist yorumu gelir. Otomatik AL/SAT değildir.",
     ]
     return clip("\n".join(lines), CAPTION_LIMIT)
 
@@ -115,32 +118,46 @@ def send_research_bundle(
     moving_average_card: Path,
     technical_chart: Path,
     report: ResearchReport,
+    *,
+    financial_card: Path | None = None,
+    valuation_peer_card: Path | None = None,
 ) -> tuple[dict[str, Any], ...]:
-    """Send four visuals first, then analyst paragraphs, with topic verification."""
+    """Send all available visuals first, then analyst paragraphs, with topic verification."""
     token, chat_id, thread_id = _destination()
+    visuals: list[tuple[Path, str]] = [
+        (summary_card, _caption(report)),
+        (fundamental_card, f"{report.symbol} · Temel analiz / sektör profili"),
+    ]
+    if financial_card is not None:
+        visuals.append(
+            (
+                financial_card,
+                f"{report.symbol} · Likidite + kaldıraç + faaliyet etkinliği + kârlılık + finansal skorlar",
+            )
+        )
+    if valuation_peer_card is not None:
+        visuals.append(
+            (
+                valuation_peer_card,
+                f"{report.symbol} · Çarpanlar + sektör medyanları + rakip karşılaştırması",
+            )
+        )
+    visuals.extend(
+        [
+            (
+                moving_average_card,
+                f"{report.symbol} · Günlük MA 5/8/13 · 21/34/55 · 89/144/233",
+            ),
+            (
+                technical_chart,
+                f"{report.symbol} · Fiyat + Hacim + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR",
+            ),
+        ]
+    )
+
     results: list[dict[str, Any]] = [
-        _send_photo(token, chat_id, thread_id, summary_card, _caption(report)),
-        _send_photo(
-            token,
-            chat_id,
-            thread_id,
-            fundamental_card,
-            f"{report.symbol} · Temel analiz / sektör profili",
-        ),
-        _send_photo(
-            token,
-            chat_id,
-            thread_id,
-            moving_average_card,
-            f"{report.symbol} · Günlük MA 5/8/13 · 21/34/55 · 89/144/233",
-        ),
-        _send_photo(
-            token,
-            chat_id,
-            thread_id,
-            technical_chart,
-            f"{report.symbol} · Fiyat + Hacim + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR",
-        ),
+        _send_photo(token, chat_id, thread_id, path, caption)
+        for path, caption in visuals
     ]
     results.extend(
         _send_text(token, chat_id, thread_id, message)
