@@ -19,7 +19,7 @@ from src.valuation_peer_card import render_valuation_peer_card
 TECHNICAL_SECTION_TITLES = (
     "TEKNİK YAPI NE DİYOR?",
     "KRİTİK SEVİYELER NEREDE?",
-    "ASIL RİSK NE?",
+    "TEKNİK RİSK NE?",
 )
 
 
@@ -71,6 +71,55 @@ def _write_commentary(root: Path, ticker: str, sections: tuple[tuple[str, str], 
     path = root / f"{ticker}_{suffix}.txt"
     path.write_text(text + "\n", encoding="utf-8")
     return path
+
+
+def _technical_risk_paragraph(report) -> str:
+    technical = report.technical
+    structure = technical.get("structure", {})
+    weekly = technical.get("weekly_structure", {})
+    atr_pct = technical.get("atr_pct")
+    divergence = technical.get("latest_rsi_divergence")
+    divergence_text = divergence.get("kind") if isinstance(divergence, dict) else "yok"
+    score = technical.get("score")
+    score_text = "—" if score is None else f"{float(score):.0f}/100"
+    atr_text = "—" if atr_pct is None else f"%{float(atr_pct):.1f}"
+
+    if report.supports:
+        nearest_support = report.supports[0]
+        support_text = (
+            f"en yakın aktif destek {nearest_support.low:.2f}–{nearest_support.high:.2f} ve "
+            f"{nearest_support.distance_atr:.1f} ATR uzakta"
+        )
+    else:
+        support_text = "fiyat altında yakın ve yeterli kaliteye sahip aktif destek bulunmuyor"
+
+    if report.resistances:
+        nearest_resistance = report.resistances[0]
+        resistance_text = (
+            f"en yakın direnç {nearest_resistance.low:.2f}–{nearest_resistance.high:.2f} ve "
+            f"{nearest_resistance.distance_atr:.1f} ATR uzakta"
+        )
+    else:
+        resistance_text = "yakın aktif direnç bulunmuyor"
+
+    return (
+        f"Teknik risk değerlendirmesinde teknik skor {score_text}; günlük yapı {structure.get('state', '—')} / "
+        f"{structure.get('event', structure.get('bos', '—'))}, haftalık yapı {weekly.get('state', '—')} / "
+        f"{weekly.get('event', '—')}. ATR {atr_text}, AlphaTrend {technical.get('alpha_trend_state', '—')} ve son "
+        f"RSI uyumsuzluğu {divergence_text}. Seviye tarafında {support_text}; {resistance_text}. Bu bölüm yalnız "
+        "fiyat yapısı, momentum, volatilite ve seviye yaşam döngüsünden doğan riski anlatır; değerleme veya bilanço "
+        "riski teknik-only rapora karıştırılmaz."
+    )
+
+
+def technical_commentary_sections(report) -> tuple[tuple[str, str], ...]:
+    """Return a strictly technical interpretation stack for the manual technical mode."""
+    section_map = dict(compose_research_commentary(report))
+    return (
+        ("TEKNİK YAPI NE DİYOR?", section_map["TEKNİK YAPI NE DİYOR?"]),
+        ("KRİTİK SEVİYELER NEREDE?", section_map["KRİTİK SEVİYELER NEREDE?"]),
+        ("TEKNİK RİSK NE?", _technical_risk_paragraph(report)),
+    )
 
 
 def build_research_bundle(symbol: str, target: str | Path) -> ResearchBundle:
@@ -131,9 +180,7 @@ def build_technical_bundle(symbol: str, target: str | Path) -> TechnicalBundle:
     moving_average, ma_snapshot = render_moving_average_card(ticker, root / f"{ticker}_ortalamalar.png")
     technical = render_research_chart(ticker, report, root / f"{ticker}_teknik_yapi.png")
 
-    all_sections = compose_research_commentary(report)
-    section_map = dict(all_sections)
-    sections = tuple((title, section_map[title]) for title in TECHNICAL_SECTION_TITLES if title in section_map)
+    sections = technical_commentary_sections(report)
     commentary_path = _write_commentary(root, ticker, sections, "teknik_yorum")
 
     payload = {
