@@ -140,7 +140,7 @@ def _technical_paragraph_rich(report: ResearchReport) -> str:
         obv_text = "OBV son 10 günlük ölçümde yatay"
 
     if rvol is None:
-        volume_text = "RVOL için veri yetersiz"
+        volume_text = "RVOL20 için veri yetersiz"
     elif rvol >= 1.5:
         volume_text = f"RVOL20 {rvol:.2f}x; hareket olağanın üzerinde katılımla gerçekleşiyor"
     elif rvol >= 0.8:
@@ -180,9 +180,13 @@ def _technical_paragraph_rich(report: ResearchReport) -> str:
     else:
         verdict = "Teknik puan tek başına yön kararı vermiyor; teyit ve geçersizleşme seviyeleri belirleyici."
 
+    alpha_text = alpha.casefold() if alpha not in ("", "—") else "veri yetersiz"
+    bollinger_text = bollinger.casefold() if bollinger not in ("", "—") else "veri yetersiz"
+
     return (
         f"Teknik yapı {score_text} ile {label}. Günlük: {daily_state} / {daily_event}; haftalık: {weekly_state} / "
         f"{weekly_event}; aylık: {monthly_state} / {monthly_event}. {structure_read} "
+        f"Trend filtrelerinde AlphaTrend {alpha_text}; Bollinger konumu {bollinger_text}. "
         f"RSI {base._num(rsi)} ({rsi_zone}), SMI {base._num(smi)} ({smi_zone}, {_direction(smi, smi_signal)}), "
         f"MACD {'pozitif' if macd_bullish else 'negatif' if macd_bearish else 'nötr/veri yetersiz'} histogram. "
         f"{' '.join(momentum_parts)} Hacim tarafında {volume_text}; {obv_text}. {volatility_text}. "
