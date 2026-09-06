@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 
-from src.research_commentary_rich import commentary_messages
+from src.research_commentary_advanced import commentary_messages
 from src.research_engine import ResearchReport
 from src.telegram_client import CAPTION_LIMIT, DEFAULT_CHAT_ID, caption_enabled, clip
 
@@ -29,13 +29,17 @@ def _caption(report: ResearchReport) -> str:
     risk = "—" if report.main_risk is None else f"{report.main_risk.name} ({report.main_risk.score:.0f}/100)"
     financial = report.financial
     structure = report.technical.get("structure", {})
+    hierarchy = report.technical.get("structure_hierarchy", {})
     elliott = report.technical.get("elliott", {})
+    valuation = report.valuation or {}
     lines = [
         f"📚 {report.symbol} — Araştırma Özeti",
         f"Genel durum: {score} · veri kapsamı %{round(report.coverage * 100)}",
         f"Bilanço: {financial.get('balance_label', '—')} · Kâr kalitesi: {financial.get('earnings_quality_label', '—')}",
+        f"Değerleme yöntemi: {valuation.get('primary_model', '—')} · model güveni %{round(float(valuation.get('model_confidence') or 0.0) * 100)}",
         f"Borç yönü: {financial.get('debt_direction', '—')}",
         f"Teknik: {report.technical.get('label', '—')} · {structure.get('event', structure.get('bos', '—'))}",
+        f"Yapı hiyerarşisi: {hierarchy.get('summary', '—')} · teyitli rail {hierarchy.get('confirmed_rails', 0)}",
         f"Elliott bağlamı: {elliott.get('primary', '—')} · güven %{elliott.get('confidence', '—')}",
         f"Ana risk: {risk}",
         "",
@@ -139,11 +143,8 @@ def send_research_bundle(
             chat_id,
             thread_id,
             technical_chart,
-            f"{report.symbol} · Fiyat + Hacim + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR",
+            f"{report.symbol} · Fiyat + Hacim + Yapı + BB + AlphaTrend + MACD + SMI + RSI Divergence + OBV + ATR",
         ),
     ]
-    results.extend(
-        _send_text(token, chat_id, thread_id, message)
-        for message in commentary_messages(report)
-    )
+    results.extend(_send_text(token, chat_id, thread_id, message) for message in commentary_messages(report))
     return tuple(results)

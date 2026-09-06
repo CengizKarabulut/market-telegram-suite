@@ -2,7 +2,9 @@
 
 Missing evidence is never converted into a neutral-looking risk score. Company
 quality excludes valuation so the independent valuation dimension is not counted
-twice. Research coverage reflects the underlying dimension coverage.
+twice. Advanced valuation policy is attached after the core data pass so model
+suitability can use both peer context and financial evidence without fabricating
+intrinsic-value assumptions.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from dataclasses import replace
 from src import research_engine as core
 from src.research_engine import LevelZone, ResearchDimension, RiskItem
 from src.research_technical import _technical_analysis
+from src.valuation_policy import build_valuation_policy
 
 MIN_DIMENSION_COVERAGE = 0.50
 
@@ -82,13 +85,7 @@ def _risk_engine(
                 f"CFO/net kâr {fm.get('cfo_net_income', '—')} · "
                 f"accrual %{fm.get('accrual_ratio', '—')}."
             )
-        risks.append(
-            RiskItem(
-                "Kâr kalitesi",
-                round(100.0 - quality_score, 1),
-                quality_evidence,
-            )
-        )
+        risks.append(RiskItem("Kâr kalitesi", round(100.0 - quality_score, 1), quality_evidence))
 
     valuation_score = core._finite(valuation.get("score"))
     valuation_coverage = core._finite(valuation.get("coverage")) or 0.0
@@ -97,7 +94,9 @@ def _risk_engine(
             RiskItem(
                 "Değerleme hassasiyeti",
                 round(100.0 - valuation_score, 1),
-                f"Karşılaştırma kapsamı: {valuation.get('scope', '—')}.",
+                f"Birincil yöntem: {valuation.get('primary_model', '—')} · "
+                f"akran kapsamı: {valuation.get('scope', '—')} · "
+                f"model güveni %{round(float(valuation.get('model_confidence') or 0.0) * 100)}.",
             )
         )
 
@@ -113,12 +112,14 @@ def _risk_engine(
         divergence = technical.get("latest_rsi_divergence")
         if divergence and "Bearish" in str(divergence.get("kind")):
             technical_risk = min(100.0, technical_risk + 8.0)
+        hierarchy = technical.get("structure_hierarchy") or {}
         structure = technical.get("structure", {})
         elliott = technical.get("elliott", {})
-        evidence = (
-            f"Yapı {structure.get('state', '—')} / {structure.get('event', '—')}"
-            f" · ATR %{atr_pct:.1f}" if atr_pct is not None else f"Yapı {structure.get('state', '—')}"
-        )
+        evidence = f"Yapı {structure.get('state', '—')} / {structure.get('event', '—')}"
+        if hierarchy.get("summary"):
+            evidence += f" · Hiyerarşi {hierarchy.get('summary')}"
+        if atr_pct is not None:
+            evidence += f" · ATR %{atr_pct:.1f}"
         evidence += (
             f" · AlphaTrend {technical.get('alpha_trend_state', '—')}"
             f" · RSI uyumsuzluk {divergence.get('kind') if divergence else 'yok'}"
@@ -134,13 +135,7 @@ def _risk_engine(
             liquidity_risk = 55.0
         else:
             liquidity_risk = 20.0
-        risks.append(
-            RiskItem(
-                "Likidite",
-                liquidity_risk,
-                f"20 günlük ortalama TL hacim {turnover:,.0f}.",
-            )
-        )
+        risks.append(RiskItem("Likidite", liquidity_risk, f"20 günlük ortalama TL hacim {turnover:,.0f}."))
 
     ordered = tuple(sorted(risks, key=lambda item: item.score, reverse=True))
     main_risk = ordered[0] if ordered and ordered[0].score >= 35.0 else None
@@ -193,6 +188,19 @@ def _coverage_gate_dimension(dimension: ResearchDimension) -> ResearchDimension:
     )
 
 
+def _valuation_dimension(valuation: dict) -> ResearchDimension:
+    score = core._finite(valuation.get("score"))
+    coverage = core._finite(valuation.get("coverage")) or 0.0
+    return ResearchDimension(
+        "Değerleme",
+        score,
+        coverage,
+        core._label(score, "İSKONTOLU / GÜÇLÜ", "MAKUL", "PRİMLİ / ZAYIF"),
+        f"Birincil yöntem {valuation.get('primary_model', '—')}; model uygunluğu ayrı raporlanır. "
+        f"Göreli karşılaştırma: {valuation.get('scope', '—')}.",
+    )
+
+
 def _finalize_dimensions(report):
     dimensions = list(report.dimensions)
     if dimensions:
@@ -218,7 +226,7 @@ def _finalize_dimensions(report):
 
 
 def build_research_report(symbol: str):
-    """Build the production research report with coverage-aware finalisation."""
+    """Build the production research report with advanced technical/valuation policy."""
     previous_risk = core._risk_engine
     previous_technical = core._technical_analysis
     core._risk_engine = _risk_engine
@@ -228,4 +236,30 @@ def build_research_report(symbol: str):
     finally:
         core._risk_engine = previous_risk
         core._technical_analysis = previous_technical
+
+    combined_metrics = dict(report.fundamental.metrics)
+    combined_metrics.update(report.financial.get("metrics") or {})
+    valuation = build_valuation_policy(
+        report.profile,
+        report.sector,
+        combined_metrics,
+        report.valuation,
+        report.price,
+    )
+    dimensions = tuple(
+        _valuation_dimension(valuation) if dimension.name == "Değerleme" else dimension
+        for dimension in report.dimensions
+    )
+    main_risk, risks = _risk_engine(report.profile, report.financial, valuation, report.technical, report.supports)
+    report = replace(
+        report,
+        valuation=valuation,
+        dimensions=dimensions,
+        main_risk=main_risk,
+        risks=risks,
+        note=(
+            report.note
+            + " Model uygunluğu şirket tipine göre değerlendirilir; eksik NAD/WACC/Ke gibi girdiler yerine varsayım uydurulmaz."
+        ),
+    )
     return _finalize_dimensions(report)
