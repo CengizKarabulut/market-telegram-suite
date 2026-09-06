@@ -1,4 +1,4 @@
-name: BIST Teknik Tarama
+name: BIST Tarama — Bot Tetikler
 
 on:
   workflow_dispatch:
@@ -44,9 +44,6 @@ on:
         required: true
         default: true
         type: boolean
-  schedule:
-    - cron: "30 7,9,11,14 * * 1-5"
-    - cron: "30 16 * * 1-5"
 
 permissions:
   contents: read
@@ -89,7 +86,7 @@ jobs:
           INPUT_RVOL_SPIKE: ${{ inputs.rvol_spike || '3.0' }}
           INPUT_MIN_TURNOVER: ${{ inputs.min_turnover || '20000000' }}
           INPUT_REPORT_TOP: ${{ inputs.report_top || '3' }}
-          SEND_TELEGRAM: ${{ github.event_name == 'schedule' || inputs.send_telegram }}
+          SEND_TELEGRAM: ${{ inputs.send_telegram }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TECHNICAL_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TECHNICAL_TOPIC_ID }}
@@ -112,7 +109,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: bist-teknik-tarama
+          name: bist-tarama-${{ github.run_id }}
           path: |
             apps/technical_bot/reports/screener.json
             apps/technical_bot/reports/bist_universe.json
