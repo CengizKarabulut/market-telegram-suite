@@ -19,7 +19,7 @@ Offset (işlenen son Telegram güncellemesi) diske yazılır. Böylece Actions
 koşuları arasında komut kaybolmaz ve aynı komut iki kez işlenmez.
 
 Komutlar:
-    /grafik TMPOL                 varsayılan aralıklar (4h, 1d, 1wk, 1mo)
+    /grafik TMPOL                 varsayılan aralıklar (1h, 4h, 1d, 1wk)
     /grafik TMPOL 1d              tek aralık
     /grafik ASELS 4h,1d           birden fazla aralık
     /grafik BTC-USD 1d            kripto ve yabancı hisse de çalışır
@@ -44,7 +44,8 @@ from . import telegram as tg
 from .pipeline import INTERVAL_LABELS
 from .technical_dashboard import build_technical_dashboard
 
-DEFAULT_INTERVALS = ("4h", "1d", "1wk", "1mo")
+PUBLIC_INTERVALS = ("1h", "4h", "1d", "1wk")
+DEFAULT_INTERVALS = PUBLIC_INTERVALS
 LONG_POLL_SECONDS = 25
 STATE_FILE = Path(os.environ.get("BOT_STATE_FILE", "state/telegram_offset.json"))
 BUSY_MESSAGE = "Şu anda başka bir grafik hazırlanıyor, birazdan tekrar deneyin."
@@ -133,6 +134,7 @@ def _help(thread_id: str | None) -> None:
         "   örn: <code>/grafik TMPOL</code>\n"
         "   örn: <code>/grafik ASELS 1d</code>\n"
         "   örn: <code>/grafik BTC-USD 4h,1d</code>\n"
+        f"   geçerli: {', '.join(PUBLIC_INTERVALS)}\n"
         f"   varsayılan: {', '.join(DEFAULT_INTERVALS)}\n\n"
         "Dashboard: mum + Bollinger + AlphaTrend + EMA8/21/55 + "
         "HH/HL/LH/LL/BOS + hacim; MACD/SMI; RSI/OBV; ATR/RVOL/ADX-DMI.\n"
@@ -162,11 +164,11 @@ def handle(message: dict) -> None:
     symbol = args[0].upper()
     if len(args) > 1:
         intervals = [i for i in args[1].replace(",", " ").split() if i]
-        unknown = [i for i in intervals if i not in INTERVAL_LABELS]
+        unknown = [i for i in intervals if i not in PUBLIC_INTERVALS]
         if unknown:
             tg.send_message(
                 f"Bilinmeyen aralık: {', '.join(unknown)}\n"
-                f"Geçerli: {', '.join(INTERVAL_LABELS)}",
+                f"Geçerli: {', '.join(PUBLIC_INTERVALS)}",
                 thread_id,
             )
             return
