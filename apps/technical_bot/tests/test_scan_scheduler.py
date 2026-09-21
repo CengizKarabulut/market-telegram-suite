@@ -35,13 +35,12 @@ class SlotSelectionTests(unittest.TestCase):
         self.assertEqual(slot.key, "12:30")
 
     def test_stale_slot_is_skipped_after_grace(self) -> None:
-        """Uzun kesintiden sonra geçmiş slotların hepsi arka arkaya çalışmamalı."""
         self.assertIsNone(due_slot(moment(17, 13, 30), {}))
 
-    def test_close_slot_uses_slow_intervals(self) -> None:
+    def test_close_slot_uses_daily_and_weekly(self) -> None:
         state = {slot.key: "2026-08-17" for slot in SLOTS if slot.hour < 19}
         slot = due_slot(moment(17, 19, 35), state)
-        self.assertEqual(slot.intervals, "1d,1wk,1mo")
+        self.assertEqual(slot.intervals, "1d,1wk")
 
     def test_weekend_never_fires(self) -> None:
         self.assertIsNone(due_slot(moment(22, 12, 31), {}))
@@ -80,27 +79,24 @@ class StateTests(unittest.TestCase):
 
 
 class IntervalResolutionTests(unittest.TestCase):
-    """Aralık seçimi iş akışı ifadesinden Python'a taşındı; burada sabitlenir."""
-
     def test_auto_uses_fast_intervals_during_the_session(self) -> None:
         from src.scan_scheduler import resolve_intervals
 
         for hour in (10, 12, 14, 17):
             self.assertEqual(resolve_intervals("auto", moment(17, hour, 30)), "1h,4h")
 
-    def test_auto_uses_slow_intervals_after_the_close(self) -> None:
+    def test_auto_uses_daily_weekly_after_the_close(self) -> None:
         from src.scan_scheduler import resolve_intervals
 
-        self.assertEqual(resolve_intervals("auto", moment(17, 19, 30)), "1d,1wk,1mo")
-        self.assertEqual(resolve_intervals("auto", moment(17, 22, 0)), "1d,1wk,1mo")
+        self.assertEqual(resolve_intervals("auto", moment(17, 19, 30)), "1d,1wk")
+        self.assertEqual(resolve_intervals("auto", moment(17, 22, 0)), "1d,1wk")
 
     def test_explicit_value_is_respected(self) -> None:
         from src.scan_scheduler import resolve_intervals
 
         self.assertEqual(resolve_intervals("1h,1d", moment(17, 11, 0)), "1h,1d")
 
-    def test_empty_value_never_falls_back_to_daily(self) -> None:
-        """Boş değer sessizce '1d' olmamalı; hata bu yüzden fark edilmemişti."""
+    def test_empty_value_uses_intraday_core(self) -> None:
         from src.scan_scheduler import resolve_intervals
 
         self.assertEqual(resolve_intervals("", moment(17, 11, 0)), "1h,4h")
