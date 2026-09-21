@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from src.intervals import resolve
+
 MARKET_TIMEZONE = ZoneInfo("Europe/Istanbul")
 STATE_PATH = Path("reports/scan_schedule.json")
 GRACE_MINUTES = 45
@@ -91,11 +93,21 @@ def mark_done(slot: Slot, current: datetime, state: dict[str, str]) -> dict[str,
 CLOSE_HOUR = 18
 
 
-def resolve_intervals(value: str, current: datetime | None = None) -> str:
-    """'auto' değerini saate göre desteklenen aralık listesine çevirir."""
+def resolve_intervals(value: str | None, current: datetime | None = None) -> str:
+    """Aralık girdisini yalnızca 1h/4h/1d/1wk sözleşmesine göre çözer.
+
+    ``auto`` veya boş değer seans saatine göre çekirdek paketi seçer. Açık bir
+    değer verilmişse her öğe merkezi interval kayıt defterinden geçirilir;
+    böylece emekli edilmiş 5m/15m/30m/2h/1mo yolları scheduler üzerinden de
+    yeniden etkinleştirilemez. Desteklenen alias'lar kanonik forma çevrilir.
+    """
     cleaned = (value or "").strip()
     if cleaned and cleaned.lower() != "auto":
-        return cleaned
+        requested = [item.strip() for item in cleaned.split(",") if item.strip()]
+        if not requested:
+            raise ValueError("En az bir zaman aralığı gereklidir.")
+        canonical = tuple(dict.fromkeys(resolve(item).key for item in requested))
+        return ",".join(canonical)
     moment = current or now_market()
     if moment.hour >= CLOSE_HOUR:
         return SLOTS[-1].intervals

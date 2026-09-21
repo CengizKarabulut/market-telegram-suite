@@ -10,6 +10,7 @@ from src.scan_scheduler import (
     due_slot,
     load_state,
     mark_done,
+    resolve_intervals,
     save_state,
 )
 
@@ -80,29 +81,27 @@ class StateTests(unittest.TestCase):
 
 class IntervalResolutionTests(unittest.TestCase):
     def test_auto_uses_fast_intervals_during_the_session(self) -> None:
-        from src.scan_scheduler import resolve_intervals
-
         for hour in (10, 12, 14, 17):
             self.assertEqual(resolve_intervals("auto", moment(17, hour, 30)), "1h,4h")
 
     def test_auto_uses_daily_weekly_after_the_close(self) -> None:
-        from src.scan_scheduler import resolve_intervals
-
         self.assertEqual(resolve_intervals("auto", moment(17, 19, 30)), "1d,1wk")
         self.assertEqual(resolve_intervals("auto", moment(17, 22, 0)), "1d,1wk")
 
     def test_explicit_value_is_respected(self) -> None:
-        from src.scan_scheduler import resolve_intervals
-
         self.assertEqual(resolve_intervals("1h,1d", moment(17, 11, 0)), "1h,1d")
 
-    def test_empty_value_uses_intraday_core(self) -> None:
-        from src.scan_scheduler import resolve_intervals
+    def test_supported_aliases_are_canonicalized(self) -> None:
+        self.assertEqual(resolve_intervals("60m,1w", moment(17, 11, 0)), "1h,1wk")
 
+    def test_retired_intervals_are_rejected(self) -> None:
+        for value in ("5m", "15m", "30m", "2h", "1mo"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                resolve_intervals(value, moment(17, 11, 0))
+
+    def test_empty_value_uses_intraday_core(self) -> None:
         self.assertEqual(resolve_intervals("", moment(17, 11, 0)), "1h,4h")
         self.assertEqual(resolve_intervals(None, moment(17, 11, 0)), "1h,4h")
 
     def test_case_insensitive_auto(self) -> None:
-        from src.scan_scheduler import resolve_intervals
-
         self.assertEqual(resolve_intervals("AUTO", moment(17, 11, 0)), "1h,4h")
