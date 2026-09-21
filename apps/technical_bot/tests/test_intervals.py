@@ -34,34 +34,33 @@ def hourly_session(days: int = 2, hours: int = 8) -> pd.DataFrame:
 
 
 class IntervalResolutionTests(unittest.TestCase):
-    def test_all_requested_timeframes_are_available(self) -> None:
-        for key in ("5m", "15m", "30m", "1h", "2h", "4h", "1d", "1wk", "1mo"):
-            self.assertIn(key, INTERVALS)
+    def test_only_core_timeframes_are_available(self) -> None:
+        self.assertEqual(tuple(INTERVALS), ("1h", "4h", "1d", "1wk"))
 
     def test_aliases_are_accepted(self) -> None:
         self.assertEqual(resolve("60m").key, "1h")
         self.assertEqual(resolve("1w").key, "1wk")
         self.assertEqual(resolve(" 1D ").key, "1d")
 
-    def test_unknown_interval_raises(self) -> None:
-        with self.assertRaises(ValueError):
-            resolve("7m")
+    def test_retired_and_unknown_intervals_raise(self) -> None:
+        for value in ("5m", "15m", "30m", "2h", "1mo", "7m"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                resolve(value)
 
-    def test_two_and_four_hour_are_derived_from_hourly(self) -> None:
-        self.assertEqual(resolve("2h").source_interval, "1h")
+    def test_four_hour_is_derived_from_hourly(self) -> None:
         self.assertEqual(resolve("4h").source_interval, "1h")
         self.assertIsNone(resolve("1h").resample_rule)
 
 
 class ResampleTests(unittest.TestCase):
-    def test_ohlcv_aggregation_is_correct(self) -> None:
-        result = resample(hourly_session(days=1), resolve("2h"))
+    def test_four_hour_ohlcv_aggregation_is_correct(self) -> None:
+        result = resample(hourly_session(days=1), resolve("4h"))
         first = result.iloc[0]
         self.assertEqual(first["Open"], 0)
-        self.assertEqual(first["High"], 2)
+        self.assertEqual(first["High"], 4)
         self.assertEqual(first["Low"], -1)
-        self.assertEqual(first["Close"], 1)
-        self.assertEqual(first["Volume"], 200)
+        self.assertEqual(first["Close"], 3)
+        self.assertEqual(first["Volume"], 400)
 
     def test_intraday_bins_align_to_session_start(self) -> None:
         result = resample(hourly_session(days=2, hours=8), resolve("4h"))
@@ -70,7 +69,6 @@ class ResampleTests(unittest.TestCase):
         self.assertEqual(result.index[1].hour, 14)
 
     def test_closing_auction_bar_is_merged_not_left_as_stub(self) -> None:
-        """Seans 9 saatlik bar içerdiğinde 18:00 kapanışı ayrı mum olmamalı."""
         frame = hourly_session(days=2, hours=9)
         result = resample(frame, resolve("4h"))
         self.assertEqual(len(result), 4, "günde iki 4 saatlik mum beklenir")
@@ -83,20 +81,9 @@ class ResampleTests(unittest.TestCase):
         result = resample(frame, resolve("4h"))
         self.assertAlmostEqual(float(result["Volume"].sum()), float(frame["Volume"].sum()), places=6)
 
-    def test_no_empty_overnight_bars_are_produced(self) -> None:
-        result = resample(hourly_session(days=2, hours=8), resolve("2h"))
-        self.assertFalse(result["Close"].isna().any())
-        self.assertEqual(len(result), 8)
-
     def test_native_interval_is_returned_untouched(self) -> None:
         frame = hourly_session(days=1)
         self.assertIs(resample(frame, resolve("1h")), frame)
-
-    def test_monthly_bins_are_labelled_at_month_start(self) -> None:
-        index = pd.bdate_range("2025-01-01", periods=60)
-        frame = pd.DataFrame({"Open": 1.0, "High": 2.0, "Low": 0.5, "Close": 1.5, "Volume": 10.0}, index=index)
-        monthly = resample(frame, resolve("1mo"))
-        self.assertTrue(all(stamp.day == 1 for stamp in monthly.index))
 
     def test_daily_to_weekly_reduces_bar_count(self) -> None:
         index = pd.bdate_range("2025-01-01", periods=60)
@@ -106,9 +93,10 @@ class ResampleTests(unittest.TestCase):
         )
         weekly = resample(frame, resolve("1wk"))
         self.assertLess(len(weekly), len(frame))
-        # İlk hafta eksik başlar; tam bir haftada beş işlem günü toplanmalı.
+        # Haftalık etiketin takvim günü pandas sürümüne göre değişebilse de
+        # tam haftadaki beş işlem gününün tamamı aynı muma girmelidir.
         self.assertAlmostEqual(float(weekly["Volume"].iloc[1]), 10.0 * 5, places=6)
-        self.assertEqual(weekly.index[1].dayofweek, 0)
+        self.assertEqual(weekly.attrs.get("resampled_from"), "1d")
 
 
 class AdaptivePeriodTests(unittest.TestCase):
@@ -125,7 +113,6 @@ class AdaptivePeriodTests(unittest.TestCase):
         self.assertEqual(len(usable_ma_periods(10, MA_PERIODS)), 6)
 
     def test_key_emas_are_never_substituted(self) -> None:
-        """Eksik periyot başka bir periyotla değiştirilmemeli; sadece düşmeli."""
         self.assertEqual(key_ema_periods(MA_PERIODS), (21, 55, 233))
         partial = key_ema_periods([5, 8, 10, 13, 20, 21, 34, 50, 55, 89, 100])
         self.assertEqual(partial, (21, 55))
@@ -138,8 +125,7 @@ class AdaptivePeriodTests(unittest.TestCase):
         self.assertEqual(missing_ma_periods(1000, MA_PERIODS), [])
 
     def test_minimum_bars_allows_recently_listed_symbols(self) -> None:
-        """377 periyot zorunlu olmamalı; yeni hisseler raporsuz kalmamalı."""
-        for key in ("1d", "1wk", "1mo", "4h"):
+        for key in ("1h", "4h", "1d", "1wk"):
             self.assertEqual(minimum_bars(resolve(key), MA_PERIODS), 120)
 
     def test_short_history_still_yields_a_usable_period_set(self) -> None:
@@ -148,25 +134,23 @@ class AdaptivePeriodTests(unittest.TestCase):
         self.assertLessEqual(max(periods) + 5, 145)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RankWindowTests(unittest.TestCase):
-    def test_window_scales_with_interval_length(self) -> None:
+    def test_window_scales_with_supported_interval_length(self) -> None:
         from src.intervals import rank_window
 
-        self.assertGreater(rank_window("5m"), rank_window("1h"))
         self.assertGreater(rank_window("1h"), rank_window("1d"))
         self.assertGreater(rank_window("1d"), rank_window("1wk"))
-        self.assertGreater(rank_window("1wk"), rank_window("1mo"))
 
     def test_daily_window_stays_one_trading_year(self) -> None:
         from src.intervals import rank_window
 
         self.assertEqual(rank_window("1d"), 252)
 
-    def test_unknown_interval_falls_back_to_daily_window(self) -> None:
+    def test_hour_alias_uses_hour_window(self) -> None:
         from src.intervals import rank_window
 
         self.assertEqual(rank_window("60m"), rank_window("1h"))
+
+
+if __name__ == "__main__":
+    unittest.main()

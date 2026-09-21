@@ -100,7 +100,7 @@ def main() -> None:
         "/esik [ad değer] — tarama eşikleri (ör. /esik rvol 2.0)\n"
         "/durum — bot ve tarama durumu\n"
         "/yardim — bu mesaj\n\n"
-        "Takip/tarama aralıkları: 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1wk, 1mo\n"
+        "Takip/tarama aralıkları: 1h, 4h, 1d, 1wk\n"
         "Takip uyarıları yalnızca tamamlanmış mum kapanışında değerlendirilir."
     )
     base.execute = execute

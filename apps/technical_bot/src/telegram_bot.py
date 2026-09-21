@@ -32,7 +32,7 @@ HELP_TEXT = (
     "/esik [ad değer] — tarama eşikleri (ör. /esik rvol 2.0)\n"
     "/durum — bot ve tarama durumu\n"
     "/yardim — bu mesaj\n\n"
-    "Geçerli aralıklar: 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1wk, 1mo"
+    "Geçerli aralıklar: 1h, 4h, 1d, 1wk"
 )
 
 
