@@ -171,13 +171,36 @@ def forming_bar_fraction(data: pd.DataFrame, interval: str, now: pd.Timestamp | 
     Gün içi taramada mevcut bar henüz kapanmamıştır; yarım barın hacmini tam bar
     ortalamasıyla kıyaslamak RVOL'ü sistematik olarak düşük gösterir. Saat başı
     çalışan taramalarda hacim koşulları bu yüzden hiç tetiklenmez.
+
+    Aktif tarama aralıkları merkezi registry tarafından yalnızca 1h/4h/1d/1wk
+    olarak doğrulanır. Bu yardımcı fonksiyon ise eski test/veri çıktılarıyla
+    geriye dönük uyumluluk için 1mo'yu yerel olarak okuyabilir; diğer emekli ya
+    da bilinmeyen aralıklar ölçeklenmeden tam bar kabul edilir.
     """
     from src.intervals import resolve
 
-    spec = resolve(interval)
     stamps = pd.DatetimeIndex(data.index)
     last = stamps[-1]
     current = now or (pd.Timestamp.now(tz=last.tz) if last.tz else pd.Timestamp.now())
+    normalized = str(interval).strip().lower()
+
+    # 1mo aktif bir tarama aralığı değildir. Yalnızca eski çıktı/test verilerinin
+    # bar-tamamlama hesabını bozmayacak geriye dönük uyumluluk dalıdır.
+    if normalized == "1mo":
+        period_end = last + pd.offsets.MonthBegin(1)
+        total = (period_end - last).total_seconds() / 60
+        elapsed = (current - last).total_seconds() / 60
+        if elapsed <= 0 or elapsed >= total:
+            return 1.0
+        return max(elapsed / total, 0.25)
+
+    try:
+        spec = resolve(interval)
+    except ValueError:
+        # Emekli/bilinmeyen zaman dilimlerini burada yeniden etkinleştirmeyiz.
+        # Ölçekleme yapmadan tam bar kabul etmek eski yardımcı sözleşmesini korur.
+        return 1.0
+
     if spec.key == "1d":
         # Günlük bar da seans ortasında yarımdır; seans uzunluğu üzerinden ölçülür.
         session_minutes = 480.0
@@ -188,9 +211,9 @@ def forming_bar_fraction(data: pd.DataFrame, interval: str, now: pd.Timestamp | 
         if elapsed <= 0 or elapsed >= session_minutes:
             return 1.0
         return max(elapsed / session_minutes, 0.25)
-    if spec.key in {"1wk", "1mo"}:
-        # Devam eden hafta/ay barının hacmi de eksiktir; geçen süreye oranlanır.
-        period_end = last + (pd.Timedelta(days=7) if spec.key == "1wk" else pd.offsets.MonthBegin(1))
+    if spec.key == "1wk":
+        # Devam eden hafta barının hacmi de eksiktir; geçen süreye oranlanır.
+        period_end = last + pd.Timedelta(days=7)
         total = (period_end - last).total_seconds() / 60
         elapsed = (current - last).total_seconds() / 60
         if elapsed <= 0 or elapsed >= total:
