@@ -53,7 +53,9 @@ jobs:
           BOT_RUN_MINUTES: "50"
           BOT_LONG_POLL_SECONDS: "25"
           BOT_SELF_RESTART: "1"
-          BOT_DRIVES_SCAN: "1"
+          # Otomatik taramalar artık technical-scan.yml içindeki doğrudan cron
+          # takvimiyle çalışır. /tara komutu dispatch_scan üzerinden açık kalır.
+          BOT_DRIVES_SCAN: "0"
         run: python -m src.bot_runner_fundamental
       - name: Durum dosyalarını sakla
         if: always()
