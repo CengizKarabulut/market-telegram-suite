@@ -1,9 +1,9 @@
 """Tarama zamanlayıcısı.
 
 GitHub'ın zamanlanmış koşuları bu depoda güvenilir çalışmadığı için tarama,
-sürekli çalışan bot süreci tarafından tetiklenir. Bot saati kendisi kontrol
-eder; bir slot geçildiyse ilgili aralıklarla taramayı başlatır ve hangi slotu
-çalıştırdığını diske yazarak aynı slotu iki kez tetiklemez.
+sürekli çalışan bot süreci tarafından tetiklenir. Bot Türkiye saatini kontrol
+eder; bir slot geçildiyse yalnızca o slota ait çekirdek zaman dilimini başlatır
+ve aynı slotu gün içinde ikinci kez tetiklemez.
 """
 
 from __future__ import annotations
@@ -32,13 +32,36 @@ class Slot:
         return f"{self.hour:02d}:{self.minute:02d}"
 
 
-# Seans içinde 1H/4H, kapanış sonrasında 1D/1W taranır.
+# Otomatik BIST tarama takvimi (Europe/Istanbul, hafta ici).
+# Her slot yalnızca kendi zaman dilimini çalıştırır.
 SLOTS = (
-    Slot(10, 30, "1h,4h"),
-    Slot(12, 30, "1h,4h"),
-    Slot(14, 30, "1h,4h"),
-    Slot(17, 30, "1h,4h"),
-    Slot(19, 30, "1d,1wk"),
+    Slot(10, 20, "1h"),
+    Slot(10, 30, "1wk"),
+    Slot(10, 45, "1d"),
+    Slot(11, 0, "4h"),
+    Slot(11, 20, "1h"),
+    Slot(12, 20, "1h"),
+    Slot(12, 45, "1d"),
+    Slot(13, 0, "4h"),
+    Slot(13, 20, "1h"),
+    Slot(13, 45, "1wk"),
+    Slot(14, 20, "1h"),
+    Slot(14, 30, "4h"),
+    Slot(14, 45, "1d"),
+    Slot(15, 20, "1h"),
+    Slot(16, 0, "1wk"),
+    Slot(16, 20, "1h"),
+    Slot(16, 30, "4h"),
+    Slot(16, 45, "1d"),
+    Slot(17, 20, "1h"),
+    Slot(17, 25, "1wk"),
+    Slot(17, 30, "4h"),
+    Slot(17, 40, "1h"),
+    Slot(17, 45, "1d"),
+    Slot(18, 20, "1h"),
+    Slot(18, 30, "4h"),
+    Slot(18, 45, "1d"),
+    Slot(19, 0, "1wk"),
 )
 
 
@@ -63,7 +86,7 @@ def save_state(state: dict[str, str], path: Path = STATE_PATH) -> None:
 
 
 def due_slot(current: datetime, state: dict[str, str]) -> Slot | None:
-    """Şu an tetiklenmesi gereken slot varsa döndürür."""
+    """Şu an tetiklenmesi gereken en eski çalışmamış slotu döndürür."""
     if current.weekday() >= 5:
         return None
     today = current.date().isoformat()
@@ -96,10 +119,9 @@ CLOSE_HOUR = 18
 def resolve_intervals(value: str | None, current: datetime | None = None) -> str:
     """Aralık girdisini yalnızca 1h/4h/1d/1wk sözleşmesine göre çözer.
 
-    ``auto`` veya boş değer seans saatine göre çekirdek paketi seçer. Açık bir
-    değer verilmişse her öğe merkezi interval kayıt defterinden geçirilir;
-    böylece emekli edilmiş 5m/15m/30m/2h/1mo yolları scheduler üzerinden de
-    yeniden etkinleştirilemez. Desteklenen alias'lar kanonik forma çevrilir.
+    ``auto`` veya boş değer manuel taramada seans saatine göre çekirdek paketi
+    seçer. Açık bir değer verilmişse her öğe merkezi interval kayıt defterinden
+    geçirilir; emekli edilmiş zaman dilimleri yeniden etkinleştirilemez.
     """
     cleaned = (value or "").strip()
     if cleaned and cleaned.lower() != "auto":
@@ -110,5 +132,5 @@ def resolve_intervals(value: str | None, current: datetime | None = None) -> str
         return ",".join(canonical)
     moment = current or now_market()
     if moment.hour >= CLOSE_HOUR:
-        return SLOTS[-1].intervals
-    return SLOTS[0].intervals
+        return "1d,1wk"
+    return "1h,4h"
