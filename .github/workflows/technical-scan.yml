@@ -48,8 +48,11 @@ on:
 permissions:
   contents: read
 
+# Farkli zaman dilimleri birbirini kuyrukta bekletmez. Ayni zaman diliminin
+# kosulari ise sirali kalir; boylece 5-15 dakika aralikli farkli slotlar
+# zamaninda baslayabilir.
 concurrency:
-  group: technical-scan-${{ github.ref }}
+  group: technical-scan-${{ github.ref }}-${{ inputs.interval }}
   cancel-in-progress: false
 
 jobs:
@@ -73,8 +76,10 @@ jobs:
           path: |
             apps/technical_bot/reports/bist_universe.json
             apps/technical_bot/reports/scan_state.json
-          key: technical-scan-${{ github.run_id }}
-          restore-keys: technical-scan-
+          key: technical-scan-${{ inputs.interval }}-${{ github.run_id }}
+          restore-keys: |
+            technical-scan-${{ inputs.interval }}-
+            technical-scan-
       - name: Taramayı çalıştır
         env:
           INPUT_UNIVERSE: ${{ inputs.universe || 'auto' }}
