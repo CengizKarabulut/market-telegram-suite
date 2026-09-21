@@ -44,9 +44,8 @@ class IntervalResolutionTests(unittest.TestCase):
 
     def test_retired_and_unknown_intervals_raise(self) -> None:
         for value in ("5m", "15m", "30m", "2h", "1mo", "7m"):
-            with self.subTest(value=value):
-                with self.assertRaises(ValueError):
-                    resolve(value)
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                resolve(value)
 
     def test_four_hour_is_derived_from_hourly(self) -> None:
         self.assertEqual(resolve("4h").source_interval, "1h")
