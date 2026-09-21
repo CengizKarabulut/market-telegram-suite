@@ -16,7 +16,6 @@ from zoneinfo import ZoneInfo
 
 MARKET_TIMEZONE = ZoneInfo("Europe/Istanbul")
 STATE_PATH = Path("reports/scan_schedule.json")
-# Slotun kaçırılmış sayılmadan önce beklenebilecek en uzun süre.
 GRACE_MINUTES = 45
 
 
@@ -31,13 +30,13 @@ class Slot:
         return f"{self.hour:02d}:{self.minute:02d}"
 
 
-# Hızlı dilimler seans içinde, yavaş dilimler kapanışta.
+# Seans içinde 1H/4H, kapanış sonrasında 1D/1W taranır.
 SLOTS = (
     Slot(10, 30, "1h,4h"),
     Slot(12, 30, "1h,4h"),
     Slot(14, 30, "1h,4h"),
     Slot(17, 30, "1h,4h"),
-    Slot(19, 30, "1d,1wk,1mo"),
+    Slot(19, 30, "1d,1wk"),
 )
 
 
@@ -62,19 +61,19 @@ def save_state(state: dict[str, str], path: Path = STATE_PATH) -> None:
 
 
 def due_slot(current: datetime, state: dict[str, str]) -> Slot | None:
-    """Şu an tetiklenmesi gereken slot varsa döndürür.
-
-    Hafta sonları çalışmaz. Slot saati geçmişse ve bugün henüz çalıştırılmadıysa
-    tetiklenir; gecikme toleransı aşılmışsa slot atlanır, böylece uzun bir
-    kesintiden sonra geçmiş slotların hepsi arka arkaya çalışmaz.
-    """
+    """Şu an tetiklenmesi gereken slot varsa döndürür."""
     if current.weekday() >= 5:
         return None
     today = current.date().isoformat()
     for slot in SLOTS:
         if state.get(slot.key) == today:
             continue
-        scheduled = current.replace(hour=slot.hour, minute=slot.minute, second=0, microsecond=0)
+        scheduled = current.replace(
+            hour=slot.hour,
+            minute=slot.minute,
+            second=0,
+            microsecond=0,
+        )
         if current < scheduled:
             continue
         if (current - scheduled).total_seconds() / 60 > GRACE_MINUTES:
@@ -88,17 +87,12 @@ def mark_done(slot: Slot, current: datetime, state: dict[str, str]) -> dict[str,
     updated[slot.key] = current.date().isoformat()
     return updated
 
-# Seans sonrası koşuların sınırı; bu saatten sonra yavaş dilimler taranır.
+
 CLOSE_HOUR = 18
 
 
 def resolve_intervals(value: str, current: datetime | None = None) -> str:
-    """'auto' değerini saate göre gerçek aralık listesine çevirir.
-
-    Aralık seçimi daha önce iş akışı dosyasındaki koşullu ifadeyle yapılıyordu;
-    orası test edilemediği için sessizce boş dönüp varsayılana düşebiliyordu.
-    Karar burada verilir ve testlerle sabitlenir.
-    """
+    """'auto' değerini saate göre desteklenen aralık listesine çevirir."""
     cleaned = (value or "").strip()
     if cleaned and cleaned.lower() != "auto":
         return cleaned
