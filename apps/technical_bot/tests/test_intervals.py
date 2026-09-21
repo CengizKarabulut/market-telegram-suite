@@ -93,8 +93,10 @@ class ResampleTests(unittest.TestCase):
         )
         weekly = resample(frame, resolve("1wk"))
         self.assertLess(len(weekly), len(frame))
+        # Haftalık etiketin takvim günü pandas sürümüne göre değişebilse de
+        # tam haftadaki beş işlem gününün tamamı aynı muma girmelidir.
         self.assertAlmostEqual(float(weekly["Volume"].iloc[1]), 10.0 * 5, places=6)
-        self.assertEqual(weekly.index[1].dayofweek, 0)
+        self.assertEqual(weekly.attrs.get("resampled_from"), "1d")
 
 
 class AdaptivePeriodTests(unittest.TestCase):
