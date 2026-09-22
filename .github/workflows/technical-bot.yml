@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 6-18 * * 1-5"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/technical-bot.yml"
 
 permissions:
   contents: read
@@ -41,7 +45,7 @@ jobs:
             apps/technical_bot/reports/bist_universe.json
           key: technical-bot-${{ github.run_id }}
           restore-keys: technical-bot-
-      - name: Komutları işle
+      - name: Komutları işle ve planlı taramaları tetikle
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TECHNICAL_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -53,9 +57,7 @@ jobs:
           BOT_RUN_MINUTES: "50"
           BOT_LONG_POLL_SECONDS: "25"
           BOT_SELF_RESTART: "1"
-          # Otomatik taramalar artık technical-scan.yml içindeki doğrudan cron
-          # takvimiyle çalışır. /tara komutu dispatch_scan üzerinden açık kalır.
-          BOT_DRIVES_SCAN: "0"
+          BOT_DRIVES_SCAN: "1"
         run: python -m src.bot_runner_fundamental
       - name: Durum dosyalarını sakla
         if: always()
