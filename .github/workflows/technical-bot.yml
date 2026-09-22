@@ -57,6 +57,7 @@ jobs:
           BOT_RUN_MINUTES: "50"
           BOT_LONG_POLL_SECONDS: "25"
           BOT_SELF_RESTART: "1"
+          # Bot bu workflow'un tek planlayıcısıdır; scan workflow yalnız worker'dır.
           BOT_DRIVES_SCAN: "1"
         run: python -m src.bot_runner_fundamental
       - name: Durum dosyalarını sakla
