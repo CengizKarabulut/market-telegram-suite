@@ -1,13 +1,7 @@
-name: Teknik Analiz Telegram Botu
+name: Teknik Analiz Telegram Botu (Manuel Yedek)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 6-18 * * 1-5"
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/technical-bot.yml"
 
 permissions:
   contents: read
@@ -44,8 +38,10 @@ jobs:
             apps/technical_bot/reports/screener.json
             apps/technical_bot/reports/bist_universe.json
           key: technical-bot-${{ github.run_id }}
-          restore-keys: technical-bot-
-      - name: Komutları işle ve planlı taramaları tetikle
+          restore-keys: |
+            technical-scheduler-
+            technical-bot-
+      - name: Manuel bot yedegini calistir
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TECHNICAL_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -56,9 +52,8 @@ jobs:
           SCAN_WORKFLOW_FILE: technical-scan.yml
           BOT_RUN_MINUTES: "50"
           BOT_LONG_POLL_SECONDS: "25"
-          BOT_SELF_RESTART: "1"
-          # Bot bu workflow'un tek planlayıcısıdır; scan workflow yalnız worker'dır.
-          BOT_DRIVES_SCAN: "1"
+          BOT_SELF_RESTART: "0"
+          BOT_DRIVES_SCAN: "0"
         run: python -m src.bot_runner_fundamental
       - name: Durum dosyalarını sakla
         if: always()
@@ -76,7 +71,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: teknik-bot-ciktilari-${{ github.run_id }}
+          name: teknik-bot-yedek-ciktilari-${{ github.run_id }}
           path: apps/technical_bot/reports/komut/**/*.png
           if-no-files-found: ignore
           retention-days: 7
