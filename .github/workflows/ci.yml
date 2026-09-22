@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   tests:
@@ -42,3 +43,28 @@ jobs:
       - name: Testler
         working-directory: ${{ matrix.path }}
         run: python -m unittest discover -s tests -v
+
+  scheduler-bootstrap:
+    if: github.event_name == 'push'
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Teknik scheduler zincirini garanti et
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_WORKFLOW: technical-scheduler-heartbeat.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+          active_count="$(
+            gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=20" |
+              jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress")] | length'
+          )"
+          if [ "${active_count}" -gt 0 ]; then
+            echo "Teknik scheduler zaten aktif (${active_count})."
+            exit 0
+          fi
+          echo "Teknik scheduler aktif degil; heartbeat baslatiliyor."
+          gh workflow run "${TARGET_WORKFLOW}" --repo "${REPOSITORY}" --ref main
