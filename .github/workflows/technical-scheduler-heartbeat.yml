@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: technical-telegram-bot
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   listen:
