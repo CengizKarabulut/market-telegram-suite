@@ -1,0 +1,141 @@
+name: BIST Teknik Tarama Recovery
+run-name: "BIST Teknik Tarama Recovery"
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Europe/Istanbul = UTC+3. Günlük recovery zincirini 09:00'da başlatır.
+    - cron: "0 6 * * 1-5"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/technical-scan-recovery.yml"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: technical-scan-recovery
+  cancel-in-progress: true
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Eksik veya başarısız teknik tarama slotlarını tamamla
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_WORKFLOW: technical-scan.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          day="$(TZ=Europe/Istanbul date +%u)"
+          hhmm="$(TZ=Europe/Istanbul date +%H%M)"
+          if [ "$day" -gt 5 ] || [ "$hhmm" -lt 900 ] || [ "$hhmm" -gt 1925 ]; then
+            echo "Türkiye saati ile piyasa izleme penceresi dışında; recovery sonlanıyor."
+            exit 0
+          fi
+
+          check_slots() {
+            while IFS='|' read -r slot_key timeframe schedule_expr slot_utc; do
+              [ -n "$slot_key" ] || continue
+
+              runs_json="$(gh api "repos/${REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?per_page=100")"
+              direct_title="BIST Tarama · ${schedule_expr}"
+              recovery_title="BIST Tarama · ${timeframe}"
+
+              success_count="$(printf '%s' "$runs_json" | jq \
+                --arg since "$slot_utc" \
+                --arg direct "$direct_title" \
+                --arg recovery "$recovery_title" \
+                '[.workflow_runs[] | select(.created_at >= $since) | select(.display_title == $direct or .display_title == $recovery) | select(.conclusion == "success")] | length')"
+
+              if [ "$success_count" -gt 0 ]; then
+                echo "${slot_key} (${timeframe}) başarılı bir koşuyla tamamlanmış."
+                continue
+              fi
+
+              active_count="$(printf '%s' "$runs_json" | jq \
+                --arg since "$slot_utc" \
+                --arg direct "$direct_title" \
+                --arg recovery "$recovery_title" \
+                '[.workflow_runs[] | select(.created_at >= $since) | select(.display_title == $direct or .display_title == $recovery) | select(.status == "queued" or .status == "in_progress")] | length')"
+
+              if [ "$active_count" -gt 0 ]; then
+                echo "${slot_key} (${timeframe}) halen aktif/kuyrukta; ikinci koşu açılmıyor."
+                continue
+              fi
+
+              echo "Eksik veya başarısız teknik tarama slotu: ${slot_key} (${timeframe}); recovery başlatılıyor."
+              gh workflow run "$TARGET_WORKFLOW" \
+                --repo "$REPOSITORY" \
+                --ref main \
+                -f interval="$timeframe" \
+                -f send_telegram=true
+            done < <(python - <<'PY'
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+
+          tz = ZoneInfo("Europe/Istanbul")
+          now = datetime.now(tz)
+          if now.weekday() >= 5:
+              raise SystemExit(0)
+
+          slots = [
+              (10,20,"1h","20 7-15 * * 1-5"),(11,20,"1h","20 7-15 * * 1-5"),
+              (12,20,"1h","20 7-15 * * 1-5"),(13,20,"1h","20 7-15 * * 1-5"),
+              (14,20,"1h","20 7-15 * * 1-5"),(15,20,"1h","20 7-15 * * 1-5"),
+              (16,20,"1h","20 7-15 * * 1-5"),(17,20,"1h","20 7-15 * * 1-5"),
+              (17,40,"1h","40 14 * * 1-5"),(18,20,"1h","20 7-15 * * 1-5"),
+              (11,0,"4h","0 8,10 * * 1-5"),(13,0,"4h","0 8,10 * * 1-5"),
+              (14,30,"4h","30 11,13-15 * * 1-5"),(16,30,"4h","30 11,13-15 * * 1-5"),
+              (17,30,"4h","30 11,13-15 * * 1-5"),(18,30,"4h","30 11,13-15 * * 1-5"),
+              (10,45,"1d","45 7,9,11,13-15 * * 1-5"),(12,45,"1d","45 7,9,11,13-15 * * 1-5"),
+              (14,45,"1d","45 7,9,11,13-15 * * 1-5"),(16,45,"1d","45 7,9,11,13-15 * * 1-5"),
+              (17,45,"1d","45 7,9,11,13-15 * * 1-5"),(18,45,"1d","45 7,9,11,13-15 * * 1-5"),
+              (10,30,"1wk","30 7 * * 1-5"),(13,45,"1wk","45 10 * * 1-5"),
+              (16,0,"1wk","0 13 * * 1-5"),(17,25,"1wk","25 14 * * 1-5"),
+              (19,0,"1wk","0 16 * * 1-5"),
+          ]
+
+          # Doğrudan cron'a 6 dakika öncelik ver; GitHub cron gecikirse recovery
+          # 6-25 dakika aralığında eksik slotu tamamlar.
+          min_age = timedelta(minutes=6)
+          max_age = timedelta(minutes=25)
+          for hour, minute, timeframe, expression in slots:
+              due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+              age = now - due
+              if min_age <= age <= max_age:
+                  utc = due.astimezone(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z")
+                  key = f"{due.date().isoformat()}-{due.strftime('%H%M')}-{timeframe}"
+                  print(f"{key}|{timeframe}|{expression}|{utc}")
+          PY
+            )
+          }
+
+          end=$(( $(date +%s) + 3000 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            check_slots || true
+            sleep 60
+          done
+
+      - name: Recovery zincirini devam ettir
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          day="$(TZ=Europe/Istanbul date +%u)"
+          hhmm="$(TZ=Europe/Istanbul date +%H%M)"
+          if [ "$day" -le 5 ] && [ "$hhmm" -ge 900 ] && [ "$hhmm" -le 1925 ]; then
+            echo "Piyasa izleme penceresi aktif; recovery zinciri devam ediyor."
+            gh workflow run technical-scan-recovery.yml --repo "$REPOSITORY" --ref main
+          else
+            echo "Piyasa izleme penceresi kapalı; zincir durdu. Sonraki iş günü 09:00 cron'u yeniden başlatacak."
+          fi
