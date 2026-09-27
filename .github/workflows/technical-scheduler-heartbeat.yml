@@ -4,7 +4,7 @@ run-name: "Teknik Bot Scheduler Heartbeat"
 on:
   workflow_dispatch:
   schedule:
-    # Europe/Istanbul = UTC+3. Scheduler zinciri hafta ici 09:00'da baslar.
+    # Europe/Istanbul = UTC+3. Bot listener zinciri hafta ici 09:00'da baslar.
     - cron: "0 6 * * 1-5"
   push:
     branches: [main]
@@ -58,23 +58,23 @@ jobs:
         if: steps.market_window.outputs.active == 'true'
         run: python -m pip install --requirement requirements.txt
 
-      - name: Bot ve scheduler state geri yükle
+      - name: Bot state geri yükle
         if: steps.market_window.outputs.active == 'true'
         uses: actions/cache@v4
         with:
           path: |
             apps/technical_bot/reports/telegram_offset.json
-            apps/technical_bot/reports/scan_schedule.json
             apps/technical_bot/reports/bot_settings.json
             apps/technical_bot/reports/watchlist.json
             apps/technical_bot/reports/screener.json
             apps/technical_bot/reports/bist_universe.json
-          key: technical-scheduler-${{ github.run_id }}
+          key: technical-bot-listener-${{ github.run_id }}
           restore-keys: |
+            technical-bot-listener-
             technical-scheduler-
             technical-bot-
 
-      - name: Botu ve planli taramalari calistir
+      - name: Telegram komut botunu calistir
         if: steps.market_window.outputs.active == 'true'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TECHNICAL_BOT_TOKEN }}
@@ -87,21 +87,22 @@ jobs:
           BOT_RUN_MINUTES: "50"
           BOT_LONG_POLL_SECONDS: "25"
           BOT_SELF_RESTART: "1"
-          BOT_DRIVES_SCAN: "1"
+          # Planli taramalar technical-scan.yml + technical-scan-recovery.yml
+          # tarafindan yonetilir. Bot yalnızca /tara gibi manuel komutlari iletir.
+          BOT_DRIVES_SCAN: "0"
         run: python -m src.bot_runner_fundamental
 
-      - name: Bot ve scheduler state sakla
+      - name: Bot state sakla
         if: always() && steps.market_window.outputs.active == 'true'
         uses: actions/cache/save@v4
         with:
           path: |
             apps/technical_bot/reports/telegram_offset.json
-            apps/technical_bot/reports/scan_schedule.json
             apps/technical_bot/reports/bot_settings.json
             apps/technical_bot/reports/watchlist.json
             apps/technical_bot/reports/screener.json
             apps/technical_bot/reports/bist_universe.json
-          key: technical-scheduler-${{ github.run_id }}
+          key: technical-bot-listener-${{ github.run_id }}
 
       - name: Komut ciktilarini sakla
         if: always() && steps.market_window.outputs.active == 'true'
