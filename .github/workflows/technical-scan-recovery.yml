@@ -40,7 +40,7 @@ jobs:
             hhmm="$(TZ=Europe/Istanbul date +%H%M)"
 
             # Recovery 7/24 yasamaya devam eder; piyasa izleme penceresi
-            # disinda tarama baslatmaz, yalnızca zinciri ayakta tutar.
+            # disinda tarama baslatmaz, yalnizca zinciri ayakta tutar.
             if [ "$day" -gt 5 ] || [ "$hhmm" -lt 900 ] || [ "$hhmm" -gt 1925 ]; then
               echo "TR gun=$day saat=$hhmm: piyasa izleme penceresi disinda; recovery zinciri korunuyor."
               return 0
@@ -107,10 +107,10 @@ jobs:
               (19,0,"1wk","0 16 * * 1-5"),
           ]
 
-          # Doğrudan cron'a 6 dakika öncelik ver; GitHub cron gecikirse recovery
-          # 6-25 dakika aralığında eksik slotu tamamlar.
+          # Dogrudan cron'a 6 dakika oncelik ver; zincir bir sure kesilirse ayni
+          # gun icindeki son 90 dakikalik slotlari da geriye donuk tamamlayabilsin.
           min_age = timedelta(minutes=6)
-          max_age = timedelta(minutes=25)
+          max_age = timedelta(minutes=90)
           for hour, minute, timeframe, expression in slots:
               due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
               age = now - due
@@ -139,5 +139,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Teknik tarama recovery devrediliyor; cron yalnızca acil bootstrap yedegi."
+          echo "Teknik tarama recovery devrediliyor; cron yalnizca acil bootstrap yedegi."
           gh workflow run technical-scan-recovery.yml --repo "$REPOSITORY" --ref main
