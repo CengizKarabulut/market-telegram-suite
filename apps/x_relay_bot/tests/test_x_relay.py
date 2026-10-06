@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from x_relay import (  # noqa: E402
+from x_relay import (
     best_video_url,
     load_state,
     media_for_post,
