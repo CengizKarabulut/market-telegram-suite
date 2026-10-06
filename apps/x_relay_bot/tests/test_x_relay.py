@@ -77,12 +77,33 @@ class RelayTests(unittest.TestCase):
             path = Path(temp_dir) / "state.json"
             self.assertEqual(
                 load_state(path),
-                {"initialized": False, "last_seen_id": None},
+                {
+                    "initialized": False,
+                    "last_seen_id": None,
+                    "user_id": None,
+                    "username": None,
+                    "protected": False,
+                },
             )
-            save_state(path, "12345")
+            save_state(
+                path,
+                {
+                    "initialized": True,
+                    "last_seen_id": "12345",
+                    "user_id": "999",
+                    "username": "Alpha",
+                    "protected": True,
+                },
+            )
             self.assertEqual(
                 load_state(path),
-                {"initialized": True, "last_seen_id": "12345"},
+                {
+                    "initialized": True,
+                    "last_seen_id": "12345",
+                    "user_id": "999",
+                    "username": "Alpha",
+                    "protected": True,
+                },
             )
 
     def test_long_message_splits(self):
