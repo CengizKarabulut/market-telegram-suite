@@ -49,8 +49,7 @@ Gerekli Telegram secret'ları:
 
 Workflow: `.github/workflows/x-relay.yml`
 
-GitHub Actions varsayılan olarak her 5 dakikada bir yeni gönderileri kontrol eder.
-Ayrıca Actions ekranından manuel olarak çalıştırılabilir.
+Workflow dosyası her 5 dakikada bir tetiklenir ancak `X_RELAY_ENABLED` repository variable değeri `true` olmadan relay job'u çalışmaz. Secrets tamamlandıktan sonra bu variable'ı `true` yap. Ayrıca Actions ekranından manuel tetikleme yapılabilir.
 
 Yerelde:
 
@@ -65,6 +64,12 @@ export TELEGRAM_BOT_TOKEN="..."
 export TELEGRAM_CHAT_ID="..."
 python src/x_relay.py
 ```
+
+## GitHub Actions variable
+
+Repository **Settings → Secrets and variables → Actions → Variables** bölümünde:
+
+- `X_RELAY_ENABLED=true` — yalnız tüm secret'lar girildikten sonra etkinleştir.
 
 ## İsteğe bağlı ortam değişkenleri
 
