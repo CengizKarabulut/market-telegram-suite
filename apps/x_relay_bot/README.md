@@ -15,6 +15,8 @@ Telegram'a aktaran bağımsız uygulama.
   noktası olarak kaydedilir.
 - Son görülen X gönderi kimliği GitHub Actions cache içinde tutulur; aynı gönderi
   tekrar gönderilmez.
+- X kullanıcı ID/username bilgisi ilk başarılı kontrolde state'e alınır; her 5 dakikada
+  ayrıca `User: Read` çağrısı yapılmaz.
 - Zamanlar Europe/Istanbul saat diliminde gösterilir.
 
 ## X Developer ayarı
