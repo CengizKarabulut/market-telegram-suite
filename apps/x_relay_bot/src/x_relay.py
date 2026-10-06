@@ -52,7 +52,7 @@ class Config:
     bootstrap_send_latest: bool
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         topic = os.getenv("TELEGRAM_TOPIC_ID", "").strip() or None
         return cls(
             x_api_key=required_env("X_API_KEY"),
@@ -431,7 +431,7 @@ def main() -> int:
         else:
             print(f"Toplam {sent} yeni gönderi Telegram'a aktarıldı.")
         return 0
-    except Exception as exc:  # pragma: no cover - entrypoint safety net
+    except (RelayError, requests.RequestException, ValueError, OSError, KeyError) as exc:
         print(f"HATA: {exc}", file=sys.stderr)
         return 1
 
