@@ -111,7 +111,7 @@ class XClient:
         exclude_retweets: bool,
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         params: dict[str, Any] = {
-            "max_results": 10,
+            "max_results": 100,
             "tweet.fields": "created_at,attachments,referenced_tweets,note_tweet",
             "expansions": "attachments.media_keys",
             "media.fields": (
@@ -341,32 +341,53 @@ def split_html_message(rendered: str, limit: int = 3900) -> list[str]:
     return chunks
 
 
+def empty_state() -> dict[str, Any]:
+    return {
+        "initialized": False,
+        "last_seen_id": None,
+        "user_id": None,
+        "username": None,
+        "protected": False,
+    }
+
+
 def load_state(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return {"initialized": False, "last_seen_id": None}
+        return empty_state()
     except (json.JSONDecodeError, OSError):
-        return {"initialized": False, "last_seen_id": None}
-    return {
-        "initialized": bool(payload.get("initialized")),
-        "last_seen_id": (
-            str(payload["last_seen_id"]) if payload.get("last_seen_id") else None
-        ),
-    }
+        return empty_state()
+
+    state = empty_state()
+    state.update(
+        {
+            "initialized": bool(payload.get("initialized")),
+            "last_seen_id": (
+                str(payload["last_seen_id"]) if payload.get("last_seen_id") else None
+            ),
+            "user_id": str(payload["user_id"]) if payload.get("user_id") else None,
+            "username": str(payload["username"]) if payload.get("username") else None,
+            "protected": bool(payload.get("protected")),
+        }
+    )
+    return state
 
 
-def save_state(path: Path, post_id: str | None) -> None:
+def save_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(
-            {
-                "initialized": True,
-                "last_seen_id": str(post_id) if post_id else None,
-            },
-            ensure_ascii=False,
+    payload = {
+        "initialized": bool(state.get("initialized")),
+        "last_seen_id": (
+            str(state["last_seen_id"]) if state.get("last_seen_id") else None
         ),
+        "user_id": str(state["user_id"]) if state.get("user_id") else None,
+        "username": str(state["username"]) if state.get("username") else None,
+        "protected": bool(state.get("protected")),
+    }
+    tmp.write_text(
+        json.dumps(payload, ensure_ascii=False),
         encoding="utf-8",
     )
     tmp.replace(path)
@@ -376,11 +397,26 @@ def main() -> int:
     try:
         config = Config.from_env()
         x = XClient(config)
-        me = x.me()
-        username = me["username"]
-        user_id = me["id"]
-        protected = bool(me.get("protected"))
         state = load_state(config.state_path)
+
+        if state["user_id"] and state["username"]:
+            user_id = state["user_id"]
+            username = state["username"]
+            protected = bool(state["protected"])
+        else:
+            me = x.me()
+            user_id = str(me["id"])
+            username = str(me["username"])
+            protected = bool(me.get("protected"))
+            state.update(
+                {
+                    "user_id": user_id,
+                    "username": username,
+                    "protected": protected,
+                }
+            )
+            save_state(config.state_path, state)
+
         last_seen = state["last_seen_id"]
 
         posts, media_map = x.posts(
@@ -396,7 +432,9 @@ def main() -> int:
                 posts = [posts[-1]]
             else:
                 newest_id = posts[-1]["id"] if posts else None
-                save_state(config.state_path, newest_id)
+                state["initialized"] = True
+                state["last_seen_id"] = newest_id
+                save_state(config.state_path, state)
                 if newest_id:
                     print(
                         "İlk çalıştırma: geçmiş gönderiler atlandı, "
@@ -422,7 +460,9 @@ def main() -> int:
             rendered = render_post_html(username, post, protected)
             media_items = media_for_post(post, media_map)
             telegram.send_post(rendered, url, media_items)
-            save_state(config.state_path, post["id"])
+            state["initialized"] = True
+            state["last_seen_id"] = post["id"]
+            save_state(config.state_path, state)
             sent += 1
             print(f"Gönderildi: {post['id']}")
 
