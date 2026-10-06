@@ -37,7 +37,7 @@ jobs:
             python -m pip install --requirement requirements-dev.txt
           fi
       - name: Ruff
-        if: matrix.app == 'technical'
+        if: matrix.app == 'technical' || matrix.app == 'x-relay'
         working-directory: ${{ matrix.path }}
         run: ruff check src tests
       - name: Testler
