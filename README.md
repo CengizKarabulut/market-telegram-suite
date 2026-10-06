@@ -44,6 +44,8 @@ Repository **Settings → Secrets and variables → Actions** bölümünde:
 | `TECHNICAL_TOPIC_ID` | Teknik rapor, temel analiz ve araştırma raporunun konu kimliği |
 | `TELEGRAM_ALLOWED_USERS` | Teknik botu kullanabilecek Telegram kullanıcı kimlikleri; isteğe bağlı |\n| `X_RELAY_BOT_TOKEN` | X gönderilerini Telegram'a iletecek botun token'ı |\n| `X_RELAY_TOPIC_ID` | X gönderilerinin gideceği forum konu kimliği; topic yoksa boş bırakılabilir |\n| `X_API_KEY` | X Developer App API Key |\n| `X_API_SECRET` | X Developer App API Key Secret |\n| `X_ACCESS_TOKEN` | Korumalı hesaba ait OAuth 1.0a Access Token |\n| `X_ACCESS_TOKEN_SECRET` | Korumalı hesaba ait OAuth 1.0a Access Token Secret |
 
+X relay ayrıca Actions **Variables** bölümündeki `X_RELAY_ENABLED=true` değeriyle açılır. Secret'lar tamamlanana kadar variable tanımsız/false bırakılmalıdır.
+
 GitHub Actions içindeki dinleme zincirleri, workflow'un `actions: write` iznine
 sahip repoya sınırlı `GITHUB_TOKEN` değerini otomatik kullanır; ayrıca PAT
 zorunlu değildir.
