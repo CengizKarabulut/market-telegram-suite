@@ -22,6 +22,8 @@ jobs:
             path: apps/chart_bot
           - app: technical
             path: apps/technical_bot
+          - app: x-relay
+            path: apps/x_relay_bot
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -37,7 +39,7 @@ jobs:
             python -m pip install --requirement requirements-dev.txt
           fi
       - name: Ruff
-        if: matrix.app == 'technical'
+        if: matrix.app == 'technical' || matrix.app == 'x-relay'
         working-directory: ${{ matrix.path }}
         run: ruff check src tests
       - name: Testler
