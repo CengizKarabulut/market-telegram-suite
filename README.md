@@ -1,14 +1,14 @@
 # Market Telegram Suite
 
 BIST grafik üretimi, teknik piyasa taraması ve bütünleşik hisse araştırmasını
-tek repoda bağımsız Telegram servisleriyle çalıştıran monorepo.
+tek repoda iki bağımsız Telegram botuyla çalıştıran monorepo.
 
 ## Uygulamalar
 
 | Uygulama | Dizin | Telegram komutları |
 | --- | --- | --- |
 | Grafik botu | `apps/chart_bot` | `/grafik`, `/kareler`, `/grafikyardim` |
-| Teknik / araştırma botu | `apps/technical_bot` | `/analiz`, `/rapor`, `/temel`, `/tara`, `/liste`, `/takip`, `/esik`, `/durum`, `/gecmis` |\n| X → Telegram relay | `apps/x_relay_bot` | Korumalı X hesabındaki yeni gönderileri Telegram'a aktarır |
+| Teknik / araştırma botu | `apps/technical_bot` | `/analiz`, `/rapor`, `/temel`, `/tara`, `/liste`, `/takip`, `/esik`, `/durum`, `/gecmis` |
 
 `/rapor SYMBOL`, güncel `/analiz SYMBOL` araştırma paketinin geriye dönük
 uyumluluk takma adıdır; ayrı bir eski rapor motoru yoktur. `/temel SYMBOL`
@@ -42,9 +42,7 @@ Repository **Settings → Secrets and variables → Actions** bölümünde:
 | `TELEGRAM_CHAT_ID` | Ortak forum grubunun `-100...` kimliği |
 | `CHART_TOPIC_ID` | Grafik botu konu kimliği |
 | `TECHNICAL_TOPIC_ID` | Teknik rapor, temel analiz ve araştırma raporunun konu kimliği |
-| `TELEGRAM_ALLOWED_USERS` | Teknik botu kullanabilecek Telegram kullanıcı kimlikleri; isteğe bağlı |\n| `X_RELAY_BOT_TOKEN` | X gönderilerini Telegram'a iletecek botun token'ı |\n| `X_RELAY_TOPIC_ID` | X gönderilerinin gideceği forum konu kimliği; topic yoksa boş bırakılabilir |\n| `X_API_KEY` | X Developer App API Key |\n| `X_API_SECRET` | X Developer App API Key Secret |\n| `X_ACCESS_TOKEN` | Korumalı hesaba ait OAuth 1.0a Access Token |\n| `X_ACCESS_TOKEN_SECRET` | Korumalı hesaba ait OAuth 1.0a Access Token Secret |
-
-X relay ayrıca Actions **Variables** bölümündeki `X_RELAY_ENABLED=true` değeriyle açılır. Secret'lar tamamlanana kadar variable tanımsız/false bırakılmalıdır.
+| `TELEGRAM_ALLOWED_USERS` | Teknik botu kullanabilecek Telegram kullanıcı kimlikleri; isteğe bağlı |
 
 GitHub Actions içindeki dinleme zincirleri, workflow'un `actions: write` iznine
 sahip repoya sınırlı `GITHUB_TOKEN` değerini otomatik kullanır; ayrıca PAT
@@ -101,7 +99,7 @@ bastırılır; otomatik işlem çağrısı üretilmez.
 
 - `chart-bot.yml`: grafik komut botunun dinleyicisi
 - `chart-generate.yml`: manuel grafik üretimi
-- `technical-bot.yml`: teknik/temel/araştırma komut botunun dinleyicisi ve tarama zamanlayıcısı\n- `x-relay.yml`: korumalı X hesabındaki yeni gönderileri 5 dakikada bir Telegram'a aktarır
+- `technical-bot.yml`: teknik/temel/araştırma komut botunun dinleyicisi ve tarama zamanlayıcısı
 - `technical-scan.yml`: yalnız bot/manuel dispatch ile çalışan BIST taraması
 - `research-report-smoke.yml`: GARAN/ZGYO/ASELS bütünleşik araştırma ve seviye-invariant kalite kontrolü
 - `research-telegram-send.yml`: güncel araştırma paketinin manuel üretim/gönderim doğrulaması
